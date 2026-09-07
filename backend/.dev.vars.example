@@ -1,0 +1,2 @@
+# Retired: local Worker secrets and development OTP are no longer supported.
+# Provision MSG91_AUTH_KEY and AUTH_HASH_KEY directly in Cloudflare.

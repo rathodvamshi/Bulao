@@ -1,0 +1,78 @@
+name = "bulao-api"
+account_id = "d68a251f53f704a2dae9331df28a76cd"
+main = "src/app.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+# No default database or credentials. Deploy explicitly with --env staging.
+# Do not use wrangler dev: the mobile app connects to a deployed HTTPS Worker.
+
+[[migrations]]
+tag = "v1-auth-coordinator"
+new_sqlite_classes = ["AuthCoordinator"]
+# SQLite here is Cloudflare's hosted Durable Object implementation, never a local DB.
+
+[env.staging]
+name = "bulao-api-staging"
+
+[env.staging.vars]
+APP_ENV = "staging"
+OTP_PROVIDER = "msg91"
+MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
+CLOUDINARY_CLOUD_NAME = "japfuiuz"
+ALLOWED_ORIGIN = "https://replace-with-your-staging-domain.invalid"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "bulao-dev"
+database_id = "87983e8a-6759-4d17-a482-769b8bd31463"
+migrations_dir = "migrations"
+
+[[env.staging.durable_objects.bindings]]
+name = "AUTH_COORDINATOR"
+class_name = "AuthCoordinator"
+
+[[env.staging.queues.producers]]
+binding = "AUTH_EVENTS"
+queue = "bulao-auth-events-staging"
+
+[[env.staging.queues.consumers]]
+queue = "bulao-auth-events-staging"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "bulao-auth-events-staging-dlq"
+
+# Production D1 binding provisioned and read back on Cloudflare on 2026-09-07.
+# Production application deployment/migrations await staging validation and confirmation.
+
+[env.production]
+name = "bulao-api-production"
+
+[env.production.vars]
+APP_ENV = "production"
+OTP_PROVIDER = "msg91"
+MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
+CLOUDINARY_CLOUD_NAME = "japfuiuz"
+ALLOWED_ORIGIN = "https://replace-with-your-production-web-origin.invalid"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "bulao-production"
+database_id = "4d2491e2-a3f9-4ff3-9978-828d1b24f1d1"
+migrations_dir = "migrations"
+
+[[env.production.durable_objects.bindings]]
+name = "AUTH_COORDINATOR"
+class_name = "AuthCoordinator"
+
+[[env.production.queues.producers]]
+binding = "AUTH_EVENTS"
+queue = "bulao-auth-events-production"
+
+[[env.production.queues.consumers]]
+queue = "bulao-auth-events-production"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "bulao-auth-events-production-dlq"
+

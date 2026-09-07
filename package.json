@@ -1,0 +1,23 @@
+{
+  "name": "bulao",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend",
+    "mobile",
+    "packages/domain"
+  ],
+  "scripts": {
+    "mobile": "cd mobile && node node_modules/expo/bin/cli start --lan --go --port 8082",
+    "test": "pnpm --filter @bulao/backend test",
+    "typecheck": "pnpm -r typecheck",
+    "dev:api": "pnpm --filter @bulao/backend dev",
+    "dev:mobile": "pnpm --filter @bulao/mobile start"
+  },
+  "devDependencies": {
+    "@babel/plugin-transform-react-jsx": "7.27.1",
+    "@types/node": "^22.0.0",
+    "prettier": "3.6.2",
+    "typescript": "~5.9.2"
+  }
+}
