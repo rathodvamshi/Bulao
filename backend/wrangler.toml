@@ -19,7 +19,7 @@ APP_ENV = "staging"
 OTP_PROVIDER = "msg91"
 MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
 CLOUDINARY_CLOUD_NAME = "japfuiuz"
-ALLOWED_ORIGIN = "https://replace-with-your-staging-domain.invalid"
+ALLOWED_ORIGIN = "http://localhost:8082"
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -75,4 +75,15 @@ max_batch_size = 25
 max_batch_timeout = 5
 max_retries = 5
 dead_letter_queue = "bulao-auth-events-production-dlq"
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
 

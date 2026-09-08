@@ -3,7 +3,7 @@ import { Image } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../src/api/client";
-import { useSession } from "../../src/store/session";
+import { useAuth } from "../../src/auth";
 import { useLocation } from "../../src/store/location";
 import {
   Screen,
@@ -17,7 +17,8 @@ import {
 import { t } from "../../src/i18n/en";
 import { PhotoUpload } from "../../src/features/profile/photo";
 export default function Profile() {
-  const token = useSession((x) => x.token);
+  const auth = useAuth();
+  const token = auth.session?.token || null;
   const location = useLocation((x) => x.location);
   const [name, setName] = useState("");
   const client = useQueryClient();
@@ -41,10 +42,11 @@ export default function Profile() {
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: ["me"] }),
   });
-  const logout = useMutation({
-    mutationFn: () => api("/auth/logout", {}),
-    onSuccess: async () => {
-      await useSession.getState().setToken(null);
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      // Use the centralized auth logout which handles server revocation
+      await auth.logout();
+      // Also clear react-query cache
       client.clear();
     },
   });
@@ -101,10 +103,10 @@ export default function Profile() {
           <Button
             label={t("signOut")}
             secondary
-            disabled={logout.isPending}
-            onPress={() => logout.mutate()}
+            disabled={logoutMutation.isPending}
+            onPress={() => logoutMutation.mutate()}
           />
-          {logout.error && <Failure error={logout.error} />}
+          {logoutMutation.error && <Failure error={logoutMutation.error} />}
         </>
       )}
     </Screen>

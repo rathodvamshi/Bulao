@@ -23,7 +23,7 @@ async function coordinated(c: import("hono").Context<AppEnv>, key: string, actio
   });
   const result = await response.json<{
     requestId: string; expiresIn: number; resendAfter: number; otpLength: number;
-    code?: string; message?: string; retryAfter?: number;
+    msg91RequestId?: string; code?: string; message?: string; retryAfter?: number;
   }>();
   if (!response.ok) {
     throw new ApiError(result.code ?? "PROVIDER_UNAVAILABLE", response.status === 429 ? 429 : response.status === 400 ? 400 : 503,
@@ -42,6 +42,7 @@ for (const action of ["send", "resend", "verify"] as const) {
     ).parse(await c.req.json());
     const ip = c.req.header("CF-Connecting-IP");
     if (!ip) throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
+    console.log(JSON.stringify({ event: "AUTH_HASH_CHECK", requestId: c.get("requestId"), present: !!c.env.AUTH_HASH_KEY, length_ok: (c.env.AUTH_HASH_KEY?.length ?? 0) >= 32 }));
     const [phoneHash, ipHash] = await Promise.all([
       authFingerprint(c.env.AUTH_HASH_KEY, `phone:${input.phone}`),
       authFingerprint(c.env.AUTH_HASH_KEY, `ip:${ip}`),
@@ -49,7 +50,7 @@ for (const action of ["send", "resend", "verify"] as const) {
     let userId: string | null = null;
     try {
       await coordinated(c, `ip:${ipHash}`, action === "verify" ? "limit-verify" : "limit-send");
-      const result = await coordinated(c, `phone:${phoneHash}`, action, input);
+      const result = await coordinated(c, `phone:${phoneHash}`, action, { ...input, traceId: c.get("requestId") });
       if (action !== "verify") {
         audit(c, { eventType: `AUTH_OTP_${action.toUpperCase()}_SUCCESS`, success: true, userId, phoneHash, ipHash, code: null });
         return ok(c, result);
@@ -71,7 +72,7 @@ for (const action of ["send", "resend", "verify"] as const) {
   });
 }
 
-auth.get("/session", async (c) => {
+for (const path of ["/session", "/me"]) auth.get(path, async (c) => {
   const header = c.req.header("Authorization");
   if (!header?.startsWith("Bearer ")) throw new ApiError("AUTH_REQUIRED", 401, "Please sign in to continue.");
   const session = await findActiveSession(c.env.DB, await hash(header.slice(7)), now());
@@ -84,4 +85,3 @@ auth.post("/logout", requireAuth, async (c) => {
   audit(c, { eventType: "AUTH_LOGOUT", success: true, userId: c.get("userId"), phoneHash: null, ipHash: null, code: null });
   return ok(c, { revoked: true });
 });
-

@@ -4,14 +4,14 @@ import { otpProvider } from "../../providers/otp/provider";
 import { AUTH_POLICY as P, recentAttempts } from "./policy";
 import { now } from "./session";
 
-type Challenge = { id: string; expiresAt: number; attempts: number; used: boolean; ready: boolean };
+type Challenge = { id: string; expiresAt: number; attempts: number; used: boolean; ready: boolean; msg91RequestId?: string };
 type State = {
   sends: number[];
   blockedUntil: number;
   busy?: { id: string; until: number };
   challenge?: Challenge;
 };
-type Input = { phone: string; requestId?: string; otp?: string };
+type Input = { phone: string; requestId?: string; otp?: string; traceId?: string; msg91RequestId?: string };
 
 // One Cloudflare object per keyed phone hash or keyed IP hash. No local storage.
 export class AuthCoordinator {
@@ -26,7 +26,7 @@ export class AuthCoordinator {
       }
       if (!["send", "resend", "verify"].includes(action)) return new Response(null, { status: 404 });
       const input = await request.json<Input>();
-      const provider = otpProvider(this.env);
+      const provider = otpProvider(this.env, input.traceId);
       const operation = crypto.randomUUID();
       const at = now();
       // Alarm is set before writes so abandoned state always has a cleanup task.
@@ -37,7 +37,6 @@ export class AuthCoordinator {
         if (state.busy && state.busy.until > at) throw blocked(state.busy.until - at);
         if (action === "send") {
           this.reserveSend(state, at);
-          // Invalidate old challenges before an external call, including ambiguous timeouts.
           state.challenge = { id: crypto.randomUUID(), expiresAt: at + P.otpLifetime, attempts: 0, used: false, ready: false };
         } else {
           const current = state.challenge;
@@ -48,8 +47,6 @@ export class AuthCoordinator {
           if (action === "resend") this.reserveSend(state, at);
           else {
             current.attempts++;
-            // Reserve the lockout with the final attempt. A Worker interruption
-            // after this write must not allow a new send to reset the attempt cap.
             if (current.attempts === P.verificationAttempts) state.blockedUntil = at + P.verificationBlock;
           }
         }
@@ -59,11 +56,16 @@ export class AuthCoordinator {
       });
 
       let valid = false;
+      let msg91RequestId: string | undefined;
       let failure: unknown;
       try {
-        if (action === "send") await provider.send(input.phone);
-        else if (action === "resend") await provider.resend(input.phone);
-        else valid = await provider.verify(input.phone, input.otp!);
+        if (action === "send") {
+          msg91RequestId = await provider.send(input.phone);
+        } else if (action === "resend") {
+          await provider.resend(input.phone);
+        } else {
+          valid = await provider.verify(input.phone, input.otp!);
+        }
       } catch (error) { failure = error; }
 
       const accepted = await this.state.storage.transaction(async (tx) => {
@@ -71,9 +73,13 @@ export class AuthCoordinator {
         if (!state || state.busy?.id !== operation || state.challenge?.id !== challenge.id) return false;
         delete state.busy;
         const current = state.challenge;
-        if (action === "send") current.ready = !failure;
+        if (action === "send") {
+          current.ready = !failure;
+          if (!failure && msg91RequestId) {
+            current.msg91RequestId = msg91RequestId;
+          }
+        }
         if (action === "verify") {
-          // Persist consumption before creating a D1 session. A failed login must start anew.
           if (valid && !failure && current.expiresAt > now()) {
             current.used = true;
             state.blockedUntil = 0;
@@ -103,6 +109,7 @@ export class AuthCoordinator {
         expiresIn: Math.max(0, challenge.expiresAt - now()),
         resendAfter: P.resendCooldown,
         otpLength: P.otpDigits,
+        msg91RequestId: msg91RequestId ?? challenge.msg91RequestId,
       });
     } catch (error) {
       const safe = error instanceof ApiError ? error : new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");

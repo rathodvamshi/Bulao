@@ -1,11 +1,75 @@
+# Dependencies
 node_modules/
 .pnpm-store/
-.expo/
-.wrangler/
-dist/
-coverage/
+
+# Environment variables (NEVER COMMIT!)
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
 .dev.vars
+CREDENTIALS.md
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Mobile
+mobile/.expo/
+mobile/dist/
+mobile/ios/
+mobile/android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+*.code-workspace
+
+# Wrangler
+.wrangler/
+.dev.vars
+wrangler.toml.backup
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Cloudflare
+.mf/
+
+# Sensitive
+secrets/
+*.pem
+*.cer
+*.crt
+
+# Local development
+.local/

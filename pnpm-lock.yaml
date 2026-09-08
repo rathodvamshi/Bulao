@@ -60,6 +60,9 @@ importers:
       '@expo/vector-icons':
         specifier: ^15.0.0
         version: 15.1.1(expo-font@14.0.12(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.1.17)(react@19.1.0)(supports-color@10.2.2))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.1.17)(react@19.1.0)(supports-color@10.2.2))(react@19.1.0)
+      '@msg91comm/sendotp-react-native':
+        specifier: ^1.0.0
+        version: 1.0.0(react-native@0.81.5(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.1.17)(react@19.1.0)(supports-color@10.2.2))(react@19.1.0)
       '@tanstack/react-query':
         specifier: ^5.87.1
         version: 5.102.8(react@19.1.0)
@@ -1994,6 +1997,12 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
+
+  '@msg91comm/sendotp-react-native@1.0.0':
+    resolution: {integrity: sha512-bDHF9pk3QQpJ3wjuaWoa1OcC+pzUBMhPeGQtbZs5lo/fHRJuG2+GIEEUdWk52A7hLNn9CSJvpf0I0YLZ6q8dbA==}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
@@ -6731,7 +6740,7 @@ snapshots:
       metro-resolver: 0.83.3
       metro-runtime: 0.83.3
       metro-source-map: 0.83.3(supports-color@10.2.2)
-      metro-symbolicate: 0.83.3(supports-color@10.2.2)
+      metro-symbolicate: 0.83.3
       metro-transform-plugins: 0.83.3(supports-color@10.2.2)
       metro-transform-worker: 0.83.3(supports-color@10.2.2)
     transitivePeerDependencies:
@@ -7087,6 +7096,11 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@msg91comm/sendotp-react-native@1.0.0(react-native@0.81.5(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.1.17)(react@19.1.0)(supports-color@10.2.2))(react@19.1.0)':
+    dependencies:
+      react: 19.1.0
+      react-native: 0.81.5(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.1.17)(react@19.1.0)(supports-color@10.2.2)
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
@@ -9219,7 +9233,7 @@ snapshots:
       '@babel/types': 7.29.8
       flow-enums-runtime: 0.0.6
       invariant: 2.2.4
-      metro-symbolicate: 0.83.3(supports-color@10.2.2)
+      metro-symbolicate: 0.83.3
       nullthrows: 1.1.1
       ob1: 0.83.3
       source-map: 0.5.7
@@ -9233,7 +9247,7 @@ snapshots:
       '@babel/types': 7.29.8
       flow-enums-runtime: 0.0.6
       invariant: 2.2.4
-      metro-symbolicate: 0.83.8(supports-color@10.2.2)
+      metro-symbolicate: 0.83.8
       nullthrows: 1.1.1
       ob1: 0.83.8
       source-map: 0.5.7
@@ -9241,7 +9255,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  metro-symbolicate@0.83.3(supports-color@10.2.2):
+  metro-symbolicate@0.83.3:
     dependencies:
       flow-enums-runtime: 0.0.6
       invariant: 2.2.4
@@ -9249,10 +9263,8 @@ snapshots:
       nullthrows: 1.1.1
       source-map: 0.5.7
       vlq: 1.0.1
-    transitivePeerDependencies:
-      - supports-color
 
-  metro-symbolicate@0.83.8(supports-color@10.2.2):
+  metro-symbolicate@0.83.8:
     dependencies:
       flow-enums-runtime: 0.0.6
       invariant: 2.2.4
@@ -9260,8 +9272,6 @@ snapshots:
       nullthrows: 1.1.1
       source-map: 0.5.7
       vlq: 1.0.1
-    transitivePeerDependencies:
-      - supports-color
 
   metro-transform-plugins@0.83.3(supports-color@10.2.2):
     dependencies:
@@ -9357,7 +9367,7 @@ snapshots:
       metro-resolver: 0.83.3
       metro-runtime: 0.83.3
       metro-source-map: 0.83.3(supports-color@10.2.2)
-      metro-symbolicate: 0.83.3(supports-color@10.2.2)
+      metro-symbolicate: 0.83.3
       metro-transform-plugins: 0.83.3(supports-color@10.2.2)
       metro-transform-worker: 0.83.3(supports-color@10.2.2)
       mime-types: 2.1.35
@@ -9402,7 +9412,7 @@ snapshots:
       metro-resolver: 0.83.8
       metro-runtime: 0.83.8
       metro-source-map: 0.83.8(supports-color@10.2.2)
-      metro-symbolicate: 0.83.8(supports-color@10.2.2)
+      metro-symbolicate: 0.83.8
       metro-transform-plugins: 0.83.8(supports-color@10.2.2)
       metro-transform-worker: 0.83.8(supports-color@10.2.2)
       mime-types: 3.0.2

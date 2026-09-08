@@ -25,6 +25,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
 });
 // Keyed hashing prevents phone/IP enumeration from rate-limit IDs or audit exports.
 export async function authFingerprint(secret: string, value: string) {
+
   if (!secret || secret.length < 32) throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const bytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
@@ -46,4 +47,5 @@ export async function rateLimit(
   if (!row || row.count > limit)
     throw new ApiError("RATE_LIMITED", 429, "Please wait before trying again.");
 }
+
 

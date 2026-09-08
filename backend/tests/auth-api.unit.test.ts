@@ -37,6 +37,14 @@ async function request(path: string, body?: unknown, headers = {}, protocol = "h
 const verifyBody = { phone, requestId: challengeId, otp: "0123" };
 
 describe("auth API, session and audit contracts with repository calls replaced", () => {
+  it("exposes authenticated me with the same session validation", async () => {
+    expect((await request("me")).status).toBe(401);
+    const response = await request("me", undefined, { Authorization: "Bearer test-session" });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.id).toBe("user");
+    expect(repo.findActiveSession.mock.calls[0]![0]).toBe(db);
+    expect(repo.findActiveSession.mock.calls[0]![1]).toBe(await hash("test-session"));
+  });
   it("normalizes phone before coordination and returns safe challenge metadata", async () => {
     const response = await request("send-otp", { phone: "99999 99991" }); const result = await response.json();
     expect(response.status).toBe(200); expect(result.data.requestId).toBe(challengeId);

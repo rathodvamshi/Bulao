@@ -5,5 +5,8 @@ export function apiBaseUrl() {
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.hostname.endsWith(".invalid") || url.hostname.includes("your-")) {
     throw new Error("Bulao API setup requires a valid HTTPS URL.");
   }
-  return value;
+  if (!["", "/", "/api", "/api/v1"].includes(url.pathname)) {
+    throw new Error("Bulao API URL must point to the Worker or its /api/v1 prefix.");
+  }
+  return `${url.origin}/api/v1`;
 }

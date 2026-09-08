@@ -1,3 +1,5 @@
+> Latest review: missing DLT Template ID confirmed in MSG91 SendOTP logs and template editor; backend fixes deployed and 93 tests pass. See [current auth review](auth-review-2026-09-08.md). Historical status and permission notes below are superseded where the new report states otherwise.
+
 > Validation update: 77 database-free tests, three TypeScript checks, and two local builds passed. See [validation report](auth-validation.md). No deployment is approved. The earlier testing-pending notes below describe the implementation checkpoint before this validation.
 
 # Cloudflare + MSG91 authentication setup
@@ -109,4 +111,3 @@ Remote backend checks require separate approval and can incur SMS costs: racing 
 ## Staging database protection
 
 The user explicitly requested that `bulao-dev` not be modified or deleted. The remote migration command above is a future provisioning instruction only. Obtain explicit clearance before applying staging schema migrations; do not interpret approval for database-free tests as approval for D1 changes. No production test traffic is permitted.
-

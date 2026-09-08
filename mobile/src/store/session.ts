@@ -2,6 +2,7 @@ import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { apiBaseUrl } from "../api/config";
+import { fetchWithTimeout } from "../api/network";
 
 type Session = {
   token: string | null;
@@ -29,9 +30,9 @@ export const useSession = create<Session>((set) => ({
       const token = Platform.OS === "web" ? null : await SecureStore.getItemAsync("bulao.session");
       if (current !== revision) return;
       if (!token) { set({ token: null, ready: true }); return; }
-      const response = await fetch(`${apiBaseUrl()}/auth/session`, {
-        headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000), cache: "no-store", redirect: "error",
-      });
+      const response = await fetchWithTimeout(`${apiBaseUrl()}/auth/session`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store", redirect: "error",
+      }, 15000);
       if (current !== revision) return;
       if (response.status === 401) {
         await SecureStore.deleteItemAsync("bulao.session");

@@ -3,10 +3,11 @@ import { Msg91OtpProvider } from "../src/providers/otp/msg91";
 describe("MSG91 boundary (no paid calls)", () => {
   it("sends the key in headers and sets four-digit expiry policy", async () => {
     const transport = vi.fn(async () =>
-      Response.json({ type: "success", message: "id" }),
+      Response.json({ type: "success", request_id: "test-request-id", message: "id" }),
     );
     const provider = new Msg91OtpProvider("test-key", "template", transport);
-    await provider.send("+919999999991");
+    const requestId = await provider.send("+919999999991");
+    expect(requestId).toBe("test-request-id");
     const [url, options] = transport.mock.calls[0] as unknown as [
       URL,
       RequestInit,
@@ -32,6 +33,7 @@ describe("MSG91 boundary (no paid calls)", () => {
     const [url, options] = transport.mock.calls[0] as unknown as [URL, RequestInit];
     expect(url.pathname).toBe("/api/v5/otp/retry");
     expect(url.searchParams.get("retrytype")).toBe("text");
+    expect(url.searchParams.has("request_id")).toBe(false);
     expect(url.searchParams.has("otp")).toBe(false);
     expect(url.searchParams.has("otp_expiry")).toBe(false);
     expect(url.searchParams.has("authkey")).toBe(false);
@@ -52,5 +54,3 @@ describe("MSG91 boundary (no paid calls)", () => {
     });
   });
 });
-
-
