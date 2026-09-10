@@ -10,6 +10,7 @@ import { ApiError, ok } from "./middleware/errors";
 import { auth } from "./modules/auth/routes";
 import { requireAuth } from "./modules/auth/session";
 import { jobRoutes } from "./modules/jobs/routes";
+import { savedPlacesRoutes } from "./modules/locations/saved-places";
 import { services, requests } from "./modules/services/routes";
 import { interactions } from "./modules/interactions/routes";
 import { trust } from "./modules/trust/routes";
@@ -205,6 +206,7 @@ app.get("/api/v1/admin/usage", requireAuth, async (c) => {
   return ok(c, { items: usage.results, providerReportedCredits: null });
 });
 app.route("/api/v1/jobs", jobRoutes);
+app.route("/api/v1/saved-places", savedPlacesRoutes);
 app.route("/api/v1/services", services);
 app.route("/api/v1/service-requests", requests);
 app.route("/api/v1/applications", interactions);

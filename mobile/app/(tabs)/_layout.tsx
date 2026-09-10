@@ -1,8 +1,25 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { View, ActivityIndicator } from "react-native";
 import { t } from "../../src/i18n/en";
 import { colors } from "../../src/components/ui";
+import { useRequireAuth } from "../../src/auth";
+
 export default function TabsLayout() {
+  const { isAuthenticated, isLoading } = useRequireAuth();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.paper }}>
+        <ActivityIndicator size="large" color={colors.green} />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <Tabs
       screenOptions={{

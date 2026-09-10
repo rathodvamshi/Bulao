@@ -3,13 +3,13 @@
  * 
  * Handles authentication bootstrap and routing:
  * - Shows splash screen during bootstrap
- * - Routes to Home if authenticated
+ * - Routes to Home tabs if authenticated
  * - Routes to Auth if unauthenticated
  * - Shows error state for network issues
  */
 
 import { useEffect, useState } from "react";
-import { router } from "expo-router";
+import { router, useRootNavigationState } from "expo-router";
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SplashScreen } from "../src/components/SplashScreen";
 import { useAuth } from "../src/auth";
@@ -24,29 +24,57 @@ const COLORS = {
 
 export default function Index() {
   const [showSplash, setShowSplash] = useState(true);
+  const [hasNavigated, setHasNavigated] = useState(false);
   const auth = useAuth();
+  const rootNavigationState = useRootNavigationState();
+
+  // Wait for navigation to be ready
+  const navigationReady = rootNavigationState?.key != null;
 
   useEffect(() => {
+    // Don't navigate until everything is ready
+    if (!navigationReady) {
+      console.log('Index: Navigation not ready');
+      return;
+    }
+
     // Wait for splash to complete before routing
-    if (showSplash) return;
+    if (showSplash) {
+      console.log('Index: Showing splash');
+      return;
+    }
 
     // Wait for auth bootstrap to complete
-    if (auth.status === 'bootstrapping') return;
+    if (auth.status === 'bootstrapping') {
+      console.log('Index: Auth bootstrapping');
+      return;
+    }
+
+    // Prevent multiple navigations
+    if (hasNavigated) {
+      console.log('Index: Already navigated');
+      return;
+    }
 
     // Route based on auth status
     if (auth.status === 'authenticated') {
-      console.log('Index: Authenticated, routing to home');
-      router.replace('/(tabs)/profile');
+      console.log('Index: Authenticated, routing to tabs');
+      setHasNavigated(true);
+      router.replace('/(tabs)');
     } else if (auth.status === 'unauthenticated') {
       console.log('Index: Unauthenticated, routing to auth');
+      setHasNavigated(true);
       router.replace('/auth');
     }
-    // If network_error, stay on this screen to show error + retry
-  }, [showSplash, auth.status]);
+    // If error, stay on this screen to show error + retry
+  }, [navigationReady, showSplash, auth.status, hasNavigated]);
 
   // Show splash screen during initial animation
   if (showSplash) {
-    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+    return <SplashScreen onComplete={() => {
+      console.log('Index: Splash completed');
+      setShowSplash(false);
+    }} />;
   }
 
   // Splash complete - show bootstrap status
@@ -54,6 +82,7 @@ export default function Index() {
     return (
       <View style={styles.container}>
         <ActivityIndicator color={COLORS.green} size="large" />
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
@@ -69,7 +98,11 @@ export default function Index() {
           
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={() => auth.retry()}
+            onPress={() => {
+              console.log('Index: Retrying auth');
+              setHasNavigated(false);
+              auth.retry();
+            }}
             activeOpacity={0.85}
           >
             <Text style={styles.retryButtonText}>Retry</Text>
@@ -77,7 +110,11 @@ export default function Index() {
 
           <TouchableOpacity
             style={styles.continueButton}
-            onPress={() => router.replace('/auth')}
+            onPress={() => {
+              console.log('Index: Continuing to auth');
+              setHasNavigated(true);
+              router.replace('/auth');
+            }}
             activeOpacity={0.85}
           >
             <Text style={styles.continueButtonText}>Continue to Login</Text>
@@ -91,6 +128,7 @@ export default function Index() {
   return (
     <View style={styles.container}>
       <ActivityIndicator color={COLORS.green} size="large" />
+      <Text style={styles.loadingText}>Preparing...</Text>
     </View>
   );
 }
@@ -102,6 +140,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 14,
+    color: COLORS.muted,
   },
   errorCard: {
     width: '100%',

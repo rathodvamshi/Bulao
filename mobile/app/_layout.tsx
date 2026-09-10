@@ -2,11 +2,12 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, View, ActivityIndicator } from "react-native";
 import { AuthProvider } from "../src/auth";
 import { set401Handler } from "../src/api/apiClient";
 import { setAuthExpiredHandler } from "../src/api/client";
 import { useAuth } from "../src/auth";
+import { colors } from "../src/components/ui";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -26,27 +27,32 @@ function AppContent() {
 
   // Setup handlers ONCE on mount
   useEffect(() => {
-    // Setup API client auth integration - use ref to get latest auth
     setAuthExpiredHandler(() => {
       console.log('API client: Session expired, logging out');
       authRef.current.logout();
     });
 
-    // Setup new apiClient 401 handler - use ref to get latest auth
     set401Handler(() => {
       console.log('Global 401 handler: Session expired, logging out');
       authRef.current.logout();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  }, []);
 
   useEffect(() => {
-    // Clear react-query cache when auth state changes
     if (auth.status === 'unauthenticated') {
       void client.cancelQueries();
       client.clear();
     }
   }, [auth.status]);
+
+  // Show loading during bootstrap (index.tsx will handle routing)
+  if (auth.status === 'bootstrapping') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.paper }}>
+        <ActivityIndicator size="large" color={colors.green} />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>

@@ -79,6 +79,16 @@ export const jobs = sqliteTable(
     payPaise: integer("pay_paise").notNull(),
     payUnit: text("pay_unit").notNull(),
     submissionKey: text("submission_key"),
+    title: text("title").notNull().default(""),
+    experience: text("experience").notNull().default("any"),
+    address: text("address").notNull().default(""),
+    duration: text("duration").notNull().default("one"),
+    endsAt: integer("ends_at"),
+    hours: text("hours").notNull().default("full"),
+    startTime: text("start_time").notNull().default("09:00"),
+    endTime: text("end_time").notNull().default("17:00"),
+    paidWhen: text("paid_when").notNull().default("after"),
+    extras: text("extras", { mode: "json" }).$type<string[]>().notNull().default([]),
     details: text("details").notNull(),
     status: text("status").notNull().default("PUBLISHED"),
     createdAt: integer("created_at").notNull(),
@@ -230,3 +240,20 @@ export const otpCooldowns = sqliteTable("otp_cooldowns", {
   phoneHash: text("phone_hash").primaryKey(),
   sentAt: integer("sent_at").notNull(),
 });
+
+export const savedPlaces = sqliteTable("saved_places", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  label: text("label").notNull(), // Home, Shop, Site, or custom name
+  icon: text("icon").notNull().default("📍"),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  locality: text("locality").notNull(),
+  address: text("address").notNull().default(""),
+  lastUsedAt: integer("last_used_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => [
+  index("saved_places_user").on(t.userId, t.lastUsedAt),
+]);

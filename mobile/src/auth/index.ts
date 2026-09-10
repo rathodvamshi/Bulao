@@ -5,6 +5,7 @@
  */
 
 export { AuthProvider, useAuth } from './AuthContext';
+export { useRequireAuth } from './useRequireAuth';
 export { bootstrapAuth, completeLogin, performLogout, refreshSession } from './authService';
 export * from './authTypes';
 export * as authStorage from './authStorage';

@@ -17,7 +17,7 @@ const choices = [
     hint: "hireHint",
     icon: "people-outline",
     color: "#FAE6CC",
-    path: "/jobs/new",
+    path: "/provider-home",
   },
   {
     title: "findService",

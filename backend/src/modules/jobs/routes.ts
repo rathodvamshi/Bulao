@@ -47,6 +47,12 @@ jobRoutes.post("/", requireAuth, async (c) => {
   if (input.startsAt < now() || input.startsAt > now() + 366 * 86400)
     throw new ApiError("INVALID_DATE");
   const db = drizzle(c.env.DB);
+  const existing = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.ownerId, c.get("userId")), eq(jobs.submissionKey, input.submissionKey))).get();
+  if (existing) return ok(c, existing);
+  if ((input.duration === "few" && (!input.endsAt || input.endsAt <= input.startsAt)) ||
+      (input.duration !== "few" && input.endsAt !== null) ||
+      (input.hours === "custom" && input.endTime <= input.startTime))
+    throw new ApiError("INVALID_SCHEDULE", 400, "Please check the end date and working hours.");
   const role = await db
     .select()
     .from(roles)
@@ -113,4 +119,57 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
       "You've already applied to this job.",
     );
   return ok(c, { id });
+});
+
+jobRoutes.get("/provider/stats", requireAuth, async (c) => {
+  const userId = c.get("userId");
+  
+  const stats = await c.env.DB.prepare(`
+    SELECT 
+      COUNT(*) as total,
+      SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END) as active,
+      SUM(CASE WHEN status = 'PAUSED' THEN 1 ELSE 0 END) as paused,
+      SUM(CASE WHEN status = 'FILLED' THEN 1 ELSE 0 END) as hired,
+      SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as completed
+    FROM jobs
+    WHERE owner_id = ?
+  `).bind(userId).first();
+
+  const applications = await c.env.DB.prepare(`
+    SELECT COUNT(*) as count
+    FROM interactions
+    WHERE owner_id = ? AND kind = 'job' AND status = 'PENDING'
+  `).bind(userId).first();
+
+  return ok(c, {
+    jobsPosted: stats?.total || 0,
+    active: stats?.active || 0,
+    interested: applications?.count || 0,
+    hired: stats?.hired || 0,
+    completed: stats?.completed || 0,
+  });
+});
+
+jobRoutes.get("/provider/recent", requireAuth, async (c) => {
+  const userId = c.get("userId");
+  
+  const recentJobs = await c.env.DB.prepare(`
+    SELECT 
+      j.id,
+      r.name as title,
+      c.name as categoryName,
+      j.area,
+      j.pay_paise as payPaise,
+      j.pay_unit as payUnit,
+      j.status,
+      (SELECT COUNT(*) FROM interactions WHERE job_id = j.id AND kind = 'job') as applicantCount
+    FROM jobs j
+    JOIN roles r ON r.id = j.role_id
+    JOIN categories c ON c.id = j.category_id
+    WHERE j.owner_id = ?
+    ORDER BY j.created_at DESC
+    LIMIT 10
+  `).bind(userId).all();
+
+  return ok(c, recentJobs.results || []);
 });

@@ -12,6 +12,21 @@ export const jobSchema = locationSchema.extend({
   payPaise: z.number().int().min(100).max(100000000),
   payUnit: z.enum(["hour", "day", "job", "month"]),
   details: z.string().trim().max(1000).default(""),
+  title: z.string().trim().max(100).default(""),
+  experience: z.enum(["any", "some", "expert"]).default("any"),
+  address: z.string().trim().max(300).default(""),
+  duration: z.enum(["one", "few", "ongoing"]).default("one"),
+  endsAt: z.number().int().positive().nullable().default(null),
+  hours: z.enum(["full", "custom"]).default("full"),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("09:00"),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("17:00"),
+  paidWhen: z.enum(["after", "daily", "weekly", "monthly"]).default("after"),
+  extras: z.array(z.string().trim().min(1).max(60)).max(10).default([]),
+});
+export const savedPlaceSchema = locationSchema.extend({
+  label: z.string().trim().min(1).max(40),
+  icon: z.enum(["home", "storefront", "business", "location"]).default("location"),
+  address: z.string().trim().max(300).default(""),
 });
 export const serviceSchema = locationSchema.extend({
   categoryId: z.string().min(1),

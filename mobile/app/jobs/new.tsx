@@ -1,247 +1,87 @@
-import { useState } from "react";
-import { View, Text } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as GPS from "expo-location";
+import type { Location, JobInput } from "@bulao/domain";
 import { api } from "../../src/api/client";
 import type { Catalog } from "../../src/api/types";
-import {
-  Screen,
-  Copy,
-  Card,
-  Chip,
-  Field,
-  Button,
-  Loading,
-  Failure,
-  s,
-} from "../../src/components/ui";
-import { t } from "../../src/i18n/en";
+import { useAuth } from "../../src/auth";
 import { useLocation } from "../../src/store/location";
-import { useSession } from "../../src/store/session";
-export default function PostJob() {
-  const [step, setStep] = useState(0);
-  const [submissionKey] = useState(
-    () => `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
-  const [category, setCategory] = useState("");
-  const [role, setRole] = useState("");
-  const [day, setDay] = useState(1);
-  const [hour, setHour] = useState(9);
-  const [workers, setWorkers] = useState(1);
-  const [pay, setPay] = useState("700");
-  const [unit, setUnit] = useState<"day" | "hour" | "job">("day");
-  const [details, setDetails] = useState("");
-  const location = useLocation((x) => x.location);
-  const token = useSession((x) => x.token);
-  const client = useQueryClient();
-  const catalog = useQuery({
-    queryKey: ["categories"],
-    queryFn: () => api<Catalog>("/categories"),
-    staleTime: 86400000,
-  });
-  const selected = catalog.data?.roles.find((r) => r.id === role);
-  const date = new Date();
-  date.setDate(date.getDate() + day);
-  date.setHours(hour, 0, 0, 0);
-  const post = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>("/jobs", {
-        ...location,
-        submissionKey,
-        categoryId: selected?.categoryId,
-        roleId: role,
-        startsAt: Math.floor(date.getTime() / 1000),
-        workers,
-        payPaise: Math.round(Number(pay) * 100),
-        payUnit: unit,
-        details,
-      }),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ["nearby"] });
-      void client.invalidateQueries({ queryKey: ["activity"] });
-    },
-  });
-  const titles = [
-    "role",
-    "where",
-    "when",
-    "payment",
-    "details",
-    "check",
-  ] as const;
-  if (!token)
-    return (
-      <Screen title={t("hire")} back>
-        <Copy>{t("signedOut")}</Copy>
-        <Button label={t("signIn")} onPress={() => router.push("/auth")} />
-      </Screen>
-    );
-  if (post.isSuccess)
-    return (
-      <Screen title={t("posted")}>
-        <Copy>{t("postedHint")}</Copy>
-        <Button
-          label={t("view")}
-          onPress={() => router.replace(`/jobs/${post.data.id}`)}
-        />
-        <Button
-          label={t("goHome")}
-          secondary
-          onPress={() => router.replace("/")}
-        />
-      </Screen>
-    );
-  return (
-    <Screen title={t(titles[step]!)} back>
-      <Copy small>
-        {step + 1} / {titles.length}
-      </Copy>
-      {step === 0 &&
-        (catalog.isPending ? (
-          <Loading />
-        ) : catalog.isError ? (
-          <Failure error={catalog.error} retry={() => void catalog.refetch()} />
-        ) : (
-          <View style={s.row}>
-            {!category ? (
-              catalog.data.categories
-                .filter((c) => c.kind === "job")
-                .map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={c.name}
-                    selected={false}
-                    onPress={() => setCategory(c.id)}
-                  />
-                ))
-            ) : (
-              <Button
-                secondary
-                label={t("back")}
-                onPress={() => {
-                  setCategory("");
-                  setRole("");
-                }}
-              />
-            )}
-            {catalog.data.roles
-              .filter((r) => r.categoryId === category)
-              .map((r) => (
-                <Chip
-                  key={r.id}
-                  label={r.name}
-                  selected={role === r.id}
-                  onPress={() => setRole(r.id)}
-                />
-              ))}
-          </View>
-        ))}
-      {step === 1 && (
-        <>
-          <Copy>{location?.area ?? t("locationWhy")}</Copy>
-          <Button
-            label={t("location")}
-            onPress={() => router.push("/location")}
-          />
-        </>
-      )}
-      {step === 2 && (
-        <>
-          <View style={s.row}>
-            {([0, 1, 7] as const).map((d, i) => (
-              <Chip
-                key={d}
-                label={t((["today", "tomorrow", "nextWeek"] as const)[i]!)}
-                selected={day === d}
-                onPress={() => setDay(d)}
-              />
-            ))}
-          </View>
-          <View style={s.row}>
-            {([9, 14, 18] as const).map((h, i) => (
-              <Chip
-                key={h}
-                label={t((["morning", "afternoon", "evening"] as const)[i]!)}
-                selected={hour === h}
-                onPress={() => setHour(h)}
-              />
-            ))}
-          </View>
-          <Copy>{date.toLocaleString()}</Copy>
-        </>
-      )}
-      {step === 3 && (
-        <>
-          <Text style={s.label}>{t("workers")}</Text>
-          <View style={s.row}>
-            <Button
-              label="−"
-              secondary
-              disabled={workers === 1}
-              onPress={() => setWorkers(workers - 1)}
-            />
-            <Text style={{ ...s.heading, padding: 10 }}>{workers}</Text>
-            <Button
-              label="+"
-              secondary
-              disabled={workers === 100}
-              onPress={() => setWorkers(workers + 1)}
-            />
-          </View>
-          <Field
-            label={t("pay")}
-            value={pay}
-            onChangeText={setPay}
-            keyboardType="number-pad"
-            placeholder={t("payPlaceholder")}
-          />
-          <View style={s.row}>
-            {(["day", "hour", "job"] as const).map((u, i) => (
-              <Chip
-                key={u}
-                label={t((["perDay", "perHour", "perJob"] as const)[i]!)}
-                selected={unit === u}
-                onPress={() => setUnit(u)}
-              />
-            ))}
-          </View>
-        </>
-      )}
-      {step === 4 && (
-        <Field
-          label={t("optional")}
-          value={details}
-          onChangeText={setDetails}
-          multiline
-          placeholder={t("detailsPlaceholder")}
-        />
-      )}{" "}
-      {step === 5 && (
-        <Card>
-          <Text style={s.heading}>{selected?.name}</Text>
-          <Copy>{location?.area}</Copy>
-          <Copy>{date.toLocaleString()}</Copy>
-          <Copy>
-            {workers} people · ₹{pay}/{unit}
-          </Copy>
-          {!!details && <Copy>{details}</Copy>}
-        </Card>
-      )}
-      {post.error && <Failure error={post.error} />}
-      <Button
-        label={post.isPending ? t("busy") : t(step === 5 ? "post" : "continue")}
-        disabled={
-          post.isPending ||
-          (step === 0 && !role) ||
-          (step === 1 && !location) ||
-          (step === 2 && date.getTime() <= Date.now()) ||
-          (step === 3 && (!Number.isFinite(Number(pay)) || Number(pay) < 1))
-        }
-        onPress={() => (step === 5 ? post.mutate() : setStep(step + 1))}
-      />
-      {step > 0 && (
-        <Button label={t("back")} secondary onPress={() => setStep(step - 1)} />
-      )}
-    </Screen>
-  );
+
+type Place = Location & { id: string; label: string; address: string };
+const green = "#176344";
+const headings = ["Who do you need?", "Tell us about the work", "Where is the work?", "Make a little plan", "Set a fair pay", "Looking good?"];
+const hints = ["Choose a category, then the right person.", "Help the right people find your work.", "Only your locality is visible publicly.", "Choose the dates and hours that suit you.", "Clear pay helps people decide with confidence.", "Your work, as people nearby will see it."];
+function dateKey(offset = 0) { const d = new Date(); d.setDate(d.getDate()+offset); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function dateLabel(v: string) { return new Date(`${v}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" }); }
+function Choice({ label, selected, onPress }: { label: string; selected?: boolean; onPress: () => void }) { return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={[s.chip, selected && s.selected]}><Text style={s.chipText}>{label}</Text></Pressable>; }
+function Field({ label, value, onChange, multiline, maxLength = 100 }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; maxLength?: number }) { return <View style={{ gap: 8 }}><Text style={s.label}>{label} ✎</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChange} maxLength={maxLength} multiline={multiline} style={[s.input,multiline && { minHeight: 90, textAlignVertical: "top" }]} /></View>; }
+function Calendar({ value, min, onChange }: { value: string; min: string; onChange: (v: string) => void }) {
+ const [month,setMonth] = useState(() => new Date(`${value}T12:00:00`)); const y=month.getFullYear(), m=month.getMonth();
+ return <View style={s.card}><View style={s.between}><Choice label="‹" onPress={() => setMonth(new Date(y,m-1,1,12))} /><Text style={s.label}>{month.toLocaleDateString("en-IN",{month:"long",year:"numeric"})}</Text><Choice label="›" onPress={() => setMonth(new Date(y,m+1,1,12))} /></View><View style={s.calendar}>{["S","M","T","W","T","F","S"].map((v,i)=><Text key={`h${i}`} style={s.dayLabel}>{v}</Text>)}{Array.from({length:new Date(y,m,1).getDay()},(_,i)=><View key={`b${i}`} style={s.day}/>)}{Array.from({length:new Date(y,m+1,0).getDate()},(_,i)=>{const v=`${y}-${String(m+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`; return <Pressable key={v} accessibilityRole="button" accessibilityLabel={v} disabled={v<min} onPress={()=>onChange(v)} style={[s.day,v===value && {backgroundColor:green,borderRadius:14}]}><Text style={{color:v<min?"#CCD3CD":v===value?"white":v===dateKey()?green:"#253C30"}}>{i+1}</Text></Pressable>;})}</View></View>;
 }
+export default function PostJob() {
+ const auth=useAuth(), client=useQueryClient(), location=useLocation(x=>x.location);
+ const [step,setStep]=useState(0), [category,setCategory]=useState(""), [role,setRole]=useState("");
+ const [title,setTitle]=useState(""), [workers,setWorkers]=useState(1), [experience,setExperience]=useState<JobInput["experience"]>("any");
+ const [place,setPlace]=useState<Location|null>(location), [address,setAddress]=useState(""), [addressOpen,setAddressOpen]=useState(false);
+ const [save,setSave]=useState(false), [label,setLabel]=useState("Site");
+ const [start,setStart]=useState(dateKey(1)), [end,setEnd]=useState(dateKey(1)), [calendar,setCalendar]=useState(false);
+ const [duration,setDuration]=useState<JobInput["duration"]>("one"), [hours,setHours]=useState<JobInput["hours"]>("full");
+ const [startTime,setStartTime]=useState("09:00"), [endTime,setEndTime]=useState("17:00");
+ const [pay,setPay]=useState(""), [unit,setUnit]=useState<JobInput["payUnit"]>("day"), [paidWhen,setPaidWhen]=useState<JobInput["paidWhen"]>("after");
+ const [extras,setExtras]=useState<string[]>([]), [details,setDetails]=useState(""), [expanded,setExpanded]=useState(false);
+ const [error,setError]=useState(""), [busy,setBusy]=useState(false), [key]=useState(()=>`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+ const lock=useRef(false), fade=useRef(new Animated.Value(1)).current, scroll=useRef<ScrollView>(null);
+ const uid=auth.session?.userId;
+ const catalog=useQuery({queryKey:["categories"],queryFn:()=>api<Catalog>("/categories"),staleTime:86400000});
+ const places=useQuery({queryKey:["saved-places",uid],queryFn:()=>api<Place[]>(`/providers/${uid}/saved-places`),enabled:!!uid});
+ useEffect(()=>{if(location)setPlace(location);},[location]);
+ useEffect(()=>{fade.setValue(0);Animated.timing(fade,{toValue:1,duration:180,useNativeDriver:true}).start();scroll.current?.scrollTo({y:0,animated:false});},[step,fade]);
+ useEffect(()=>{const sub=BackHandler.addEventListener("hardwareBackPress",()=>{if(lock.current)return true;if(step>0){setStep(step-1);return true;}return false;});return()=>sub.remove();},[step]);
+ const selected=catalog.data?.roles.find(r=>r.id===role), categoryName=catalog.data?.categories.find(c=>c.id===category)?.name;
+ const timeValid=/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)&&endTime>startTime;
+ const startDate=new Date(`${start}T${hours==="custom"?startTime:"23:59"}:00`);
+ const schedule=`${start===dateKey()?"Today":start===dateKey(1)?"Tomorrow":dateLabel(start)}, ${duration==="one"?"one day":duration==="few"?`through ${dateLabel(end)}`:"ongoing"}, ${hours==="full"?"full day (as agreed)":`${startTime}–${endTime}`}`;
+ const payText=`₹${Number(pay||0).toLocaleString("en-IN")}/${unit==="job"?"task":unit}, paid ${paidWhen==="after"?"after work":paidWhen}`;
+ function validation(n:number) {
+  if(n===0&&!selected)return "Choose the help you need.";
+  if(n===1&&title.trim().length<2)return "Add a short title for your work.";
+  if(n===2&&(!place||place.area.trim().length<2||place.area==="Near me"))return "Choose a location and enter its locality.";
+  if(n===2&&save&&!label.trim())return "Give this saved place a name.";
+  if(n===3&&(start<dateKey()||!Number.isFinite(startDate.getTime())||startDate.getTime()<=Date.now()||startDate.getTime()>Date.now()+366*86400000||(duration==="few"&&end<start)||(hours==="custom"&&!timeValid)))return "Check dates and use future working hours (HH:MM, same day).";
+  if(n===4&&(!Number.isFinite(Number(pay))||Number(pay)<1||Number(pay)>1000000))return "Enter pay between ₹1 and ₹10,00,000.";
+  return "";
+ }
+ const post=useMutation({mutationFn:()=>api<{id:string}>("/jobs",{...place,submissionKey:key,categoryId:category,roleId:role,title,workers,experience,address,startsAt:Math.floor(startDate.getTime()/1000),duration,endsAt:duration==="few"?Math.floor(new Date(`${end}T23:59:59`).getTime()/1000):null,hours,startTime,endTime,payPaise:Math.round(Number(pay)*100),payUnit:unit,paidWhen,extras,details}),onSuccess:()=>{for(const queryKey of [["nearby"],["activity"],["provider-stats"],["provider-recent-jobs"]])void client.invalidateQueries({queryKey});},onSettled:()=>{lock.current=false;}});
+ function edit(n:number){if(!lock.current){setError("");setStep(n);}}
+ async function next(){
+  if(lock.current)return;setError("");const invalid=step===5?[0,1,2,3,4].find(n=>validation(n)):validation(step)?step:undefined;
+  if(invalid!==undefined){setStep(invalid);setError(validation(invalid));return;}
+  if(step===5){lock.current=true;post.mutate();return;}
+  if(step===2&&save&&place){lock.current=true;setBusy(true);try{await api("/saved-places",{...place,label,address,icon:label==="Home"?"home":label==="Shop"?"storefront":"business"});await client.invalidateQueries({queryKey:["saved-places",uid]});setSave(false);}catch(e){setError(e instanceof Error?e.message:"Could not save. Retry or turn off Save place.");return;}finally{lock.current=false;setBusy(false);}}
+  setStep(step+1);
+ }
+ async function gps(){if(busy)return;setBusy(true);setError("");try{const p=await GPS.requestForegroundPermissionsAsync();if(!p.granted)throw new Error("Location permission is off. Choose a locality instead.");const point=await GPS.getCurrentPositionAsync({accuracy:GPS.Accuracy.Balanced});let area="";try{const [a]=await GPS.reverseGeocodeAsync(point.coords);area=[a?.district||a?.city,a?.region].filter(Boolean).join(", ");}catch{}setPlace({latitude:point.coords.latitude,longitude:point.coords.longitude,area});setAddress("");}catch(e){setError(e instanceof Error?e.message:"Could not find your location.");}finally{setBusy(false);}}
+ function review(name:string,value:string,n:number){return <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${name}`} onPress={()=>edit(n)} style={s.review}><View style={{flex:1,gap:6}}><Text style={s.eyebrow}>{name}</Text><Text style={s.body}>{value}</Text></View><Ionicons name="create-outline" size={20} color={green}/></Pressable>;}
+ if(!auth.session)return <SafeAreaView style={s.page}><View style={s.content}><Text style={s.heading}>Post work nearby</Text><Text style={s.body}>Sign in to post work and manage your hires.</Text><Choice label="Sign in →" onPress={()=>router.push("/auth")}/><Choice label="Back" onPress={()=>router.back()}/></View></SafeAreaView>;
+ if(post.isSuccess)return <SafeAreaView style={s.page}><View style={[s.content,{flex:1,justifyContent:"center",alignItems:"center"}]}><Ionicons name="checkmark-circle" size={80} color={green}/><Text style={s.heading}>Your work is posted!</Text><Text style={s.body}>People nearby can now find your job.</Text><Choice label="View your job →" selected onPress={()=>router.replace(`/jobs/${post.data.id}`)}/><Choice label="Back to provider home" onPress={()=>router.replace("/provider-home")}/></View></SafeAreaView>;
+ return <SafeAreaView style={s.page}><KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}>
+ <View style={s.header}><Pressable accessibilityRole="button" accessibilityLabel="Go back" disabled={busy||post.isPending} onPress={()=>step?edit(step-1):category?setCategory(""):router.back()} style={s.back}><Ionicons name="arrow-back" size={23} color={green}/></Pressable><Text style={s.brand}>Post work</Text><Text style={s.eyebrow}>{step+1} OF 6</Text></View>
+ <View style={s.progress}>{headings.map((_,i)=><Pressable key={i} accessibilityRole="button" accessibilityLabel={`Step ${i+1}`} disabled={i>=step||busy||post.isPending} onPress={()=>edit(i)} style={[s.dot,i<=step&&{backgroundColor:green},i===step&&{flex:2}]}/>)}</View>
+ <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={s.content}><Animated.View style={{gap:22,opacity:fade}}><View style={{gap:8}}><Text style={s.heading}>{headings[step]}</Text><Text style={s.muted}>{hints[step]}</Text></View>
+ {step===0&&<>{catalog.isPending?<Text style={s.muted}>Loading categories…</Text>:catalog.isError?<Choice label="Retry categories" onPress={()=>void catalog.refetch()}/>:<View style={s.wrap}>{!category?catalog.data?.categories.filter(c=>c.kind==="job").sort((a,b)=>Number(a.id==="other-work")-Number(b.id==="other-work")).map(c=><Pressable key={c.id} accessibilityRole="button" onPress={()=>{setCategory(c.id);setUnit("day");setExtras([]);}} style={s.tile}><View style={s.icon}><Ionicons name={c.icon as keyof typeof Ionicons.glyphMap} size={27} color={green}/></View><Text style={s.tileLabel}>{c.name}</Text><Ionicons name="arrow-forward" size={18} color={green}/></Pressable>):<><Choice label={`${categoryName} ✎`} selected onPress={()=>setCategory("")}/>{catalog.data?.roles.filter(r=>r.categoryId===category).map(r=><Pressable key={r.id} accessibilityRole="button" onPress={()=>{setRole(r.id);setTitle(r.id==="other-work-role"?"":`${r.name} needed`);edit(1);}} style={[s.tile,role===r.id&&s.selected]}><Text style={s.tileLabel}>{r.name}</Text><Ionicons name="arrow-forward" size={22} color={green}/></Pressable>)}</>}</View>}</>}
+ {step===1&&<><Field label="Work title" value={title} onChange={setTitle}/><View style={s.card}><Text style={s.label}>People needed</Text><View style={s.between}><Pressable accessibilityRole="button" accessibilityLabel="Fewer workers" disabled={workers<=1} style={s.stepper} onPress={()=>setWorkers(workers-1)}><Text style={s.amount}>−</Text></Pressable><Text style={s.amount}>{workers}</Text><Pressable accessibilityRole="button" accessibilityLabel="More workers" disabled={workers>=100} style={s.stepper} onPress={()=>setWorkers(workers+1)}><Text style={s.amount}>+</Text></Pressable></View></View><Text style={s.label}>Experience</Text><View style={s.wrap}>{([['any','🌱 Any'],['some','🙂 Some'],['expert','🏅 Expert']] as const).map(([v,l])=><Choice key={v} label={l} selected={experience===v} onPress={()=>setExperience(v)}/>)}</View></>}
+ {step===2&&<><View style={s.wrap}><Choice label={busy?"Finding you…":"◎ Use current location"} onPress={()=>void gps()}/><Choice label="Choose locality ↗" onPress={()=>router.push("/location")}/></View><Text style={s.label}>Saved places</Text>{places.isPending?<Text style={s.muted}>Loading places…</Text>:places.isError?<Choice label="Retry saved places" onPress={()=>void places.refetch()}/>:!places.data?.length?<Text style={s.muted}>Save a place below to make next time faster.</Text>:<View style={s.wrap}>{places.data.map(p=><Choice key={p.id} label={`☆ ${p.label}`} selected={place?.latitude===p.latitude&&place?.longitude===p.longitude&&place?.area===p.area} onPress={()=>{setPlace(p);setAddress(p.address);void api(`/saved-places/${p.id}/use`,{}).catch(()=>{});}}/>)}</View>}{place&&<Field label="Public locality" value={place.area} onChange={area=>setPlace({...place,area})}/>}<Choice label={`${addressOpen?"−":"+"} Landmark / building · private`} onPress={()=>setAddressOpen(!addressOpen)}/>{addressOpen&&<Field label="Exact address · shared after hire" value={address} onChange={setAddress} maxLength={300} multiline/>}<Choice label={`${save?"☑":"☐"} Save this place for next time`} selected={save} onPress={()=>setSave(!save)}/>{save&&<><View style={s.wrap}>{["Home","Shop","Site"].map(l=><Choice key={l} label={l} selected={label===l} onPress={()=>setLabel(l)}/>)}</View><Field label="Place name" value={label} onChange={setLabel} maxLength={40}/></>}</>}
+ {step===3&&<><Text style={s.label}>Start date ✎</Text><View style={s.wrap}><Choice label="☀ Today" selected={start===dateKey()} onPress={()=>{setStart(dateKey());setCalendar(false);}}/><Choice label="Tomorrow" selected={start===dateKey(1)} onPress={()=>{setStart(dateKey(1));setCalendar(false);}}/><Choice label="Pick a date ✎" selected={calendar} onPress={()=>setCalendar(!calendar)}/></View>{calendar&&<Calendar value={start} min={dateKey()} onChange={v=>{setStart(v);if(end<v)setEnd(v);}}/>}<Text style={s.label}>How long?</Text><View style={s.wrap}>{([['one','One day'],['few','Few days'],['ongoing','∞ Ongoing']] as const).map(([v,l])=><Choice key={v} label={l} selected={duration===v} onPress={()=>{setDuration(v);if(end<start)setEnd(start);}}/>)}</View>{duration==="few"&&<><Text style={s.body}>{dateLabel(start)} → {dateLabel(end)} · {Math.round((new Date(`${end}T12:00:00`).getTime()-new Date(`${start}T12:00:00`).getTime())/86400000)+1} days</Text><Calendar value={end} min={start} onChange={setEnd}/></>}{duration==="ongoing"&&<Text style={s.muted}>Starts {dateLabel(start)}, no end date. You can close this job anytime.</Text>}<Text style={s.label}>Working hours</Text><View style={s.wrap}><Choice label="☀ Full day" selected={hours==="full"} onPress={()=>setHours("full")}/><Choice label="Custom hours ✎" selected={hours==="custom"} onPress={()=>setHours("custom")}/></View>{hours==="custom"?<View style={s.card}><Field label="Start time · 24-hour HH:MM" value={startTime} onChange={setStartTime} maxLength={5}/><Field label="End time · 24-hour HH:MM" value={endTime} onChange={setEndTime} maxLength={5}/>{timeValid&&<Text style={s.muted}>{((Number(endTime.slice(0,2))*60+Number(endTime.slice(3))-Number(startTime.slice(0,2))*60-Number(startTime.slice(3)))/60).toFixed(1)} hours</Text>}</View>:<Text style={s.muted}>Full day (as agreed)</Text>}</>}
+ {step===4&&<><View style={s.card}><Text style={s.label}>Pay per person</Text><View style={s.wrap}><Text style={s.amount}>₹</Text><TextInput accessibilityLabel="Pay in rupees" keyboardType="decimal-pad" value={pay} onChangeText={setPay} placeholder="0" maxLength={10} style={[s.amount,{flex:1}]}/></View><View style={s.wrap}>{(category==="construction"?["day","job"] as const:["day","hour","job","month"] as const).map(u=><Choice key={u} label={`Per ${u==="job"?"task":u}`} selected={unit===u} onPress={()=>setUnit(u)}/>)}</View></View><Text style={s.label}>When will you pay?</Text><View style={s.wrap}>{([['after','After work'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']] as const).map(([v,l])=><Choice key={v} label={l} selected={paidWhen===v} onPress={()=>setPaidWhen(v)}/>)}</View><Choice label={`${expanded?"−":"+"} Extras & description · optional`} onPress={()=>setExpanded(!expanded)}/>{expanded&&<><View style={s.wrap}>{[...(category==="construction"?["Tools provided","Materials provided"]:category==="events"?["Uniform provided"]:[]),"Meals","Travel","Stay"].map(e=><Choice key={e} label={e} selected={extras.includes(e)} onPress={()=>setExtras(extras.includes(e)?extras.filter(x=>x!==e):[...extras,e])}/>)}</View><Field label="Anything else workers should know?" value={details} onChange={setDetails} maxLength={1000} multiline/></>}</>}
+ {step===5&&<View style={s.card}><View style={s.between}><Text style={s.badge}>WORK NEARBY</Text><Ionicons name="briefcase-outline" size={28} color={green}/></View>{review("CATEGORY & ROLE",`${categoryName} · ${selected?.name}`,0)}{review("THE WORK",`${title} · ${workers} ${workers===1?"person":"people"} · ${experience} experience`,1)}{review("LOCALITY",place?.area||"Choose location",2)}{review("WHEN",schedule,3)}{review("PAY PER PERSON",payText,4)}{(extras.length>0||details)&&review("EXTRAS",[...extras,details].filter(Boolean).join(" · "),4)}{!!address&&<Text style={s.muted}>Your exact address is hidden from this public preview.</Text>}</View>}
+ </Animated.View></ScrollView><View style={s.footer}>{!!(error||post.error)&&<Text accessibilityRole="alert" style={s.error}>{error||post.error?.message}</Text>}{step<5&&<Text style={s.recap}>{[categoryName?`${categoryName}${selected?` → ${selected.name}`:""} ✎`:"Good help starts here.",`${title||"Your work"}, ${workers} people, ${experience} experience.`,`${place?.area||"Choose where you need help"}`,schedule,`${payText}. ${extras.length} extras added.`][step]}</Text>}{step>0&&<Pressable accessibilityRole="button" disabled={busy||post.isPending} onPress={()=>void next()} style={[s.primary,(busy||post.isPending)&&{opacity:0.55}]}><Text style={s.primaryText}>{post.isPending?"Posting your work…":busy?"Saving…":step===5?"Post job":"Next"}</Text><Ionicons name="arrow-forward" size={20} color="white"/></Pressable>}{step===5&&<Text style={s.reassurance}>You can pause or close this job after posting.</Text>}</View>
+ </KeyboardAvoidingView></SafeAreaView>;
+}
+const s=StyleSheet.create({
+ page:{flex:1,backgroundColor:"#F7FAF6"},header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:22,paddingVertical:14},back:{padding:10,backgroundColor:"#EAF1E8",borderRadius:16},brand:{fontSize:18,fontWeight:"700",color:green},eyebrow:{fontSize:10,fontWeight:"700",color:"#728376",letterSpacing:1.2},progress:{flexDirection:"row",gap:7,paddingHorizontal:24,paddingBottom:12},dot:{height:6,borderRadius:5,flex:1,backgroundColor:"#DFE7DD"},content:{padding:24,gap:22,width:"100%",maxWidth:640,alignSelf:"center",paddingBottom:32},heading:{fontSize:30,lineHeight:37,fontWeight:"800",letterSpacing:-0.8,color:"#173D2C"},muted:{fontSize:14,lineHeight:22,color:"#718076"},body:{fontSize:16,lineHeight:24,color:"#294434"},label:{fontSize:15,fontWeight:"700",color:"#294434"},wrap:{flexDirection:"row",flexWrap:"wrap",gap:10,alignItems:"center"},between:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},chip:{paddingHorizontal:16,paddingVertical:13,borderWidth:1,borderColor:"#DFE7DD",backgroundColor:"white",borderRadius:15,minHeight:46},chipText:{color:green,fontWeight:"600",fontSize:14},selected:{borderColor:"#398660",backgroundColor:"#E6F2DF"},card:{borderRadius:24,padding:20,gap:18,backgroundColor:"white",borderWidth:1,borderColor:"#E3EBE1"},tile:{width:"47%",flexGrow:1,minHeight:142,borderRadius:23,padding:18,gap:14,backgroundColor:"white",borderWidth:1,borderColor:"#E0E9DC"},tileLabel:{fontWeight:"700",fontSize:16,lineHeight:22,color:"#244A34"},icon:{width:48,height:48,borderRadius:15,backgroundColor:"#EDF5E6",justifyContent:"center",alignItems:"center"},input:{backgroundColor:"white",borderColor:"#DDE7D9",borderWidth:1,borderRadius:16,padding:16,fontSize:17,color:"#244A34",minHeight:56},stepper:{width:54,height:54,alignItems:"center",justifyContent:"center",borderRadius:17,backgroundColor:"#EFF5EB"},amount:{fontSize:36,fontWeight:"700",color:green},footer:{padding:18,paddingHorizontal:24,gap:12,backgroundColor:"#F7FAF6",borderTopWidth:1,borderColor:"#E4EBE1",width:"100%",maxWidth:640,alignSelf:"center"},recap:{color:"#52705B",fontSize:13,lineHeight:19},primary:{backgroundColor:green,borderRadius:18,minHeight:58,paddingHorizontal:22,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},primaryText:{color:"white",fontWeight:"700",fontSize:17},reassurance:{fontSize:11,color:"#788478",textAlign:"center"},error:{color:"#AB3737",fontSize:13,lineHeight:19},review:{flexDirection:"row",alignItems:"center",gap:14,borderBottomWidth:1,borderBottomColor:"#EDF0E9",paddingVertical:10},badge:{color:green,backgroundColor:"#EAF4E1",padding:9,borderRadius:8,fontSize:10,letterSpacing:1,fontWeight:"800"},calendar:{flexDirection:"row",flexWrap:"wrap"},day:{width:"14.2857%",height:44,alignItems:"center",justifyContent:"center"},dayLabel:{width:"14.2857%",textAlign:"center",paddingVertical:10,color:"#849183",fontSize:12}
+});
