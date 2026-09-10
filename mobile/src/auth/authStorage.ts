@@ -16,15 +16,14 @@ import { Platform } from 'react-native';
 import type { SessionData } from './authTypes';
 
 const SESSION_KEY = 'bulao_session_v1';
+const inMemoryStorage = new Map<string, string>();
 
 /**
  * Save session data to secure storage
  */
 export async function saveSession(session: SessionData): Promise<void> {
   if (Platform.OS === 'web') {
-    // Web fallback - not production secure but functional for development
-    console.warn('SecureStore not available on web, using localStorage');
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    inMemoryStorage.set(SESSION_KEY, JSON.stringify(session));
     return;
   }
 
@@ -47,7 +46,7 @@ export async function saveSession(session: SessionData): Promise<void> {
  */
 export async function getSession(): Promise<SessionData | null> {
   if (Platform.OS === 'web') {
-    const stored = localStorage.getItem(SESSION_KEY);
+    const stored = inMemoryStorage.get(SESSION_KEY);
     return stored ? JSON.parse(stored) : null;
   }
 
@@ -76,7 +75,7 @@ export async function getSession(): Promise<SessionData | null> {
  */
 export async function clearSession(): Promise<void> {
   if (Platform.OS === 'web') {
-    localStorage.removeItem(SESSION_KEY);
+    inMemoryStorage.delete(SESSION_KEY);
     return;
   }
 
@@ -93,7 +92,7 @@ export async function clearSession(): Promise<void> {
  */
 export async function hasSession(): Promise<boolean> {
   if (Platform.OS === 'web') {
-    return localStorage.getItem(SESSION_KEY) !== null;
+    return inMemoryStorage.has(SESSION_KEY);
   }
 
   try {

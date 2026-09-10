@@ -44,7 +44,7 @@ jobRoutes.post("/", requireAuth, async (c) => {
   const input = jobSchema
     .extend({ submissionKey: z.string().min(8).max(100) })
     .parse(await c.req.json());
-  if (input.startsAt < now() || input.startsAt > now() + 366 * 86400)
+  if (input.startsAt < now() - 3600 || input.startsAt > now() + 366 * 86400)
     throw new ApiError("INVALID_DATE");
   const db = drizzle(c.env.DB);
   const existing = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.ownerId, c.get("userId")), eq(jobs.submissionKey, input.submissionKey))).get();
@@ -156,20 +156,52 @@ jobRoutes.get("/provider/recent", requireAuth, async (c) => {
   const recentJobs = await c.env.DB.prepare(`
     SELECT 
       j.id,
+      j.role_id as roleId,
+      j.category_id as categoryId,
       r.name as title,
       c.name as categoryName,
       j.area,
+      j.lat,
+      j.lng,
       j.pay_paise as payPaise,
       j.pay_unit as payUnit,
       j.status,
+      j.created_at as createdAt,
       (SELECT COUNT(*) FROM interactions WHERE job_id = j.id AND kind = 'job') as applicantCount
     FROM jobs j
     JOIN roles r ON r.id = j.role_id
     JOIN categories c ON c.id = j.category_id
     WHERE j.owner_id = ?
     ORDER BY j.created_at DESC
-    LIMIT 10
+    LIMIT 20
   `).bind(userId).all();
 
-  return ok(c, recentJobs.results || []);
+  const jobsList = recentJobs.results || [];
+  const jobsWithApplicants = await Promise.all(
+    jobsList.map(async (job: any) => {
+      if (job.applicantCount > 0) {
+        const applicantsRes = await c.env.DB.prepare(`
+          SELECT 
+            u.id,
+            u.name,
+            u.photo_url as photoUrl
+          FROM interactions i
+          JOIN users u ON u.id = i.worker_id
+          WHERE i.job_id = ? AND i.kind = 'job'
+          ORDER BY i.created_at DESC
+          LIMIT 4
+        `).bind(job.id).all();
+        return {
+          ...job,
+          applicants: applicantsRes.results || [],
+        };
+      }
+      return {
+        ...job,
+        applicants: [],
+      };
+    })
+  );
+
+  return ok(c, jobsWithApplicants);
 });

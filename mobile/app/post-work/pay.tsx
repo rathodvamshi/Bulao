@@ -3,17 +3,24 @@ import { useState } from "react";
 import { View, Text, Pressable, StyleSheet, TextInput, Alert, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../../src/components/ui";
-import { PostWorkHeader, PostWorkProgress, PostWorkFooter, PostWorkSummary } from "../../src/components/PostWorkUI";
+import {
+  PostWorkHeader,
+  StageProgressIndicator,
+  PostWorkFooter,
+  PostWorkSummary,
+  ExitModal,
+} from "../../src/components/PostWorkUI";
 import { usePostWorkStore, PayUnit, PayWhen } from "../../src/features/post-work/store";
 
 export default function PostWorkPayScreen() {
-  const { payAmount, payUnit, payWhen, extras, description, setPay } = usePostWorkStore();
+  const { payAmount, payUnit, payWhen, extras, description, setPay, resetFlow } = usePostWorkStore();
 
   const [localAmount, setLocalAmount] = useState(payAmount);
   const [localUnit, setLocalUnit] = useState<PayUnit>(payUnit);
   const [localWhen, setLocalWhen] = useState<PayWhen>(payWhen);
-  const [localExtras, setLocalExtras] = useState<string[]>([]);
+  const [localExtras, setLocalExtras] = useState<string[]>(extras || []);
   const [localDescription, setLocalDescription] = useState(description);
+  const [showExitModal, setShowExitModal] = useState(false);
 
   const payUnits: { value: PayUnit; label: string }[] = [
     { value: "day", label: "Day" },
@@ -42,12 +49,39 @@ export default function PostWorkPayScreen() {
     router.push("/post-work/review");
   };
 
+  const handleConfirmExit = () => {
+    setShowExitModal(false);
+    resetFlow();
+    router.replace("/provider-home");
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <PostWorkHeader title="Payment" step={5} />
+      {/* Top Header with ← Exit */}
+      <PostWorkHeader
+        title="Payment"
+        currentStep={6}
+        totalSteps={7}
+        onExit={() => setShowExitModal(true)}
+      />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      {/* Connected Stage Progress Indicator with smooth line & tick animation */}
+      <StageProgressIndicator
+        currentStep={6}
+        onStepPress={(step) => {
+          if (step === 1 || step === 2) router.push("/post-work");
+          else if (step === 3) router.push("/post-work/details");
+          else if (step === 4) router.push("/post-work/location");
+          else if (step === 5) router.push("/post-work/schedule");
+        }}
+      />
+
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <Text style={styles.stageTag}>STAGE 6 OF 7</Text>
         <Text style={styles.question}>How much will you pay?</Text>
+        <Text style={styles.subtitle}>
+          Set a fair pay amount and when you will pay your workers.
+        </Text>
 
         <View style={styles.section}>
           <Text style={styles.label}>Amount (₹)</Text>
@@ -100,7 +134,7 @@ export default function PostWorkPayScreen() {
           <TextInput
             value={localDescription}
             onChangeText={setLocalDescription}
-            placeholder="Any other details..."
+            placeholder="Any extra instructions or details for workers..."
             placeholderTextColor={colors.mutedLight}
             multiline
             numberOfLines={3}
@@ -115,16 +149,30 @@ export default function PostWorkPayScreen() {
         />
       </ScrollView>
 
-      <PostWorkFooter onNext={handleNext} />
-      <PostWorkProgress currentStep={5} />
+      {/* Bottom Nav Buttons */}
+      <PostWorkFooter
+        onBack={() => router.back()}
+        onNext={handleNext}
+        nextDisabled={!localAmount || parseFloat(localAmount) <= 0}
+      />
+
+      {/* Exit Confirmation Modal */}
+      <ExitModal
+        visible={showExitModal}
+        onClose={() => setShowExitModal(false)}
+        onExit={handleConfirmExit}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
-  content: { flex: 1, padding: 20 },
-  question: { fontSize: 18, fontWeight: "600", color: colors.ink, marginBottom: 24 },
+  content: { flex: 1 },
+  contentContainer: { padding: 20, paddingBottom: 32, maxWidth: 640, width: "100%", alignSelf: "center" },
+  stageTag: { fontSize: 11, fontWeight: "800", color: colors.green, letterSpacing: 1, marginBottom: 4 },
+  question: { fontSize: 24, fontWeight: "800", color: colors.ink, marginBottom: 4, letterSpacing: -0.5 },
+  subtitle: { fontSize: 14, fontWeight: "500", color: colors.muted, lineHeight: 20, marginBottom: 24 },
   section: { marginBottom: 24 },
   label: { fontSize: 15, fontWeight: "700", color: colors.ink, marginBottom: 12 },
   input: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 2, borderColor: colors.line, paddingHorizontal: 16, paddingVertical: 14, fontSize: 17, fontWeight: "600", color: colors.ink },

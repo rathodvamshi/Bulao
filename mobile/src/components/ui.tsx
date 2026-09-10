@@ -98,24 +98,29 @@ export function Heading({ children }: { children: ReactNode }) {
 // ─── Copy / Body Text ─────────────────────────────────────────────────────────
 export function Copy({
   children,
-  small = false,
-  center = false,
-  bold = false,
+  small,
+  center,
+  bold,
+  style,
 }: {
   children: ReactNode;
   small?: boolean;
   center?: boolean;
   bold?: boolean;
+  style?: any;
 }) {
   return (
     <Text
-      style={{
-        color: colors.muted,
-        fontSize: small ? 13 : 16,
-        lineHeight: small ? 20 : 26,
-        fontWeight: bold ? "600" : "400",
-        textAlign: center ? "center" : "left",
-      }}
+      style={[
+        {
+          color: colors.muted,
+          fontSize: small ? 13 : 16,
+          lineHeight: small ? 20 : 26,
+          fontWeight: bold ? "600" : "400",
+          textAlign: center ? "center" : "left",
+        },
+        style,
+      ]}
     >
       {children}
     </Text>

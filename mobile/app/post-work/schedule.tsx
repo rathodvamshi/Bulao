@@ -4,10 +4,16 @@ import { View, Text, Pressable, StyleSheet, Alert, Platform, ScrollView } from "
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { colors } from "../../src/components/ui";
+import {
+  PostWorkHeader,
+  StageProgressIndicator,
+  PostWorkFooter,
+  ExitModal,
+} from "../../src/components/PostWorkUI";
 import { usePostWorkStore, Duration, Hours } from "../../src/features/post-work/store";
 
 export default function PostWorkScheduleScreen() {
-  const { startDate, duration, endDate, hours, startTime, endTime, setSchedule } = usePostWorkStore();
+  const { startDate, duration, endDate, hours, startTime, endTime, setSchedule, resetFlow } = usePostWorkStore();
 
   const [localStartDate, setLocalStartDate] = useState(startDate);
   const [localDuration, setLocalDuration] = useState<Duration>(duration);
@@ -19,6 +25,7 @@ export default function PostWorkScheduleScreen() {
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -53,20 +60,38 @@ export default function PostWorkScheduleScreen() {
     router.push("/post-work/pay");
   };
 
+  const handleConfirmExit = () => {
+    setShowExitModal(false);
+    resetFlow();
+    router.replace("/provider-home");
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>←</Text>
-        </Pressable>
-        <Text style={styles.title}>Schedule</Text>
-        <View style={styles.stepIndicator}>
-          <Text style={styles.stepText}>Step 4/6</Text>
-        </View>
-      </View>
+      {/* Top Header with ← Exit */}
+      <PostWorkHeader
+        title="Schedule"
+        currentStep={5}
+        totalSteps={7}
+        onExit={() => setShowExitModal(true)}
+      />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.question}>When does work start?</Text>
+      {/* Connected Stage Progress Indicator with smooth line & tick animation */}
+      <StageProgressIndicator
+        currentStep={5}
+        onStepPress={(step) => {
+          if (step === 1 || step === 2) router.push("/post-work");
+          else if (step === 3) router.push("/post-work/details");
+          else if (step === 4) router.push("/post-work/location");
+        }}
+      />
+
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <Text style={styles.stageTag}>STAGE 5 OF 7</Text>
+        <Text style={styles.question}>When will the work happen?</Text>
+        <Text style={styles.subtitle}>
+          Pick the start date, how many days, and working hours.
+        </Text>
 
         <View style={styles.quickDateRow}>
           <Pressable onPress={() => setLocalStartDate(today)} style={[styles.quickDateBtn, localStartDate.toDateString() === today.toDateString() && styles.quickDateBtnActive]}>
@@ -131,13 +156,13 @@ export default function PostWorkScheduleScreen() {
         {localHours === "custom" && (
           <View style={styles.timeRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.timeLabel}>Start</Text>
+              <Text style={styles.timeLabel}>Start Time</Text>
               <Pressable onPress={() => setShowStartTimePicker(true)} style={styles.timeBtn}>
                 <Text style={styles.timeText}>{formatTime(localStartTime)}</Text>
               </Pressable>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.timeLabel}>End</Text>
+              <Text style={styles.timeLabel}>End Time</Text>
               <Pressable onPress={() => setShowEndTimePicker(true)} style={styles.timeBtn}>
                 <Text style={styles.timeText}>{formatTime(localEndTime)}</Text>
               </Pressable>
@@ -146,10 +171,10 @@ export default function PostWorkScheduleScreen() {
         )}
 
         {showStartTimePicker && (
-          <DateTimePicker value={new Date(`2000-01-01T${localStartTime}`)} mode="time" display={Platform.OS === "ios" ? "spinner" : "default"} onChange={(event, date) => { setShowStartTimePicker(Platform.OS === "ios"); if (date) { const hours = date.getHours().toString().padStart(2, "0"); const minutes = date.getMinutes().toString().padStart(2, "0"); setLocalStartTime(`${hours}:${minutes}`); } }} />
+          <DateTimePicker value={new Date(`2000-01-01T${localStartTime}`)} mode="time" display={Platform.OS === "ios" ? "spinner" : "default"} onChange={(event, date) => { setShowStartTimePicker(Platform.OS === "ios"); if (date) { const h = date.getHours().toString().padStart(2, "0"); const m = date.getMinutes().toString().padStart(2, "0"); setLocalStartTime(`${h}:${m}`); } }} />
         )}
         {showEndTimePicker && (
-          <DateTimePicker value={new Date(`2000-01-01T${localEndTime}`)} mode="time" display={Platform.OS === "ios" ? "spinner" : "default"} onChange={(event, date) => { setShowEndTimePicker(Platform.OS === "ios"); if (date) { const hours = date.getHours().toString().padStart(2, "0"); const minutes = date.getMinutes().toString().padStart(2, "0"); setLocalEndTime(`${hours}:${minutes}`); } }} />
+          <DateTimePicker value={new Date(`2000-01-01T${localEndTime}`)} mode="time" display={Platform.OS === "ios" ? "spinner" : "default"} onChange={(event, date) => { setShowEndTimePicker(Platform.OS === "ios"); if (date) { const h = date.getHours().toString().padStart(2, "0"); const m = date.getMinutes().toString().padStart(2, "0"); setLocalEndTime(`${h}:${m}`); } }} />
         )}
 
         <View style={styles.summary}>
@@ -161,31 +186,29 @@ export default function PostWorkScheduleScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
-        <Pressable onPress={handleNext} style={styles.nextButton}>
-          <Text style={styles.nextButtonText}>Continue</Text>
-        </Pressable>
-      </View>
+      {/* Bottom Nav Buttons */}
+      <PostWorkFooter
+        onBack={() => router.back()}
+        onNext={handleNext}
+      />
 
-      <View style={styles.progressBar}>
-        {[1, 2, 3, 4, 5, 6].map((step) => (
-          <View key={step} style={[styles.progressDot, step <= 4 && styles.progressDotActive]} />
-        ))}
-      </View>
+      {/* Exit Confirmation Modal */}
+      <ExitModal
+        visible={showExitModal}
+        onClose={() => setShowExitModal(false)}
+        onExit={handleConfirmExit}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 16, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.line },
-  backButton: { width: 40, height: 40, justifyContent: "center" },
-  backText: { fontSize: 24, color: colors.green },
-  title: { flex: 1, fontSize: 20, fontWeight: "700", color: colors.ink, marginLeft: 8 },
-  stepIndicator: { backgroundColor: colors.greenLight, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  stepText: { fontSize: 12, fontWeight: "600", color: colors.green },
-  content: { flex: 1, padding: 20 },
-  question: { fontSize: 18, fontWeight: "600", color: colors.ink, marginBottom: 20 },
+  content: { flex: 1 },
+  contentContainer: { padding: 20, paddingBottom: 32, maxWidth: 640, width: "100%", alignSelf: "center" },
+  stageTag: { fontSize: 11, fontWeight: "800", color: colors.green, letterSpacing: 1, marginBottom: 4 },
+  question: { fontSize: 24, fontWeight: "800", color: colors.ink, marginBottom: 4, letterSpacing: -0.5 },
+  subtitle: { fontSize: 14, fontWeight: "500", color: colors.muted, lineHeight: 20, marginBottom: 20 },
   quickDateRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
   quickDateBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 2, borderColor: colors.line, backgroundColor: colors.white, alignItems: "center" },
   quickDateBtnActive: { borderColor: colors.green, backgroundColor: colors.green },
@@ -215,10 +238,4 @@ const styles = StyleSheet.create({
   summaryIcon: { fontSize: 28 },
   summaryText: { fontSize: 16, fontWeight: "700", color: colors.ink },
   summarySubtext: { fontSize: 13, fontWeight: "500", color: colors.muted, marginTop: 2 },
-  footer: { padding: 20, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.line },
-  nextButton: { backgroundColor: colors.green, borderRadius: 16, paddingVertical: 16, alignItems: "center" },
-  nextButtonText: { fontSize: 17, fontWeight: "700", color: colors.white },
-  progressBar: { flexDirection: "row", justifyContent: "center", gap: 8, paddingVertical: 12, backgroundColor: colors.white },
-  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.line },
-  progressDotActive: { backgroundColor: colors.green, width: 24 },
 });

@@ -16,6 +16,8 @@ export type SavedPlace = {
   address: string;
 };
 
+export type GenderType = "any" | "male" | "female" | "custom";
+
 export type PostWorkState = {
   // Step 1: Category + Role
   category: string;
@@ -23,10 +25,14 @@ export type PostWorkState = {
   role: string;
   roleName: string;
 
-  // Step 2: What & how many
+  // Step 2 / Stage 3: What, how many, gender & experience
   title: string;
   workers: number;
+  genderType: GenderType;
+  maleWorkers: number;
+  femaleWorkers: number;
   experience: ExperienceLevel;
+  experiences: ExperienceLevel[];
 
   // Step 3: Where
   latitude: number | null;
@@ -58,7 +64,16 @@ export type PostWorkState = {
   // Actions
   setCategory: (id: string, name: string) => void;
   setRole: (id: string, name: string) => void;
-  setDetails: (title: string, workers: number, experience: ExperienceLevel) => void;
+  setDetails: (
+    title: string,
+    workers: number,
+    experience: ExperienceLevel,
+    genderType?: GenderType,
+    maleWorkers?: number,
+    femaleWorkers?: number,
+    description?: string,
+    experiences?: ExperienceLevel[]
+  ) => void;
   setLocation: (
     lat: number,
     lng: number,
@@ -96,7 +111,11 @@ const initialState = {
   roleName: "",
   title: "",
   workers: 1,
+  genderType: "any" as GenderType,
+  maleWorkers: 1,
+  femaleWorkers: 0,
   experience: "any" as ExperienceLevel,
+  experiences: ["any"] as ExperienceLevel[],
   latitude: null,
   longitude: null,
   locality: "",
@@ -131,8 +150,26 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
       title: `${name} needed`,
     })),
 
-  setDetails: (title, workers, experience) =>
-    set({ title, workers, experience }),
+  setDetails: (
+    title,
+    workers,
+    experience,
+    genderType = "any",
+    maleWorkers = 1,
+    femaleWorkers = 0,
+    description = "",
+    experiences = ["any"]
+  ) =>
+    set((state) => ({
+      title,
+      workers,
+      experience,
+      experiences,
+      genderType,
+      maleWorkers,
+      femaleWorkers,
+      description: description !== undefined ? description : state.description,
+    })),
 
   setLocation: (lat, lng, locality, address = "", savedPlaceId?: string | null) =>
     set({
