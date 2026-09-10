@@ -12,6 +12,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { AuthState, AuthStatus, UserData, SessionData } from './authTypes';
 import * as authService from './authService';
+import { setAuthTokenGetter } from '../api/client';
 
 type AuthContextValue = {
   // Current auth state
@@ -78,11 +79,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const result = await authService.bootstrapAuth();
 
       if (result.status === 'authenticated') {
+        setAuthTokenGetter(() => result.session.token);
         setUser(result.user);
         setSession(result.session);
         setStatus('authenticated');
         setError(null);
       } else if (result.status === 'unauthenticated') {
+        setAuthTokenGetter(() => null);
         setUser(null);
         setSession(null);
         setStatus('unauthenticated');
@@ -121,6 +124,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
    */
   const login = useCallback((user: UserData, session: SessionData) => {
     console.log('Auth context: Login');
+    // Publish the token before navigating or mounting protected queries.
+    setAuthTokenGetter(() => session.token);
     setUser(user);
     setSession(session);
     setStatus('authenticated');
@@ -134,6 +139,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     console.log('Auth context: Logout');
     
     const currentToken = session?.token || null;
+    setAuthTokenGetter(() => null);
 
     // Clear state immediately for responsive UX
     setUser(null);

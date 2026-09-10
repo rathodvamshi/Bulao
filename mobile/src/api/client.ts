@@ -50,7 +50,7 @@ export async function api<T>(path: string, body?: unknown, method?: string): Pro
     
     // Handle 401 - session expired
     // IMPORTANT: Only trigger logout if this is NOT the verify-widget-otp endpoint
-    if (response.status === 401 && token && handleAuthExpired && !path.includes('verify-widget-otp')) {
+    if (response.status === 401 && token && token === getAuthToken?.() && handleAuthExpired && !path.includes('verify-widget-otp')) {
       console.log('api() triggering auth expired handler');
       handleAuthExpired();
     }

@@ -109,7 +109,7 @@ export async function logout(token: string): Promise<void> {
  * 
  * This is called by the auth screen after MSG91 OTP verification succeeds.
  */
-export async function createSession(identifier: string, requestId: string): Promise<{
+export async function createSession(identifier: string, accessToken: string): Promise<{
   token: string;
   expiresAt: number;
   user: UserData;
@@ -124,7 +124,7 @@ export async function createSession(identifier: string, requestId: string): Prom
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ identifier, requestId }),
+        body: JSON.stringify({ identifier, accessToken }),
       },
       API_TIMEOUT
     );
@@ -135,9 +135,11 @@ export async function createSession(identifier: string, requestId: string): Prom
       const data = await response.json().catch(() => ({}));
       console.error('authApi: Session creation failed:', data);
       throw new AuthError(
-        'AUTH_REQUIRED',
-        data.error?.message || 'Session creation failed',
-        false
+        data.error?.code || 'SERVER_ERROR',
+        response.status === 401 || response.status === 404
+          ? 'The login service needs an update. Please contact support.'
+          : data.error?.message || 'Could not finish signing in. Please try again.',
+        response.status >= 500
       );
     }
 

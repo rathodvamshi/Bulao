@@ -10,7 +10,7 @@ const choices = [
     hint: "workHint",
     icon: "briefcase-outline",
     color: "#E9F1C4",
-    path: "/explore?kind=job",
+    path: "/find-work",
   },
   {
     title: "hire",

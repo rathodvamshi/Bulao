@@ -102,11 +102,11 @@ export async function bootstrapAuth(): Promise<BootstrapResult> {
  */
 export async function completeLogin(
   identifier: string,
-  requestId: string
+  accessToken: string
 ): Promise<{ user: UserData; session: SessionData }> {
   console.log('Auth: Creating session after OTP verification');
 
-  const result = await authApi.createSession(identifier, requestId);
+  const result = await authApi.createSession(identifier, accessToken);
 
   const session: SessionData = {
     token: result.token,

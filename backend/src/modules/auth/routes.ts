@@ -6,6 +6,7 @@ import { authFingerprint, hash, now, requireAuth } from "./session";
 import { AUTH_POLICY as P, phoneSchema, otpSchema } from "./policy";
 import { audit } from "./audit";
 import { createUserSession, findActiveSession, revokeSession } from "./repository";
+import { verifyWidgetToken } from "../../providers/otp/widget";
 
 export const auth = new Hono<AppEnv>();
 auth.use("*", async (c, next) => {
@@ -71,6 +72,36 @@ for (const action of ["send", "resend", "verify"] as const) {
     }
   });
 }
+
+// Public login exchange: MSG91 proof is required, an existing Bulao session is not.
+auth.post("/verify-widget-otp", async (c) => {
+  const input = z.object({ identifier: phoneSchema, accessToken: z.string().min(1).max(8192) }).parse(await c.req.json());
+  const ip = c.req.header("CF-Connecting-IP");
+  if (!ip) throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
+  const ipHash = await authFingerprint(c.env.AUTH_HASH_KEY, `ip:${ip}`);
+  const phoneHash = await authFingerprint(c.env.AUTH_HASH_KEY, `phone:${input.identifier}`);
+  let userId: string | null = null;
+  try {
+    await coordinated(c, `ip:${ipHash}`, "limit-verify");
+    const verifiedPhone = await verifyWidgetToken(c.env.MSG91_AUTH_KEY, input.accessToken);
+    if (verifiedPhone !== input.identifier)
+      throw new ApiError("WIDGET_PHONE_MISMATCH", 400, "The verified number does not match. Please request a new OTP.");
+    const at = now();
+    const token = [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, "0")).join("");
+    const expiresAt = at + P.sessionLifetime;
+    // Preserve the phone representation used by existing widget accounts.
+    const user = await createUserSession(c.env.DB, verifiedPhone.slice(1), await hash(token), at, expiresAt);
+    if (!user) throw new ApiError("UNAUTHORIZED", 403, "This account cannot sign in. Please contact support.");
+    userId = user.id;
+    audit(c, { eventType: "AUTH_WIDGET_VERIFY_SUCCESS", success: true, userId, phoneHash, ipHash, code: null });
+    return ok(c, { token, expiresAt, user });
+  } catch (error) {
+    const code = error instanceof ApiError ? error.code : "INTERNAL_ERROR";
+    console.error(JSON.stringify({ event: "AUTH_WIDGET_VERIFY_FAILED", requestId: c.get("requestId"), code }));
+    audit(c, { eventType: "AUTH_WIDGET_VERIFY_FAILED", success: false, userId, phoneHash, ipHash, code });
+    throw error;
+  }
+});
 
 for (const path of ["/session", "/me"]) auth.get(path, async (c) => {
   const header = c.req.header("Authorization");

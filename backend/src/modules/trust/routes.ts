@@ -4,8 +4,7 @@ import type { AppEnv } from "../../config/env";
 import { ApiError, ok } from "../../middleware/errors";
 import { requireAuth, now, rateLimit } from "../auth/session";
 export const trust = new Hono<AppEnv>();
-trust.use("*", requireAuth);
-trust.post("/reviews", async (c) => {
+trust.post("/reviews", requireAuth, async (c) => {
   const input = z
     .object({
       interactionId: z.string().uuid(),
@@ -36,7 +35,7 @@ trust.post("/reviews", async (c) => {
     );
   return ok(c, result);
 });
-trust.post("/blocks", async (c) => {
+trust.post("/blocks", requireAuth, async (c) => {
   const { targetId } = z
     .object({ targetId: z.string().uuid() })
     .parse(await c.req.json());
@@ -48,7 +47,7 @@ trust.post("/blocks", async (c) => {
     .run();
   return ok(c, { blocked: true });
 });
-trust.post("/reports", async (c) => {
+trust.post("/reports", requireAuth, async (c) => {
   const input = z
     .object({
       targetId: z.string().uuid(),

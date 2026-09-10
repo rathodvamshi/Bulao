@@ -40,6 +40,11 @@ export type ApiErrorCode =
   | 'SERVER_ERROR'
   | 'VALIDATION_ERROR'
   | 'RATE_LIMITED'
+  | 'PROVIDER_AUTH_REJECTED'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'OTP_RATE_LIMITED'
+  | 'WIDGET_TOKEN_INVALID'
+  | 'WIDGET_PHONE_MISMATCH'
   | 'UNKNOWN';
 
 export class AuthError extends Error {

@@ -6,7 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { OTPWidget } from "@msg91comm/sendotp-react-native";
+import { OTPWidget, widgetProof } from "../src/features/auth/widget";
 import { useAuth, completeLogin } from "../src/auth";
 
 // MSG91 Widget Configuration from environment
@@ -85,16 +85,14 @@ export default function Auth() {
     setLoading(true);
 
     try {
-      console.log("MSG91: Sending OTP to +91" + phone);
       
       // Use MSG91 Widget to send OTP
-      const identifier = "+91" + phone;
+      const identifier = "91" + phone;
       const response = await OTPWidget.sendOTP({ identifier });
       
-      console.log("MSG91: OTP sent response:", JSON.stringify(response));
       
       // SDK returns request ID in message field, not requestId
-      const requestId = response.requestId || response.message;
+      const requestId = response.reqId || response.requestId || response.message;
       
       if (requestId && response.type === "success") {
         // Create challenge for backend tracking
@@ -221,10 +219,10 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
   const [clock, setClock] = useState(Date.now());
   const [resendAt, setResendAt] = useState(() => Date.now() + challenge.resendAfter * 1000);
   const [expiresAt, setExpiresAt] = useState(() => Date.now() + challenge.expiresIn * 1000);
-  const [blockedUntil, setBlockedUntil] = useState(0);
   const inputs = useRef<Array<TextInput | null>>([]);
   const busy = useRef(false);
   const mounted = useRef(true);
+  const verifiedAccessToken = useRef<string | null>(null);
   
   const auth = useAuth();
   const router = useRouter();
@@ -235,54 +233,36 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
     return () => { mounted.current = false; clearInterval(timer); };
   }, []);
 
-  const resendSeconds = Math.max(0, Math.ceil((Math.max(resendAt, blockedUntil) - clock) / 1000));
+  const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
   const expired = clock >= expiresAt;
-  const blocked = clock < blockedUntil;
 
   const showFailure = (failure: unknown) => {
     setError(failure instanceof Error ? failure.message : "Please try again.");
-    if (failure instanceof Error && failure.message.includes("retry")) {
-      setBlockedUntil(Date.now() + 600 * 1000); // 10 min block
-    }
+
   };
 
   // Verify OTP using MSG91 Widget and create session
   const onVerify = async () => {
-    if (busy.current || otp.some((digit) => !digit) || expired || blocked) return;
+    if (busy.current || otp.some((digit) => !digit) || expired) return;
     busy.current = true;
     setLoading("verify");
     setError("");
 
     try {
-      console.log("MSG91: Verifying OTP:", otp.join(""));
       
-      // Verify with MSG91 Widget
-      const verifyResponse = await OTPWidget.verifyOTP({
-        reqId: current.requestId,
-        otp: otp.join(""),
-      });
-
-      console.log("MSG91: Verify response:", JSON.stringify(verifyResponse));
-
-      // Check if OTP verification succeeded
-      if (verifyResponse.type === "success") {
-        // Now create session with our backend using the new auth service
-        const identifier = "+91" + phone;
-        
-        const { user, session } = await completeLogin(identifier, current.requestId);
-        
-        if (mounted.current) {
-          // Login successful - update auth context
-          auth.login(user, session);
-          
-          // Clear OTP input
-          setOtp(["", "", "", ""]);
-          
-          // Navigate to home (will be handled by navigation in index.tsx)
-          router.replace("/(tabs)/profile");
-        }
-      } else {
-        throw new Error(verifyResponse.message || "Invalid OTP");
+      // Retain proof in memory if the session exchange needs a network retry.
+      if (!verifiedAccessToken.current) {
+        verifiedAccessToken.current = widgetProof(await OTPWidget.verifyOTP({
+          reqId: current.requestId,
+          otp: otp.join(""),
+        }));
+      }
+      const { user, session } = await completeLogin("91" + phone, verifiedAccessToken.current);
+      if (mounted.current) {
+        auth.login(user, session);
+        verifiedAccessToken.current = null;
+        setOtp(["", "", "", ""]);
+        router.replace("/(tabs)/profile");
       }
     } catch (failure) {
       if (mounted.current) showFailure(failure);
@@ -307,49 +287,19 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
         retryChannel: 11, // SMS
       });
 
-      console.log("MSG91: Retry response:", JSON.stringify(retryResponse));
 
-      // SDK returns request ID in message field, not requestId
-      const retryRequestId = retryResponse.requestId || retryResponse.message;
-
-      if (retryRequestId && retryResponse.type === "success") {
-        const newChallenge: OtpChallenge = {
-          requestId: retryRequestId,
-          expiresIn: 300,
-          resendAfter: 60,
-          otpLength: 4,
-        };
-        
-        if (!mounted.current) return;
-        setCurrent(newChallenge);
-        setOtp(["", "", "", ""]);
-        setExpiresAt(Date.now() + newChallenge.expiresIn * 1000);
-        setResendAt(Date.now() + newChallenge.resendAfter * 1000);
-        inputs.current[0]?.focus();
-      } else {
-        // If retry doesn't return new requestId, send fresh OTP
-        const identifier = "+91" + phone;
-        const sendResponse = await OTPWidget.sendOTP({ identifier });
-        
-        const sendRequestId = sendResponse.requestId || sendResponse.message;
-        if (sendRequestId && sendResponse.type === "success") {
-          const newChallenge: OtpChallenge = {
-            requestId: sendRequestId,
-            expiresIn: 300,
-            resendAfter: 60,
-            otpLength: 4,
-          };
-          
-          if (!mounted.current) return;
-          setCurrent(newChallenge);
-          setOtp(["", "", "", ""]);
-          setExpiresAt(Date.now() + newChallenge.expiresIn * 1000);
-          setResendAt(Date.now() + newChallenge.resendAfter * 1000);
-          inputs.current[0]?.focus();
-        } else {
-          throw new Error(sendResponse.message || "Failed to resend OTP");
-        }
+      if (retryResponse?.type !== "success") {
+        throw new Error(`MSG91: ${retryResponse?.message || "Could not resend OTP. Please try again."}`);
       }
+      // Retry can keep the original reqId; its message may only be a status label.
+      const retryRequestId = retryResponse.reqId || retryResponse.requestId || current.requestId;
+      if (!mounted.current) return;
+      verifiedAccessToken.current = null;
+      setCurrent({ ...current, requestId: retryRequestId });
+      setOtp(["", "", "", ""]);
+      setExpiresAt(Date.now() + current.expiresIn * 1000);
+      setResendAt(Date.now() + current.resendAfter * 1000);
+      inputs.current[0]?.focus();
     } catch (failure) {
       if (mounted.current) showFailure(failure);
     } finally {
@@ -370,7 +320,7 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
     if (digits) inputs.current[Math.min(3, idx + digits.length)]?.focus();
   };
 
-  const canVerify = otp.every(Boolean) && !expired && !blocked && !loading;
+  const canVerify = otp.every(Boolean) && !expired && !loading;
 
   return (
     <View style={styles.otpCard}>
@@ -384,7 +334,7 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
             keyboardType="number-pad"
             maxLength={4}
             value={digit}
-            editable={!loading && !expired && !blocked}
+            editable={!loading && !expired}
             onChangeText={(value) => onChange(index, value)}
             onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === "Backspace" && !digit && index > 0) inputs.current[index - 1]?.focus(); }}
             autoComplete={index === 0 ? "sms-otp" : "off"}

@@ -135,62 +135,6 @@ app.post("/api/v1/webhooks/msg91", async (c) => {
   }
 });
 
-// MSG91 Widget OTP Verification Endpoint
-app.post("/api/v1/auth/verify-widget-otp", async (c) => {
-  try {
-    const body = await c.req.json();
-    const identifier = body.identifier || body.phone || "";
-    const requestId = body.requestId || "";
-    
-    // Normalize phone to remove + prefix (D1 stores without +)
-    let phone = identifier.replace(/^\+/, ''); // Remove leading +
-    
-    // Ensure it's in the format: 917569408235 (country code + number)
-    if (phone.length === 10) {
-      phone = '91' + phone; // Add India code if just 10 digits
-    }
-
-    console.log(JSON.stringify({
-      event: "WIDGET_OTP_VERIFIED",
-      requestId: requestId,
-      identifier: identifier.slice(-4),
-      normalizedPhone: phone.slice(-4),
-    }));
-
-    // Create session using the proper auth module function
-    const at = Math.floor(Date.now() / 1000);
-    const expiresAt = at + 30 * 24 * 60 * 60;  // 30 days
-    const token = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
-    
-    // Import hash from auth module
-    const { hash } = await import("./modules/auth/session");
-    const tokenHash = await hash(token);
-
-    // Import createUserSession from auth repository
-    const { createUserSession } = await import("./modules/auth/repository");
-    const user = await createUserSession(c.env.DB, phone, tokenHash, at, expiresAt);
-
-    if (!user) {
-      throw new ApiError("UNAUTHORIZED", 403, "This account cannot sign in. Please contact support.");
-    }
-
-    console.log(JSON.stringify({
-      event: "SESSION_CREATED",
-      userId: user.id,
-      tokenLength: token.length,
-      expiresAt,
-    }));
-
-    return ok(c, { token, expiresAt, user });
-  } catch (error) {
-    console.error(JSON.stringify({ event: "WIDGET_OTP_ERROR", error: String(error) }));
-    if (error instanceof ZodError || error instanceof SyntaxError) {
-      return c.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid request format" } }, 400);
-    }
-    throw error;
-  }
-});
-
 app.route("/api/v1/auth", auth);
 app.route("/api/auth", auth);
 app.route("/api/v1/images", images);

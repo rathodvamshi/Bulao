@@ -2,9 +2,10 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthProvider } from "../src/auth";
 import { set401Handler } from "../src/api/apiClient";
-import { setAuthTokenGetter, setAuthExpiredHandler } from "../src/api/client";
+import { setAuthExpiredHandler } from "../src/api/client";
 import { useAuth } from "../src/auth";
 
 const client = new QueryClient({
@@ -26,7 +27,6 @@ function AppContent() {
   // Setup handlers ONCE on mount
   useEffect(() => {
     // Setup API client auth integration - use ref to get latest auth
-    setAuthTokenGetter(() => authRef.current.session?.token || null);
     setAuthExpiredHandler(() => {
       console.log('API client: Session expired, logging out');
       authRef.current.logout();
@@ -48,7 +48,11 @@ function AppContent() {
     }
   }, [auth.status]);
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
+      <Stack screenOptions={{ headerShown: false }} />
+    </SafeAreaView>
+  );
 }
 
 export default function Layout() {

@@ -7,19 +7,30 @@ import {
   StyleSheet,
   ActivityIndicator,
   ImageBackground,
+  Platform,
 } from "react-native";
 import type { ReactNode } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { t } from "../i18n/en";
+
 export const colors = {
-  ink: "#183E33",
-  green: "#21634D",
-  muted: "#64756D",
-  paper: "#FAFAF5",
-  line: "#DFE6DD",
-  lime: "#E6F2A8",
+  ink: "#0D2318",         // Very dark green-black — maximum readability
+  green: "#1A6645",       // Rich forest green
+  greenDark: "#124A31",   // Darker green for pressed states
+  greenLight: "#E8F5EE",  // Light green tint for backgrounds
+  muted: "#3D5246",       // Dark enough to read on white or light backgrounds
+  mutedLight: "#6B8275",  // For placeholders only
+  paper: "#F4F7F3",       // Off-white green-tinted background
+  white: "#FFFFFF",
+  line: "#C8D8CE",
+  lime: "#C8E87A",
+  error: "#B03A2E",
+  errorBg: "#FEECEB",
+  success: "#1A7A4A",
 };
+
+// ─── Screen ────────────────────────────────────────────────────────────────────
 export function Screen({
   children,
   title,
@@ -35,6 +46,7 @@ export function Screen({
     <ScrollView
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={s.screen}
+      showsVerticalScrollIndicator={false}
     >
       {back && (
         <Pressable
@@ -73,6 +85,8 @@ export function Screen({
     </SafeAreaView>
   );
 }
+
+// ─── Heading ───────────────────────────────────────────────────────────────────
 export function Heading({ children }: { children: ReactNode }) {
   return (
     <Text accessibilityRole="header" style={s.heading}>
@@ -80,36 +94,59 @@ export function Heading({ children }: { children: ReactNode }) {
     </Text>
   );
 }
+
+// ─── Copy / Body Text ─────────────────────────────────────────────────────────
 export function Copy({
   children,
   small = false,
+  center = false,
+  bold = false,
 }: {
   children: ReactNode;
   small?: boolean;
+  center?: boolean;
+  bold?: boolean;
 }) {
   return (
     <Text
       style={{
         color: colors.muted,
-        fontSize: small ? 14 : 17,
-        lineHeight: small ? 21 : 26,
+        fontSize: small ? 13 : 16,
+        lineHeight: small ? 20 : 26,
+        fontWeight: bold ? "600" : "400",
+        textAlign: center ? "center" : "left",
       }}
     >
       {children}
     </Text>
   );
 }
+
+// ─── Button ───────────────────────────────────────────────────────────────────
 export function Button({
   label,
   onPress,
   disabled = false,
   secondary = false,
+  danger = false,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   secondary?: boolean;
+  danger?: boolean;
 }) {
+  const bgColor = danger
+    ? colors.errorBg
+    : secondary
+    ? colors.greenLight
+    : colors.green;
+  const textColor = danger
+    ? colors.error
+    : secondary
+    ? colors.greenDark
+    : colors.white;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -118,15 +155,17 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         s.button,
-        secondary && s.secondary,
-        { opacity: disabled ? 0.45 : pressed ? 0.8 : 1 },
+        { backgroundColor: bgColor },
+        pressed && { opacity: 0.75 },
+        disabled && { opacity: 0.4 },
       ]}
     >
       <Text
         style={{
-          fontSize: 17,
+          fontSize: 16,
           fontWeight: "700",
-          color: secondary ? colors.ink : "#FFF",
+          color: textColor,
+          letterSpacing: 0.2,
         }}
       >
         {label}
@@ -134,9 +173,41 @@ export function Button({
     </Pressable>
   );
 }
-export function Card({ children }: { children: ReactNode }) {
-  return <View style={s.card}>{children}</View>;
+
+// ─── Card ─────────────────────────────────────────────────────────────────────
+export function Card({
+  children,
+  accent = false,
+}: {
+  children: ReactNode;
+  accent?: boolean;
+}) {
+  return (
+    <View style={[s.card, accent && { borderColor: colors.green, borderWidth: 1.5 }]}>
+      {children}
+    </View>
+  );
 }
+
+// ─── Section Header ──────────────────────────────────────────────────────────
+export function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <Text
+      style={{
+        fontSize: 11,
+        fontWeight: "700",
+        color: colors.mutedLight,
+        letterSpacing: 1.2,
+        textTransform: "uppercase",
+        marginBottom: -8,
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+// ─── Field ────────────────────────────────────────────────────────────────────
 export function Field({
   label,
   value,
@@ -161,7 +232,7 @@ export function Field({
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         placeholder={placeholder}
-        placeholderTextColor="#829087"
+        placeholderTextColor={colors.mutedLight}
         multiline={multiline}
         style={[
           s.input,
@@ -171,6 +242,8 @@ export function Field({
     </View>
   );
 }
+
+// ─── Chip ─────────────────────────────────────────────────────────────────────
 export function Chip({
   label,
   selected,
@@ -195,9 +268,9 @@ export function Chip({
     >
       <Text
         style={{
-          fontSize: 15,
+          fontSize: 14,
           fontWeight: "600",
-          color: selected ? "white" : colors.ink,
+          color: selected ? colors.white : colors.ink,
         }}
       >
         {label}
@@ -205,14 +278,18 @@ export function Chip({
     </Pressable>
   );
 }
+
+// ─── Loading ──────────────────────────────────────────────────────────────────
 export function Loading() {
   return (
-    <View style={{ gap: 12, padding: 24 }}>
-      <ActivityIndicator color={colors.green} />
-      <Copy>{t("loading")}</Copy>
+    <View style={{ gap: 14, padding: 32, alignItems: "center" }}>
+      <ActivityIndicator color={colors.green} size="large" />
+      <Copy center>{t("loading")}</Copy>
     </View>
   );
 }
+
+// ─── Failure ──────────────────────────────────────────────────────────────────
 export function Failure({
   error,
   retry,
@@ -221,21 +298,28 @@ export function Failure({
   retry?: () => void;
 }) {
   return (
-    <Card>
+    <View style={s.errorCard}>
       <Text
         accessibilityRole="alert"
-        style={{ color: "#913E2B", fontSize: 16 }}
+        style={{ color: colors.error, fontSize: 15, fontWeight: "500", lineHeight: 22 }}
       >
         {error instanceof Error ? error.message : t("error")}
       </Text>
       {retry && <Button label={t("retry")} onPress={retry} secondary />}
-    </Card>
+    </View>
   );
 }
+
+// ─── Divider ──────────────────────────────────────────────────────────────────
+export function Divider() {
+  return <View style={s.divider} />;
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 export const s = StyleSheet.create({
   screen: {
-    padding: 24,
-    paddingBottom: 40,
+    padding: 20,
+    paddingBottom: 48,
     gap: 20,
     width: "100%",
     maxWidth: 680,
@@ -243,48 +327,87 @@ export const s = StyleSheet.create({
   },
   heading: {
     fontSize: 30,
-    fontWeight: "700",
+    fontWeight: "800",
     color: colors.ink,
     letterSpacing: -0.8,
     lineHeight: 37,
   },
-  label: { fontSize: 17, fontWeight: "600", color: colors.ink },
-  link: { color: colors.green, fontSize: 16, fontWeight: "600" },
+  label: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.ink,
+    letterSpacing: 0.1,
+  },
+  link: {
+    color: colors.green,
+    fontSize: 16,
+    fontWeight: "600",
+  },
   button: {
     minHeight: 54,
     borderRadius: 16,
-    padding: 16,
-    backgroundColor: colors.green,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     alignItems: "center",
     justifyContent: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+      },
+      android: { elevation: 2 },
+    }),
   },
-  secondary: { backgroundColor: "#EDF1E7" },
   card: {
-    backgroundColor: "white",
+    backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 22,
-    padding: 20,
-    gap: 12,
+    padding: 22,
+    gap: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.07,
+        shadowRadius: 14,
+      },
+      android: { elevation: 3 },
+    }),
   },
   input: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.line,
     borderRadius: 14,
     padding: 16,
-    fontSize: 18,
+    fontSize: 17,
     color: colors.ink,
-    backgroundColor: "white",
+    backgroundColor: colors.white,
     minHeight: 54,
   },
   chip: {
-    minHeight: 48,
+    minHeight: 44,
     paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingVertical: 12,
     borderRadius: 30,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.line,
-    backgroundColor: "white",
+    backgroundColor: colors.white,
   },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  errorCard: {
+    backgroundColor: colors.errorBg,
+    borderRadius: 16,
+    padding: 18,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#F5C6C3",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.line,
+    marginVertical: 4,
+  },
 });
