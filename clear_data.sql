@@ -1,0 +1,23 @@
+DELETE FROM interaction_messages;
+DELETE FROM user_contact_phones;
+DELETE FROM user_saved_locations;
+DELETE FROM job_uploads;
+DELETE FROM auth_events;
+DELETE FROM otp_cooldowns;
+DELETE FROM image_intents;
+DELETE FROM provider_usage;
+DELETE FROM rate_limits;
+DELETE FROM otp_challenges;
+DELETE FROM sessions;
+DELETE FROM reviews;
+DELETE FROM blocks;
+DELETE FROM reports;
+DELETE FROM interactions;
+DELETE FROM service_profiles;
+DELETE FROM jobs;
+DELETE FROM locations;
+DELETE FROM roles;
+DELETE FROM categories;
+DELETE FROM users;
+-- Keep d1_migrations intact, as it tracks which schema migrations have run.
+-- DELETE FROM d1_migrations;

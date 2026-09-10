@@ -36,7 +36,7 @@ export default function Index() {
     // Route based on auth status
     if (auth.status === 'authenticated') {
       console.log('Index: Authenticated, routing to home');
-      router.replace('/(tabs)/profile');
+      router.replace('/(tabs)');
     } else if (auth.status === 'unauthenticated') {
       console.log('Index: Unauthenticated, routing to auth');
       router.replace('/auth');

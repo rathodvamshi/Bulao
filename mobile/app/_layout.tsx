@@ -2,11 +2,15 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthProvider } from "../src/auth";
 import { set401Handler } from "../src/api/apiClient";
 import { setAuthExpiredHandler } from "../src/api/client";
 import { useAuth } from "../src/auth";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { LocationSheet } from "../src/components/LocationSheet";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -49,18 +53,23 @@ function AppContent() {
   }, [auth.status]);
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
-      <Stack screenOptions={{ headerShown: false }} />
-    </SafeAreaView>
+    <View style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </SafeAreaView>
+      <LocationSheet />
+    </View>
   );
 }
 
 export default function Layout() {
   return (
-    <AuthProvider>
-      <QueryClientProvider client={client}>
-        <AppContent />
-      </QueryClientProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <QueryClientProvider client={client}>
+          <AppContent />
+        </QueryClientProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

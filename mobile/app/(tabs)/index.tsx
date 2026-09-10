@@ -51,7 +51,7 @@ export default function Home() {
         </Text>
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push("/location")}
+          onPress={() => useLocation.getState().setLocationSheetVisible(true)}
           style={{
             flexDirection: "row",
             gap: 6,
@@ -61,9 +61,10 @@ export default function Home() {
           }}
         >
           <Ionicons name="location-outline" size={18} color={colors.green} />
-          <Text style={[s.link, { flexShrink: 1 }]}>
-            {location?.area ?? t("location")}⌄
+          <Text style={[s.link, { flexShrink: 1 }]} numberOfLines={1}>
+            {location?.area ?? t("location")}
           </Text>
+          <Ionicons name="chevron-down" size={16} color={colors.green} />
         </Pressable>
       </View>
       <View style={{ paddingTop: 4, gap: 6 }}>
@@ -81,33 +82,48 @@ export default function Home() {
           {t("question")}
         </Text>
       </View>
-      <View style={{ gap: 14, marginTop: 8 }}>
+      <View style={{ gap: 14, marginTop: 16 }}>
         {choices.map((item) => (
           <Pressable
             key={item.title}
             accessibilityRole="button"
             onPress={() => router.push(item.path)}
             style={({ pressed }) => ({
-              backgroundColor: item.color,
-              borderRadius: 24,
-              padding: 18,
-              gap: 10,
-              opacity: pressed ? 0.8 : 1,
+              opacity: pressed ? 0.7 : 1,
             })}
           >
             <View
-              style={{ flexDirection: "row", justifyContent: "space-between" }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: 16,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.line,
+                backgroundColor: item.color,
+              }}
             >
-              <Ionicons name={item.icon} size={26} color={colors.ink} />
-              <Ionicons name="arrow-forward" size={23} color={colors.ink} />
-            </View>
-            <View style={{ gap: 5 }}>
-              <Text
-                style={{ fontSize: 23, fontWeight: "700", color: colors.ink }}
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ fontSize: 20, fontWeight: "700", color: colors.ink }}>
+                  {t(item.title)}
+                </Text>
+                <Text style={{ fontSize: 13, color: colors.ink, opacity: 0.7, marginTop: 4 }}>
+                  {t(item.hint)}
+                </Text>
+              </View>
+              <View
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: "#fff",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
               >
-                {t(item.title)}
-              </Text>
-              <Copy small>{t(item.hint)}</Copy>
+                <Ionicons name={item.icon} size={22} color={colors.ink} />
+              </View>
             </View>
           </Pressable>
         ))}
