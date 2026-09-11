@@ -251,10 +251,20 @@ export default function PostWorkReviewScreen() {
               <Text style={styles.roleIconEmoji}>{roleIcon}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{store.title || "Job Posting"}</Text>
-              <Text style={styles.cardSubTitle}>
-                {store.categoryName || "Work"} • {store.roleName || "Worker"}
+              <Text style={styles.cardTitle} numberOfLines={1}>
+                {store.title || store.roleName || "Job Request"}
               </Text>
+              <View style={styles.cardSubTitleRow}>
+                <View style={styles.categoryPill}>
+                  <Text style={styles.categoryPillText}>
+                    {store.categoryName || "Work"}
+                  </Text>
+                </View>
+                <Text style={styles.cardSubTitleDot}>•</Text>
+                <Text style={styles.cardSubTitle}>
+                  {store.roleName || "Worker"}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -277,14 +287,16 @@ export default function PostWorkReviewScreen() {
                   : `${store.workers} ${store.workers === 1 ? "Worker" : "Workers"} (Any gender)`}
               </Text>
               <Text style={styles.rowSubtext}>
-                Experience: <Text style={{ fontWeight: "700" }}>{store.experience.toUpperCase()}</Text>
+                Experience Level: <Text style={{ fontWeight: "700", color: "#0F1F14" }}>{store.experience.toUpperCase()}</Text>
               </Text>
             </View>
             <Pressable
               onPress={() => router.push("/post-work/details")}
-              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Edit Workers"
+              style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
             >
-              <Ionicons name="pencil" size={15} color={colors.green} />
+              <Ionicons name="pencil" size={13} color={colors.green} />
               <Text style={styles.editText}>Edit</Text>
             </Pressable>
           </View>
@@ -299,13 +311,19 @@ export default function PostWorkReviewScreen() {
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>Work Location</Text>
               <Text style={styles.rowValue}>{store.locality || "Not selected"}</Text>
-              {store.address ? <Text style={styles.rowSubtext}>{store.address}</Text> : null}
+              {store.address ? (
+                <Text style={styles.rowSubtext} numberOfLines={2}>
+                  {store.address}
+                </Text>
+              ) : null}
             </View>
             <Pressable
               onPress={() => router.push("/post-work/location")}
-              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Edit Location"
+              style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
             >
-              <Ionicons name="pencil" size={15} color={colors.green} />
+              <Ionicons name="pencil" size={13} color={colors.green} />
               <Text style={styles.editText}>Edit</Text>
             </Pressable>
           </View>
@@ -318,7 +336,7 @@ export default function PostWorkReviewScreen() {
               <Ionicons name="calendar" size={17} color={colors.green} />
             </View>
             <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Date & Time</Text>
+              <Text style={styles.rowLabel}>Date & Schedule</Text>
               <Text style={styles.rowValue}>
                 {formatDate(store.startDate || new Date())}{" "}
                 {store.duration === "few" && store.endDate
@@ -329,15 +347,17 @@ export default function PostWorkReviewScreen() {
               </Text>
               <Text style={styles.rowSubtext}>
                 {store.hours === "full"
-                  ? "Full Day Work"
-                  : `${formatTime(store.startTime)} - ${formatTime(store.endTime)}`}
+                  ? "Full Day Work (Standard Shift)"
+                  : `Working Hours: ${formatTime(store.startTime)} - ${formatTime(store.endTime)}`}
               </Text>
             </View>
             <Pressable
               onPress={() => router.push("/post-work/schedule")}
-              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Edit Schedule"
+              style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
             >
-              <Ionicons name="pencil" size={15} color={colors.green} />
+              <Ionicons name="pencil" size={13} color={colors.green} />
               <Text style={styles.editText}>Edit</Text>
             </Pressable>
           </View>
@@ -353,19 +373,21 @@ export default function PostWorkReviewScreen() {
               <Text style={styles.rowLabel}>Offered Pay</Text>
               <Text style={styles.rowValue}>
                 ₹{store.payAmount || "0"}{" "}
-                <Text style={{ fontSize: 13, fontWeight: "500", color: "#6B8A74" }}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#6B8A74" }}>
                   per {store.payUnit}
                 </Text>
               </Text>
               <Text style={styles.rowSubtext}>
-                Paid {store.payWhen === "after" ? "after work completes" : store.payWhen}
+                Payment terms: Paid {store.payWhen === "after" ? "after work completes" : store.payWhen}
               </Text>
             </View>
             <Pressable
               onPress={() => router.push("/post-work/pay")}
-              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Edit Payment"
+              style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
             >
-              <Ionicons name="pencil" size={15} color={colors.green} />
+              <Ionicons name="pencil" size={13} color={colors.green} />
               <Text style={styles.editText}>Edit</Text>
             </Pressable>
           </View>
@@ -385,7 +407,7 @@ export default function PostWorkReviewScreen() {
         <View style={styles.guaranteeBox}>
           <Ionicons name="shield-checkmark" size={16} color={colors.green} />
           <Text style={styles.guaranteeText}>
-            Direct direct connect with workers • No commission fees
+            Direct connect with verified workers • Zero commission fees
           </Text>
         </View>
       </ScrollView>
@@ -698,26 +720,26 @@ const styles = StyleSheet.create({
   // ── Main Review Card ──
   card: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 22,
+    borderRadius: 24,
     borderWidth: 1.5,
     borderColor: "#D8E5DB",
-    padding: 18,
-    gap: 14,
+    padding: 20,
+    gap: 15,
     shadowColor: "#0B1A0F",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
-    shadowRadius: 10,
+    shadowRadius: 12,
     elevation: 3,
   },
   cardTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
   },
   roleIconBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 50,
+    height: 50,
+    borderRadius: 15,
     backgroundColor: "#EDFBF3",
     alignItems: "center",
     justifyContent: "center",
@@ -725,16 +747,39 @@ const styles = StyleSheet.create({
     borderColor: "#C8EADA",
   },
   roleIconEmoji: {
-    fontSize: 22,
+    fontSize: 24,
   },
   cardTitle: {
-    fontSize: 17,
-    fontWeight: "800",
+    fontSize: 18,
+    fontWeight: "900",
     color: "#0F1F14",
-    marginBottom: 2,
+    marginBottom: 4,
+    letterSpacing: -0.3,
+  },
+  cardSubTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  categoryPill: {
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  categoryPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  cardSubTitleDot: {
+    fontSize: 12,
+    color: "#9CA3AF",
   },
   cardSubTitle: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: "600",
     color: "#6B8A74",
   },
@@ -744,49 +789,56 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   rowIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     backgroundColor: "#EDFBF3",
     alignItems: "center",
     justifyContent: "center",
     marginTop: 2,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
   },
   rowContent: { flex: 1 },
   rowLabel: {
     fontSize: 10,
-    fontWeight: "800",
+    fontWeight: "900",
     color: "#8FA89B",
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: "uppercase",
     marginBottom: 2,
   },
   rowValue: {
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 14.5,
+    fontWeight: "800",
     color: "#0F1F14",
-    lineHeight: 19,
+    lineHeight: 20,
   },
   rowSubtext: {
     fontSize: 12,
     fontWeight: "500",
     color: "#6B8A74",
     marginTop: 2,
+    lineHeight: 16,
   },
   editBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
-    backgroundColor: "#EDFBF3",
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
+    backgroundColor: "#F2FAF5",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#C8EADA",
+    borderColor: "#CCE7D7",
+  },
+  editBtnPressed: {
+    backgroundColor: "#E2F5EA",
+    transform: [{ scale: 0.96 }],
   },
   editText: {
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: 11.5,
+    fontWeight: "800",
     color: colors.green,
   },
   divider: {
