@@ -426,205 +426,209 @@ export default function PostWorkReviewScreen() {
               },
             ]}
           >
-            {/* Celebration Radar & Checkmark Header */}
-            <View style={styles.celebrationArea}>
-              {/* Outer Pulsing Glow */}
-              <Animated.View
-                style={[
-                  styles.radarCircle,
-                  styles.radarCircleOuter,
-                  {
-                    transform: [
-                      {
-                        scale: rippleAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0.85, 2.4],
-                        }),
-                      },
-                    ],
-                    opacity: rippleAnim.interpolate({
-                      inputRange: [0, 0.6, 1],
-                      outputRange: [0.45, 0.15, 0],
-                    }),
-                  },
-                ]}
-              />
+            <ScrollView
+              style={{ width: "100%" }}
+              contentContainerStyle={styles.successScrollContainer}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              {/* Celebration Radar & Checkmark Header */}
+              <View style={styles.celebrationArea}>
+                {/* Outer Pulsing Glow */}
+                <Animated.View
+                  style={[
+                    styles.radarCircle,
+                    styles.radarCircleOuter,
+                    {
+                      transform: [
+                        {
+                          scale: rippleAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.85, 2.3],
+                          }),
+                        },
+                      ],
+                      opacity: rippleAnim.interpolate({
+                        inputRange: [0, 0.6, 1],
+                        outputRange: [0.45, 0.15, 0],
+                      }),
+                    },
+                  ]}
+                />
 
-              {/* Inner Pulsing Ring */}
-              <Animated.View
-                style={[
-                  styles.radarCircle,
-                  {
-                    transform: [
-                      {
-                        scale: rippleAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0.9, 1.7],
-                        }),
-                      },
-                    ],
-                    opacity: rippleAnim.interpolate({
-                      inputRange: [0, 0.5, 1],
-                      outputRange: [0.6, 0.25, 0],
-                    }),
-                  },
-                ]}
-              />
+                {/* Inner Pulsing Ring */}
+                <Animated.View
+                  style={[
+                    styles.radarCircle,
+                    {
+                      transform: [
+                        {
+                          scale: rippleAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.9, 1.6],
+                          }),
+                        },
+                      ],
+                      opacity: rippleAnim.interpolate({
+                        inputRange: [0, 0.5, 1],
+                        outputRange: [0.6, 0.25, 0],
+                      }),
+                    },
+                  ]}
+                />
 
-              {/* Floating Sparkles */}
-              <View style={styles.sparkleTopRight}>
-                <Text style={{ fontSize: 16 }}>✨</Text>
-              </View>
-              <View style={styles.sparkleBottomLeft}>
-                <Text style={{ fontSize: 14 }}>🌟</Text>
-              </View>
-
-              {/* Animated Bouncing Checkmark Badge */}
-              <Animated.View
-                style={[
-                  styles.successCheckBadge,
-                  {
-                    transform: [
-                      {
-                        scale: checkBounce.interpolate({
-                          inputRange: [0, 0.7, 1],
-                          outputRange: [0, 1.2, 1],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <Ionicons name="checkmark" size={38} color="#FFFFFF" />
-              </Animated.View>
-            </View>
-
-            {/* Title & Status */}
-            <Text style={styles.successTitle}>Job Posted Successfully!</Text>
-            <View style={styles.liveBroadcastBadge}>
-              <View style={styles.pulsingGreenDot} />
-              <Text style={styles.liveBroadcastText}>LIVE & MATCHING WORKERS</Text>
-            </View>
-
-            {/* ── PREMIUM POSTED JOB SUMMARY CARD ── */}
-            <View style={styles.postedJobSummaryCard}>
-              {/* Job Header */}
-              <View style={styles.postedSummaryHeader}>
-                <View style={styles.postedSummaryIconBox}>
-                  <Text style={{ fontSize: 20 }}>{roleIcon || "💼"}</Text>
+                {/* Floating Sparkles */}
+                <View style={styles.sparkleTopRight}>
+                  <Text style={{ fontSize: 15 }}>✨</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.postedSummaryTitle} numberOfLines={1}>
-                    {store.title || store.roleName || "Job Request"}
+                <View style={styles.sparkleBottomLeft}>
+                  <Text style={{ fontSize: 13 }}>🌟</Text>
+                </View>
+
+                {/* Animated Bouncing Checkmark Badge */}
+                <Animated.View
+                  style={[
+                    styles.successCheckBadge,
+                    {
+                      transform: [
+                        {
+                          scale: checkBounce.interpolate({
+                            inputRange: [0, 0.7, 1],
+                            outputRange: [0, 1.2, 1],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <Ionicons name="checkmark" size={34} color="#FFFFFF" />
+                </Animated.View>
+              </View>
+
+              {/* Title & Status */}
+              <Text style={styles.successTitle}>Job Posted Successfully!</Text>
+              <View style={styles.liveBroadcastBadge}>
+                <View style={styles.pulsingGreenDot} />
+                <Text style={styles.liveBroadcastText}>LIVE & MATCHING WORKERS</Text>
+              </View>
+
+              {/* ── PREMIUM POSTED JOB SUMMARY CARD ── */}
+              <View style={styles.postedJobSummaryCard}>
+                {/* Job Header */}
+                <View style={styles.postedSummaryHeader}>
+                  <View style={styles.postedSummaryIconBox}>
+                    <Text style={{ fontSize: 18 }}>{roleIcon || "💼"}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.postedSummaryTitle} numberOfLines={1}>
+                      {store.title || store.roleName || "Job Request"}
+                    </Text>
+                    <Text style={styles.postedSummaryCategory} numberOfLines={1}>
+                      {store.categoryName || "Work"} • {store.roleName || "Worker"}
+                    </Text>
+                  </View>
+                  <View style={styles.postedPayBadge}>
+                    <Text style={styles.postedPayBadgeText}>
+                      ₹{store.payAmount || "0"}
+                    </Text>
+                    <Text style={styles.postedPayBadgeUnit}>/{store.payUnit}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.postedSummaryDivider} />
+
+                {/* 2x2 Mini Info Grid */}
+                <View style={styles.postedGrid}>
+                  {/* Location */}
+                  <View style={styles.postedGridItem}>
+                    <Ionicons name="location-sharp" size={13} color={colors.green} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.postedGridLabel}>Location</Text>
+                      <Text style={styles.postedGridVal} numberOfLines={1}>
+                        {store.locality || "Selected Location"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Workers Needed */}
+                  <View style={styles.postedGridItem}>
+                    <Ionicons name="people-sharp" size={13} color={colors.green} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.postedGridLabel}>Workers</Text>
+                      <Text style={styles.postedGridVal} numberOfLines={1}>
+                        {store.workers} {store.workers === 1 ? "Person" : "People"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Schedule */}
+                  <View style={styles.postedGridItem}>
+                    <Ionicons name="calendar-sharp" size={13} color={colors.green} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.postedGridLabel}>Schedule</Text>
+                      <Text style={styles.postedGridVal} numberOfLines={1}>
+                        {formatDate(store.startDate || new Date())}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Hours */}
+                  <View style={styles.postedGridItem}>
+                    <Ionicons name="time-sharp" size={13} color={colors.green} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.postedGridLabel}>Timing</Text>
+                      <Text style={styles.postedGridVal} numberOfLines={1}>
+                        {store.hours === "full" ? "Full Day" : `${formatTime(store.startTime)} - ${formatTime(store.endTime)}`}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Live Worker Broadcast Banner */}
+                <View style={styles.broadcastBanner}>
+                  <Ionicons name="radio" size={13} color={colors.green} />
+                  <Text style={styles.broadcastBannerText} numberOfLines={1}>
+                    Broadcasting to workers in {store.locality || "your area"}
                   </Text>
-                  <Text style={styles.postedSummaryCategory} numberOfLines={1}>
-                    {store.categoryName || "Work"} • {store.roleName || "Worker"}
+                </View>
+              </View>
+
+              {/* ── SIDE-BY-SIDE ACTION BUTTONS ── */}
+              <View style={styles.sideBySideRow}>
+                {/* Secondary: Go to Provider Home */}
+                <Pressable
+                  onPress={handleGoHome}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Provider Home"
+                  style={({ pressed }) => [
+                    styles.btnSideSecondary,
+                    pressed && styles.btnSideSecondaryPressed,
+                  ]}
+                >
+                  <Ionicons name="home-outline" size={17} color={colors.green} />
+                  <Text style={styles.btnSideSecondaryTitle} numberOfLines={1}>
+                    Go Home
                   </Text>
-                </View>
-                <View style={styles.postedPayBadge}>
-                  <Text style={styles.postedPayBadgeText}>
-                    ₹{store.payAmount || "0"}
+                </Pressable>
+
+                {/* Primary: View Job Details in Activity */}
+                <Pressable
+                  onPress={handleViewJob}
+                  accessibilityRole="button"
+                  accessibilityLabel="View Job Details"
+                  style={({ pressed }) => [
+                    styles.btnSidePrimary,
+                    pressed && styles.btnSidePrimaryPressed,
+                  ]}
+                >
+                  <Ionicons name="eye" size={17} color="#FFFFFF" />
+                  <Text style={styles.btnSidePrimaryTitle} numberOfLines={1}>
+                    View Job
                   </Text>
-                  <Text style={styles.postedPayBadgeUnit}>/{store.payUnit}</Text>
-                </View>
+                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                </Pressable>
               </View>
-
-              <View style={styles.postedSummaryDivider} />
-
-              {/* 2x2 Mini Info Grid */}
-              <View style={styles.postedGrid}>
-                {/* Location */}
-                <View style={styles.postedGridItem}>
-                  <Ionicons name="location-sharp" size={14} color={colors.green} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.postedGridLabel}>Location</Text>
-                    <Text style={styles.postedGridVal} numberOfLines={1}>
-                      {store.locality || "Selected Location"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Workers Needed */}
-                <View style={styles.postedGridItem}>
-                  <Ionicons name="people-sharp" size={14} color={colors.green} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.postedGridLabel}>Workers</Text>
-                    <Text style={styles.postedGridVal} numberOfLines={1}>
-                      {store.workers} {store.workers === 1 ? "Person" : "People"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Schedule */}
-                <View style={styles.postedGridItem}>
-                  <Ionicons name="calendar-sharp" size={14} color={colors.green} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.postedGridLabel}>Schedule</Text>
-                    <Text style={styles.postedGridVal} numberOfLines={1}>
-                      {formatDate(store.startDate || new Date())}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Hours */}
-                <View style={styles.postedGridItem}>
-                  <Ionicons name="time-sharp" size={14} color={colors.green} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.postedGridLabel}>Timing</Text>
-                    <Text style={styles.postedGridVal} numberOfLines={1}>
-                      {store.hours === "full" ? "Full Day" : `${formatTime(store.startTime)} - ${formatTime(store.endTime)}`}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Live Worker Broadcast Banner */}
-              <View style={styles.broadcastBanner}>
-                <Ionicons name="radio" size={14} color={colors.green} />
-                <Text style={styles.broadcastBannerText} numberOfLines={1}>
-                  Broadcasting to verified workers in {store.locality || "your area"}
-                </Text>
-              </View>
-            </View>
-
-            {/* ── ACTION BUTTONS STRATEGY ── */}
-            <View style={styles.successActions}>
-              {/* Primary Action: View Job Details in Activity */}
-              <Pressable
-                onPress={handleViewJob}
-                accessibilityRole="button"
-                accessibilityLabel="View Job Details"
-                style={({ pressed }) => [
-                  styles.btnPrimary,
-                  pressed && styles.btnPrimaryPressed,
-                ]}
-              >
-                <View style={styles.btnIconCirclePrimary}>
-                  <Ionicons name="document-text" size={18} color="#FFFFFF" />
-                </View>
-                <View style={styles.btnTextCol}>
-                  <Text style={styles.btnPrimaryTitle}>View Job Details</Text>
-                  <Text style={styles.btnPrimarySub}>Track applicants & manage</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" style={{ opacity: 0.9 }} />
-              </Pressable>
-
-              {/* Secondary Action: Go to Provider Home */}
-              <Pressable
-                onPress={handleGoHome}
-                accessibilityRole="button"
-                accessibilityLabel="Go to Provider Home"
-                style={({ pressed }) => [
-                  styles.btnSecondary,
-                  pressed && styles.btnSecondaryPressed,
-                ]}
-              >
-                <View style={styles.btnIconCircleSecondary}>
-                  <Ionicons name="home" size={17} color={colors.green} />
-                </View>
-                <Text style={styles.btnSecondaryTitle}>Go to Provider Home</Text>
-              </Pressable>
-            </View>
+            </ScrollView>
           </Animated.View>
         </View>
       </Modal>
@@ -869,30 +873,36 @@ const styles = StyleSheet.create({
   // ── Success Popup ──
   successCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 28,
-    padding: 22,
+    borderRadius: 24,
+    padding: 16,
     width: "100%",
     maxWidth: 390,
+    maxHeight: "92%",
     alignItems: "center",
     shadowColor: "#052E16",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.28,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successScrollContainer: {
+    alignItems: "center",
+    width: "100%",
+    paddingBottom: 4,
   },
   celebrationArea: {
-    width: 96,
-    height: 96,
+    width: 76,
+    height: 76,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    marginBottom: 8,
     position: "relative",
   },
   radarCircle: {
     position: "absolute",
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: "#DCFCE7",
     borderWidth: 2,
     borderColor: colors.green,
@@ -914,70 +924,70 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   successCheckBadge: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.green,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: colors.green,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.45,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowRadius: 10,
+    elevation: 6,
   },
   successTitle: {
-    fontSize: 21,
+    fontSize: 19,
     fontWeight: "900",
     color: "#0F1F14",
     textAlign: "center",
-    marginBottom: 6,
+    marginBottom: 4,
     letterSpacing: -0.4,
   },
   liveBroadcastBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     backgroundColor: "#ECFDF5",
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#A7F3D0",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   pulsingGreenDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: "#10B981",
   },
   liveBroadcastText: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "900",
     color: "#047857",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
 
   // ── Posted Job Summary Card in Modal ──
   postedJobSummaryCard: {
     width: "100%",
     backgroundColor: "#F8FAF9",
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1.5,
     borderColor: "#DCEAE2",
-    padding: 14,
-    marginBottom: 18,
+    padding: 12,
+    marginBottom: 10,
   },
   postedSummaryHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   postedSummaryIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: "#E8F5EE",
     alignItems: "center",
     justifyContent: "center",
@@ -985,12 +995,12 @@ const styles = StyleSheet.create({
     borderColor: "#C5E6D5",
   },
   postedSummaryTitle: {
-    fontSize: 14.5,
+    fontSize: 14,
     fontWeight: "800",
     color: "#0F1F14",
   },
   postedSummaryCategory: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "600",
     color: "#6B8A74",
     marginTop: 1,
@@ -999,51 +1009,51 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "baseline",
     backgroundColor: "#ECFDF5",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 7,
     borderWidth: 1,
     borderColor: "#A7F3D0",
   },
   postedPayBadgeText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "900",
     color: "#047857",
   },
   postedPayBadgeUnit: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "700",
     color: "#059669",
   },
   postedSummaryDivider: {
     height: 1,
     backgroundColor: "#E4ECE7",
-    marginVertical: 10,
+    marginVertical: 8,
   },
   postedGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   postedGridItem: {
-    width: "48%",
+    width: "48.5%",
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 6,
+    gap: 5,
     backgroundColor: "#FFFFFF",
-    padding: 8,
-    borderRadius: 10,
+    padding: 7,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: "#E9F0EB",
   },
   postedGridLabel: {
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: "700",
     color: "#8FA89B",
     textTransform: "uppercase",
   },
   postedGridVal: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "700",
     color: "#0F1F14",
     marginTop: 1,
@@ -1051,99 +1061,75 @@ const styles = StyleSheet.create({
   broadcastBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     backgroundColor: "#F0FDF4",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "#DCFCE7",
-    marginTop: 10,
+    marginTop: 8,
   },
   broadcastBannerText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: "600",
     color: "#15803D",
     flex: 1,
   },
 
-  // ── Actions Strategy ──
-  successActions: {
+  // ── Side-By-Side Action Buttons ──
+  sideBySideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     width: "100%",
     gap: 10,
+    marginTop: 4,
   },
-  btnPrimary: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.green,
-    minHeight: 56,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 16,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  btnPrimaryPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
-  },
-  btnIconCirclePrimary: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  btnTextCol: {
+  btnSideSecondary: {
     flex: 1,
-    justifyContent: "center",
-  },
-  btnPrimaryTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: -0.2,
-  },
-  btnPrimarySub: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.82)",
-    marginTop: 1,
-  },
-  btnSecondary: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F4FAF6",
-    minHeight: 50,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
+    gap: 6,
+    height: 48,
+    backgroundColor: "#F2F9F5",
+    borderRadius: 14,
     borderWidth: 1.5,
     borderColor: "#CCE5D7",
   },
-  btnSecondaryPressed: {
-    backgroundColor: "#E6F5EC",
+  btnSideSecondaryPressed: {
+    backgroundColor: "#E2F5EA",
     transform: [{ scale: 0.98 }],
   },
-  btnIconCircleSecondary: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#E2F4EA",
+  btnSideSecondaryTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.green,
+  },
+  btnSidePrimary: {
+    flex: 1.15,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 8,
+    gap: 6,
+    height: 48,
+    backgroundColor: colors.green,
+    borderRadius: 14,
+    shadowColor: colors.green,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  btnSecondaryTitle: {
+  btnSidePrimaryPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
+  },
+  btnSidePrimaryTitle: {
     fontSize: 14.5,
-    fontWeight: "700",
-    color: colors.green,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 
   // ── Error Popup ──
