@@ -7,22 +7,29 @@ const workspaceRoot = path.resolve(projectRoot, '../');
 
 const config = getDefaultConfig(projectRoot);
 
-// ── pnpm symlink / monorepo fix ─────────────────────────────────────────────
-// Metro does not follow symlinks (junctions on Windows) by default.
-// This tells Metro to watch the entire workspace node_modules so that
-// packages installed by pnpm (e.g. react-native-maps) can be resolved.
-config.watchFolders = [workspaceRoot];
+// ── Monorepo & Performance Optimizations ────────────────────────────────────
+// Narrow watch folders specifically to packages and node_modules so Metro does
+// not crawl backend/, .git/, .pnpm-store/, docs/, or temporary folders.
+config.watchFolders = [
+  path.resolve(workspaceRoot, 'packages'),
+  path.resolve(workspaceRoot, 'node_modules'),
+];
 
 config.resolver = {
   ...config.resolver,
-  // Allow Metro to resolve modules from the workspace-level node_modules
-  // (where pnpm actually stores the real package files)
   nodeModulesPaths: [
     path.resolve(projectRoot, 'node_modules'),
     path.resolve(workspaceRoot, 'node_modules'),
   ],
-  // Follow symlinks (junctions) so pnpm-linked packages are resolved correctly
   unstable_enableSymlinks: true,
+  // Ignore backend, git, design documents, and temporary files from bundling
+  blockList: [
+    /.*[/\\]backend[/\\].*/,
+    /.*[/\\]\.git[/\\].*/,
+    /.*[/\\]\.pnpm-store[/\\].*/,
+    /.*[/\\]Bulao_design[/\\].*/,
+    /.*[/\\]docs[/\\].*/,
+  ],
 };
 // ────────────────────────────────────────────────────────────────────────────
 

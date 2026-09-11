@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "start:clear": "expo start --clear",
+    "start": "expo start --lan",
+    "start:clear": "expo start --lan --clear",
     "start:lan": "expo start --lan",
     "start:tunnel": "expo start --tunnel",
     "start:tunnel:clear": "expo start --tunnel --clear",
