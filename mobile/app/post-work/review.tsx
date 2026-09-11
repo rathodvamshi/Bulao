@@ -627,8 +627,8 @@ export default function PostWorkReviewScreen() {
                 </View>
               </View>
 
-              {/* ── Side-by-Side Action Buttons: Home & View Job ── */}
-              <View style={styles.successActionsRow}>
+              {/* ── Side-by-Side Action Buttons inside Green Parent Dock ── */}
+              <View style={styles.successActionsParent}>
                 <Pressable
                   style={({ pressed }) => [
                     styles.btnSuccessHome,
@@ -638,7 +638,7 @@ export default function PostWorkReviewScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Go to Provider Home"
                 >
-                  <Ionicons name="home-outline" size={17} color={colors.green} />
+                  <Ionicons name="home-outline" size={17} color="#FFFFFF" />
                   <Text style={styles.btnSuccessHomeText}>Home</Text>
                 </Pressable>
 
@@ -651,9 +651,9 @@ export default function PostWorkReviewScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="View Posted Job Details"
                 >
-                  <Ionicons name="eye-outline" size={17} color="#FFFFFF" />
+                  <Ionicons name="eye-outline" size={17} color={colors.green} />
                   <Text style={styles.btnSuccessViewJobText}>View Job</Text>
-                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                  <Ionicons name="arrow-forward" size={15} color={colors.green} />
                 </Pressable>
               </View>
             </ScrollView>
@@ -1135,66 +1135,71 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Success Action Buttons (Side by Side) ──
-  successActionsRow: {
+  // ── Success Action Buttons inside Green Parent Dock ──
+  successActionsParent: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     width: "100%",
+    backgroundColor: colors.green,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "#063B1D",
+    padding: 6,
     marginTop: 6,
+    shadowColor: colors.green,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   btnSuccessHome: {
     flex: 1,
-    height: 48,
-    borderRadius: 14,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: colors.green,
-    backgroundColor: "#F0FDF4",
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
   },
   btnSuccessHomePressed: {
-    backgroundColor: "#DCFCE7",
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
     transform: [{ scale: 0.98 }],
   },
   btnSuccessHomeText: {
     fontSize: 14,
     fontWeight: "800",
-    color: colors.green,
+    color: "#FFFFFF",
     letterSpacing: 0.2,
   },
   btnSuccessViewJob: {
-    flex: 1.15,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: colors.green,
+    flex: 1.2,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1.5,
-    borderColor: "#047857",
+    borderColor: "#FFFFFF",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
   },
   btnSuccessViewJobPressed: {
-    backgroundColor: "#0D532B",
+    backgroundColor: "#E8F5EE",
     transform: [{ scale: 0.98 }],
   },
   btnSuccessViewJobText: {
     fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    fontWeight: "900",
+    color: colors.green,
     letterSpacing: 0.2,
   },
 
