@@ -587,31 +587,42 @@ export default function PostWorkReviewScreen() {
               </View>
             </View>
 
-            {/* ── ACTION BUTTONS ── */}
+            {/* ── ACTION BUTTONS STRATEGY ── */}
             <View style={styles.successActions}>
-              {/* Primary: View Job in Activity */}
+              {/* Primary Action: View Job Details in Activity */}
               <Pressable
                 onPress={handleViewJob}
+                accessibilityRole="button"
+                accessibilityLabel="View Job Details"
                 style={({ pressed }) => [
                   styles.btnPrimary,
-                  pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+                  pressed && styles.btnPrimaryPressed,
                 ]}
               >
-                <Ionicons name="eye" size={18} color="#FFFFFF" />
-                <Text style={styles.btnPrimaryText}>View Job Details</Text>
-                <Ionicons name="arrow-forward" size={16} color="#FFFFFF" style={{ marginLeft: "auto" }} />
+                <View style={styles.btnIconCirclePrimary}>
+                  <Ionicons name="document-text" size={18} color="#FFFFFF" />
+                </View>
+                <View style={styles.btnTextCol}>
+                  <Text style={styles.btnPrimaryTitle}>View Job Details</Text>
+                  <Text style={styles.btnPrimarySub}>Track applicants & manage</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" style={{ opacity: 0.9 }} />
               </Pressable>
 
-              {/* Secondary: Go Home (Provider Home) */}
+              {/* Secondary Action: Go to Provider Home */}
               <Pressable
                 onPress={handleGoHome}
+                accessibilityRole="button"
+                accessibilityLabel="Go to Provider Home"
                 style={({ pressed }) => [
                   styles.btnSecondary,
-                  pressed && { backgroundColor: "#EDFBF3", transform: [{ scale: 0.98 }] },
+                  pressed && styles.btnSecondaryPressed,
                 ]}
               >
-                <Ionicons name="home-outline" size={18} color={colors.green} />
-                <Text style={styles.btnSecondaryText}>Go to Provider Home</Text>
+                <View style={styles.btnIconCircleSecondary}>
+                  <Ionicons name="home" size={17} color={colors.green} />
+                </View>
+                <Text style={styles.btnSecondaryTitle}>Go to Provider Home</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -1056,7 +1067,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Actions ──
+  // ── Actions Strategy ──
   successActions: {
     width: "100%",
     gap: 10,
@@ -1064,36 +1075,73 @@ const styles = StyleSheet.create({
   btnPrimary: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
     backgroundColor: colors.green,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 14,
+    minHeight: 56,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
     shadowColor: colors.green,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 10,
-    elevation: 4,
+    elevation: 5,
   },
-  btnPrimaryText: {
+  btnPrimaryPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
+  },
+  btnIconCirclePrimary: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  btnTextCol: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  btnPrimaryTitle: {
     fontSize: 15,
     fontWeight: "800",
     color: "#FFFFFF",
+    letterSpacing: -0.2,
+  },
+  btnPrimarySub: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.82)",
+    marginTop: 1,
   },
   btnSecondary: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#FFFFFF",
-    paddingVertical: 13,
-    borderRadius: 14,
+    backgroundColor: "#F4FAF6",
+    minHeight: 50,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: "#D8E5DB",
+    borderColor: "#CCE5D7",
   },
-  btnSecondaryText: {
-    fontSize: 14,
+  btnSecondaryPressed: {
+    backgroundColor: "#E6F5EC",
+    transform: [{ scale: 0.98 }],
+  },
+  btnIconCircleSecondary: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#E2F4EA",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  btnSecondaryTitle: {
+    fontSize: 14.5,
     fontWeight: "700",
     color: colors.green,
   },
