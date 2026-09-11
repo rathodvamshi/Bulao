@@ -620,7 +620,7 @@ export default function PostWorkReviewScreen() {
 
                 {/* Live Worker Broadcast Banner */}
                 <View style={styles.broadcastBanner}>
-                  <Ionicons name="radio" size={13} color={colors.green} />
+                  <Ionicons name="radio" size={13} color="#1A6645" />
                   <Text style={styles.broadcastBannerText} numberOfLines={1}>
                     Broadcasting to workers in {store.locality || "your area"}
                   </Text>
@@ -628,33 +628,31 @@ export default function PostWorkReviewScreen() {
               </View>
             </ScrollView>
 
-            {/* ── Always Visible Pinned Bottom Action Buttons ── */}
-            <View style={styles.modalActionsRow}>
+            {/* ── Pinned Bottom: Two Action Buttons ── */}
+            <View style={styles.actionBtnContainer}>
+              {/* Home Button — outlined */}
               <Pressable
                 style={({ pressed }) => [
-                  styles.btnSuccessHome,
-                  pressed && styles.btnSuccessHomePressed,
+                  styles.actionBtnOutline,
+                  pressed && { backgroundColor: "#D1FAE5", borderColor: "#34D399" },
                 ]}
                 onPress={handleGoHome}
-                accessibilityRole="button"
-                accessibilityLabel="Go to Home"
               >
-                <Ionicons name="home" size={17} color="#15803D" />
-                <Text style={styles.btnSuccessHomeText}>Home</Text>
+                <Ionicons name="home-outline" size={18} color="#059669" />
+                <Text style={styles.actionBtnOutlineText}>Home</Text>
               </Pressable>
 
+              {/* View Job Button — solid filled */}
               <Pressable
                 style={({ pressed }) => [
-                  styles.btnSuccessViewJob,
-                  pressed && styles.btnSuccessViewJobPressed,
+                  styles.actionBtnFilled,
+                  pressed && { backgroundColor: "#047857" },
                 ]}
                 onPress={handleViewJob}
-                accessibilityRole="button"
-                accessibilityLabel="View Posted Job Details"
               >
-                <Ionicons name="eye" size={17} color="#FFFFFF" />
-                <Text style={styles.btnSuccessViewJobText}>View Job</Text>
-                <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.actionBtnFilledText}>View Job</Text>
+                <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
               </Pressable>
             </View>
           </Animated.View>
@@ -932,11 +930,14 @@ const styles = StyleSheet.create({
   successCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
-    padding: 16,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
     width: "100%",
     maxWidth: 390,
-    maxHeight: "92%",
+    maxHeight: "90%",
     alignItems: "center",
+    overflow: "visible",
     shadowColor: "#052E16",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
@@ -950,7 +951,7 @@ const styles = StyleSheet.create({
   successScrollContainer: {
     alignItems: "center",
     width: "100%",
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   celebrationArea: {
     width: 76,
@@ -1139,68 +1140,49 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Modal Action Buttons: Side-by-Side ──
-  modalActionsRow: {
+  // ── Pinned Bottom Action Buttons ──
+  actionBtnContainer: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
     width: "100%",
-    marginTop: 14,
+    gap: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+    marginTop: 4,
   },
-  btnSuccessHome: {
+  actionBtnOutline: {
     flex: 1,
-    height: 50,
-    borderRadius: 15,
-    borderWidth: 1.5,
-    borderColor: "#86EFAC",
-    backgroundColor: "#F0FDF4",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    shadowColor: "#059669",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
+    gap: 8,
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#10B981",
+    backgroundColor: "#FFFFFF",
   },
-  btnSuccessHomePressed: {
-    backgroundColor: "#DCFCE7",
-    borderColor: "#4ADE80",
-    transform: [{ scale: 0.97 }],
-  },
-  btnSuccessHomeText: {
+  actionBtnOutlineText: {
     fontSize: 15,
-    fontWeight: "800",
-    color: "#15803D",
-    letterSpacing: 0.2,
+    fontWeight: "700",
+    color: "#059669",
   },
-  btnSuccessViewJob: {
-    flex: 1.15,
-    height: 50,
-    borderRadius: 15,
-    backgroundColor: colors.green,
-    borderWidth: 1.5,
-    borderColor: "#0A4D27",
+  actionBtnFilled: {
+    flex: 1.3,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    elevation: 4,
+    gap: 8,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#10B981",
+    borderWidth: 2,
+    borderColor: "#10B981",
   },
-  btnSuccessViewJobPressed: {
-    backgroundColor: "#064E3B",
-    transform: [{ scale: 0.97 }],
-  },
-  btnSuccessViewJobText: {
+  actionBtnFilledText: {
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
     color: "#FFFFFF",
-    letterSpacing: 0.2,
   },
 
   modalCloseBtn: {
