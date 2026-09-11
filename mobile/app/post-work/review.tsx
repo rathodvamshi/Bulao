@@ -204,17 +204,6 @@ export default function PostWorkReviewScreen() {
     router.replace("/provider-home");
   };
 
-  const handleViewJob = () => {
-    setShowSuccessModal(false);
-    const id = createdJobId;
-    store.resetFlow();
-    if (id) {
-      router.replace(`/jobs/${id}`);
-    } else {
-      router.replace("/activity");
-    }
-  };
-
   const handleConfirmExit = () => {
     setShowExitModal(false);
     store.resetFlow();
@@ -426,6 +415,19 @@ export default function PostWorkReviewScreen() {
               },
             ]}
           >
+            {/* Close Button Top-Right */}
+            <Pressable
+              onPress={handleGoHome}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              style={({ pressed }) => [
+                styles.modalCloseBtn,
+                pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
+              ]}
+            >
+              <Ionicons name="close" size={20} color="#6B8A74" />
+            </Pressable>
+
             <ScrollView
               style={{ width: "100%" }}
               contentContainerStyle={styles.successScrollContainer}
@@ -591,42 +593,6 @@ export default function PostWorkReviewScreen() {
                     Broadcasting to workers in {store.locality || "your area"}
                   </Text>
                 </View>
-              </View>
-
-              {/* ── SIDE-BY-SIDE ACTION BUTTONS ── */}
-              <View style={styles.sideBySideRow}>
-                {/* Secondary: Go to Provider Home */}
-                <Pressable
-                  onPress={handleGoHome}
-                  accessibilityRole="button"
-                  accessibilityLabel="Go to Provider Home"
-                  style={({ pressed }) => [
-                    styles.btnSideSecondary,
-                    pressed && styles.btnSideSecondaryPressed,
-                  ]}
-                >
-                  <Ionicons name="home-outline" size={17} color={colors.green} />
-                  <Text style={styles.btnSideSecondaryTitle} numberOfLines={1}>
-                    Go Home
-                  </Text>
-                </Pressable>
-
-                {/* Primary: View Job Details in Activity */}
-                <Pressable
-                  onPress={handleViewJob}
-                  accessibilityRole="button"
-                  accessibilityLabel="View Job Details"
-                  style={({ pressed }) => [
-                    styles.btnSidePrimary,
-                    pressed && styles.btnSidePrimaryPressed,
-                  ]}
-                >
-                  <Ionicons name="eye" size={17} color="#FFFFFF" />
-                  <Text style={styles.btnSidePrimaryTitle} numberOfLines={1}>
-                    View Job
-                  </Text>
-                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
-                </Pressable>
               </View>
             </ScrollView>
           </Animated.View>
@@ -1077,59 +1043,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Side-By-Side Action Buttons ──
-  sideBySideRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    gap: 10,
-    marginTop: 4,
-  },
-  btnSideSecondary: {
-    flex: 1,
-    flexDirection: "row",
+  modalCloseBtn: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F0F4F2",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    height: 48,
-    backgroundColor: "#F2F9F5",
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: "#CCE5D7",
-  },
-  btnSideSecondaryPressed: {
-    backgroundColor: "#E2F5EA",
-    transform: [{ scale: 0.98 }],
-  },
-  btnSideSecondaryTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: colors.green,
-  },
-  btnSidePrimary: {
-    flex: 1.15,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: 48,
-    backgroundColor: colors.green,
-    borderRadius: 14,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  btnSidePrimaryPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
-  },
-  btnSidePrimaryTitle: {
-    fontSize: 14.5,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    zIndex: 20,
   },
 
   // ── Error Popup ──
