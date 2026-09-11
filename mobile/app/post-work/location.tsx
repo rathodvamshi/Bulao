@@ -82,7 +82,7 @@ export default function PostWorkLocationScreen() {
 
   // Animations
   const tabSlide = useRef(new Animated.Value(0)).current;
-  const cardFade = useRef(new Animated.Value(0)).current;
+  const cardFade = useRef(new Animated.Value(1)).current;
   const mapRef = useRef<MapView>(null);
 
   // ── Fetch saved places ──────────────────────────────────
@@ -209,8 +209,9 @@ export default function PostWorkLocationScreen() {
     if (!selectedPlace && initialSelected) {
       setSelectedPlace(initialSelected);
       setSelectedChipId(initialSelected.id);
+      cardFade.setValue(1);
     }
-  }, [initialSelected]);
+  }, [initialSelected, selectedPlace]);
 
   // Animate map to selected place
   useEffect(() => {
@@ -230,10 +231,10 @@ export default function PostWorkLocationScreen() {
   // Fade-in card when place selected
   const showCard = (place: DetailedPlace) => {
     setSelectedPlace(place);
-    cardFade.setValue(0);
+    cardFade.setValue(0.6);
     Animated.timing(cardFade, {
       toValue: 1,
-      duration: 280,
+      duration: 220,
       easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start();
