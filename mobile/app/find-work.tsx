@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, ActivityIndicator, Alert, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import { colors } from "../src/components/ui";
 import { useLocation } from "../src/store/location";
+import { useAuth } from "../src/auth";
+import { jobApi } from "../src/api/jobApi";
+import type { Job } from "../src/api/types";
+import { JobCard } from "../src/components/JobCard";
+import { JobDetailsSheet } from "../src/components/JobDetailsSheet";
 
 const tabs = [
   { key: "home", label: "Home", icon: "arrow-back" },
@@ -14,9 +19,13 @@ const tabs = [
   { key: "profile", label: "Profile", icon: "person-outline" },
 ] as const;
 
-function WorkSearchBar() {
+interface WorkSearchBarProps {
+  query: string;
+  setQuery: (q: string) => void;
+}
+
+function WorkSearchBar({ query, setQuery }: WorkSearchBarProps) {
   const inputRef = useRef<TextInput>(null);
-  const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [typedWord, setTypedWord] = useState("");
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -86,50 +95,58 @@ function WorkSearchBar() {
 }
 
 export default function FindWork() {
-  const setLocation = useLocation((state) => state.setLocation);
-  const [resolvedArea, setResolvedArea] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
-  const locationRequestActive = useRef(false);
+  const { location, setLocationSheetVisible } = useLocation();
+  const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<"jobs" | "applications" | "profile">("jobs");
+  const [radiusKm, setRadiusKm] = useState<3 | 5 | 10 | 15 | 50>(5);
+  const [category, setCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  async function detectLocation() {
-    if (locationRequestActive.current) return;
-    locationRequestActive.current = true;
-    setLocating(true);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+
+  const fetchJobs = useCallback(async () => {
+    if (!location?.latitude || !location?.longitude) return;
+    
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("Allow location", "Allow location access to show your current area.",
-          permission.canAskAgain ? [{ text: "OK" }] : [
-            { text: "Cancel", style: "cancel" },
-            { text: "Open settings", onPress: () => {
-              void Linking.openSettings().catch(() => Alert.alert("Settings", "Open your phone settings to allow location access."));
-            } },
-          ]);
-        return;
-      }
-      if (!(await Location.hasServicesEnabledAsync())) {
-        Alert.alert("Turn on location", "Enable location in your phone settings, then tap the location button again.");
-        return;
-      }
-      const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      // GPS remains useful even when the address lookup is unavailable.
-      let area = `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
-      try {
-        const [address] = await Location.reverseGeocodeAsync(coords);
-        area = address?.district || address?.city || address?.subregion || area;
-      } catch {
-        // Display the actual coordinates instead of a preset area name.
-      }
-      setLocation({ latitude: coords.latitude, longitude: coords.longitude, area });
-      setResolvedArea(area);
-    } catch {
-      Alert.alert("Location unavailable", "Couldn't get your current location. Please try again.");
-    } finally {
-      locationRequestActive.current = false;
-      setLocating(false);
+      const res = await jobApi.searchJobs({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        radiusKm,
+        categoryId: category,
+      }, session?.token);
+      setJobs(res.items);
+    } catch (err) {
+      console.error("Failed to fetch jobs:", err);
     }
-  }
+  }, [location?.latitude, location?.longitude, radiusKm, category, session?.token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      setIsLoading(true);
+      fetchJobs().finally(() => {
+        if (isActive) setIsLoading(false);
+      });
+
+      return () => {
+        isActive = false;
+      };
+    }, [fetchJobs])
+  );
+
+  const filteredJobs = jobs.filter((job) => {
+    if (!searchQuery) return true;
+    const lowerQ = searchQuery.toLowerCase();
+    return (
+      job.title.toLowerCase().includes(lowerQ) ||
+      job.area.toLowerCase().includes(lowerQ) ||
+      job.details?.toLowerCase().includes(lowerQ)
+    );
+  });
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
@@ -137,16 +154,13 @@ export default function FindWork() {
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.brand}>Bulao</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={locating ? "Finding your current location" : `Use current location: ${resolvedArea ?? "Choose location"}`}
-          accessibilityState={{ disabled: locating, busy: locating }}
-          disabled={locating}
-          onPress={() => void detectLocation()}
+          accessibilityLabel={`Use current location: ${location?.area ?? "Choose location"}`}
+          onPress={() => setLocationSheetVisible(true)}
           style={styles.location}
         >
-          {locating ? <ActivityIndicator size="small" color={colors.green} /> :
-            <Ionicons name="location-outline" size={18} color={colors.green} />}
+          <Ionicons name="location-outline" size={18} color={colors.green} />
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.locationName}>
-            {locating ? "Locating…" : resolvedArea ?? "Choose location"}
+            {location?.area ?? "Choose location"}
           </Text>
         </Pressable>
         <Pressable
@@ -159,10 +173,80 @@ export default function FindWork() {
         </Pressable>
       </View>
 
-      <WorkSearchBar />
+      <WorkSearchBar query={searchQuery} setQuery={setSearchQuery} />
+      <View style={styles.radiusFilters} accessibilityLabel="Job search distance">
+        {([3, 5, 10, 15, 50] as const).map((km) => (
+          <Pressable
+            key={km}
+            accessibilityRole="button"
+            accessibilityLabel={km === 50 ? "Any distance" : `Within ${km} kilometres`}
+            accessibilityState={{ selected: radiusKm === km }}
+            onPress={() => setRadiusKm(km)}
+            style={[styles.radiusButton, radiusKm === km && styles.radiusButtonSelected]}
+          >
+            <Text style={[styles.radiusLabel, radiusKm === km && styles.radiusLabelSelected]}>
+              {km === 50 ? "All" : `${km} km`}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
-      {/* Content for each Find Work tab will be added in the next step. */}
-      <View style={styles.content} />
+      <View style={styles.categoryFilters}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryFilterContent}>
+          {["Events", "Tuitions", "Shop & Hotel", "Constructions", "House"].map((label) => (
+            <Pressable
+              key={label}
+              accessibilityRole="button"
+              accessibilityLabel={`Filter by ${label}`}
+              accessibilityState={{ selected: category === label }}
+              onPress={() => setCategory(category === label ? null : label)}
+              style={[styles.categoryButton, category === label && styles.radiusButtonSelected]}
+            >
+              <Text style={[styles.radiusLabel, category === label && styles.radiusLabelSelected]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      <View style={styles.content}>
+        {activeTab === "jobs" && (
+          isLoading ? (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <ActivityIndicator size="large" color={colors.green} />
+            </View>
+          ) : filteredJobs.length > 0 ? (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingTop: 16, paddingBottom: 24 }}
+              refreshControl={
+                <RefreshControl
+                  refreshing={isRefreshing}
+                  onRefresh={() => {
+                    setIsRefreshing(true);
+                    fetchJobs().finally(() => setIsRefreshing(false));
+                  }}
+                  colors={[colors.green]}
+                  tintColor={colors.green}
+                />
+              }
+            >
+              {filteredJobs.map((job) => (
+                <JobCard key={job.id} job={job} onViewDetails={setSelectedJob} />
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32 }}>
+              <Ionicons name="briefcase-outline" size={64} color={colors.line} style={{ marginBottom: 16 }} />
+              <Text style={{ fontSize: 18, fontWeight: "700", color: colors.ink, marginBottom: 8 }}>
+                No jobs found nearby
+              </Text>
+              <Text style={{ fontSize: 14, color: colors.muted, textAlign: "center" }}>
+                Try expanding your search radius or changing the category filter.
+              </Text>
+            </View>
+          )
+        )}
+      </View>
 
       <View style={styles.bottomBar}>
         {tabs.map((tab) => {
@@ -195,6 +279,8 @@ export default function FindWork() {
           );
         })}
       </View>
+
+      <JobDetailsSheet job={selectedJob} onClose={() => setSelectedJob(null)} />
     </SafeAreaView>
   );
 }
@@ -220,6 +306,14 @@ const styles = StyleSheet.create({
   searchBarFocused: { borderColor: colors.green },
   searchInput: { flex: 1, minWidth: 0, paddingLeft: 16, paddingRight: 4, paddingVertical: 14, fontSize: 15, color: colors.ink },
   searchIcon: { width: 48, minHeight: 52, alignItems: "center", justifyContent: "center" },
+  radiusFilters: { width: "100%", maxWidth: 680, alignSelf: "center", flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10 },
+  radiusButton: { width: "18%", minHeight: 34, alignItems: "center", justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
+  radiusButtonSelected: { backgroundColor: colors.green, borderColor: colors.green },
+  radiusLabel: { fontSize: 13, fontWeight: "600", color: colors.green },
+  radiusLabelSelected: { color: colors.white },
+  categoryFilters: { width: "100%", maxWidth: 680, alignSelf: "center", paddingBottom: 12 },
+  categoryFilterContent: { paddingHorizontal: 16, gap: 8 },
+  categoryButton: { minHeight: 34, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
   // Match the main Home tab bar. The root layout reserves the device's bottom safe area.
   bottomBar: {
     flexDirection: "row",

@@ -5,7 +5,7 @@ import { ZodError, z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { AppEnv } from "./config/env";
-import { users, categories, roles, locations } from "./db/schema";
+import { users, categories, roles, locations as dbLocations } from "./db/schema";
 import { ApiError, ok } from "./middleware/errors";
 import { auth } from "./modules/auth/routes";
 import { requireAuth } from "./modules/auth/session";
@@ -17,7 +17,9 @@ import { trust } from "./modules/trust/routes";
 import { images } from "./modules/images/routes";
 import { profiles } from "./modules/profiles/routes";
 import { consumeAuthEvents } from "./modules/auth/audit";
+import { locations } from "./modules/users/locations";
 export { AuthCoordinator } from "./modules/auth/coordinator";
+
 const app = new Hono<AppEnv>();
 app.use("*", async (c, next) => {
   const started = Date.now();
@@ -145,7 +147,7 @@ app.get("/api/v1/categories", async (c) => {
   const [categoryRows, roleRows, locationRows] = await Promise.all([
     db.select().from(categories),
     db.select().from(roles),
-    db.select().from(locations),
+    db.select().from(dbLocations),
   ]);
   c.header("Cache-Control", "public,max-age=86400");
   return ok(c, {
@@ -212,5 +214,6 @@ app.route("/api/v1/service-requests", requests);
 app.route("/api/v1/applications", interactions);
 app.route("/api/v1/service-requests", interactions);
 app.route("/api/v1", trust);
+app.route("/api/v1", locations);
 export { app };
 export default { fetch: app.fetch, queue: consumeAuthEvents };

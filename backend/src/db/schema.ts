@@ -257,3 +257,23 @@ export const savedPlaces = sqliteTable("saved_places", {
 }, (t) => [
   index("saved_places_user").on(t.userId, t.lastUsedAt),
 ]);
+
+export const userLocations = sqliteTable(
+  "user_locations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    label: text("label", { enum: ["Home", "Work", "Other"] }).notNull(),
+    area: text("area").notNull(),
+    address: text("address").notNull(),
+    latitude: real("latitude").notNull(),
+    longitude: real("longitude").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at"),
+  },
+  (t) => [index("user_locations_user_id").on(t.userId)],
+);
+

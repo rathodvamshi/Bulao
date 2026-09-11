@@ -9,6 +9,8 @@ import { set401Handler } from "../src/api/apiClient";
 import { setAuthExpiredHandler } from "../src/api/client";
 import { useAuth } from "../src/auth";
 import { colors } from "../src/components/ui";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { LocationSheet } from "../src/components/LocationSheet";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -56,18 +58,23 @@ function AppContent() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
-      <Stack screenOptions={{ headerShown: false }} />
-    </SafeAreaView>
+    <View style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </SafeAreaView>
+      <LocationSheet />
+    </View>
   );
 }
 
 export default function Layout() {
   return (
-    <AuthProvider>
-      <QueryClientProvider client={client}>
-        <AppContent />
-      </QueryClientProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <QueryClientProvider client={client}>
+          <AppContent />
+        </QueryClientProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
