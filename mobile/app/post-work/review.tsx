@@ -409,7 +409,7 @@ export default function PostWorkReviewScreen() {
         loading={posting}
       />
 
-      {/* ─── SUCCESS ANIMATED POPUP ─── */}
+      {/* ─── PREMIUM SUCCESS ANIMATED POPUP ─── */}
       <Modal
         visible={showSuccessModal}
         transparent
@@ -426,9 +426,31 @@ export default function PostWorkReviewScreen() {
               },
             ]}
           >
-            {/* Confetti & Ripple Container */}
+            {/* Celebration Radar & Checkmark Header */}
             <View style={styles.celebrationArea}>
-              {/* Radar wave */}
+              {/* Outer Pulsing Glow */}
+              <Animated.View
+                style={[
+                  styles.radarCircle,
+                  styles.radarCircleOuter,
+                  {
+                    transform: [
+                      {
+                        scale: rippleAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.85, 2.4],
+                        }),
+                      },
+                    ],
+                    opacity: rippleAnim.interpolate({
+                      inputRange: [0, 0.6, 1],
+                      outputRange: [0.45, 0.15, 0],
+                    }),
+                  },
+                ]}
+              />
+
+              {/* Inner Pulsing Ring */}
               <Animated.View
                 style={[
                   styles.radarCircle,
@@ -437,17 +459,25 @@ export default function PostWorkReviewScreen() {
                       {
                         scale: rippleAnim.interpolate({
                           inputRange: [0, 1],
-                          outputRange: [0.8, 2.2],
+                          outputRange: [0.9, 1.7],
                         }),
                       },
                     ],
                     opacity: rippleAnim.interpolate({
-                      inputRange: [0, 0.7, 1],
-                      outputRange: [0.5, 0.15, 0],
+                      inputRange: [0, 0.5, 1],
+                      outputRange: [0.6, 0.25, 0],
                     }),
                   },
                 ]}
               />
+
+              {/* Floating Sparkles */}
+              <View style={styles.sparkleTopRight}>
+                <Text style={{ fontSize: 16 }}>✨</Text>
+              </View>
+              <View style={styles.sparkleBottomLeft}>
+                <Text style={{ fontSize: 14 }}>🌟</Text>
+              </View>
 
               {/* Animated Bouncing Checkmark Badge */}
               <Animated.View
@@ -458,45 +488,108 @@ export default function PostWorkReviewScreen() {
                       {
                         scale: checkBounce.interpolate({
                           inputRange: [0, 0.7, 1],
-                          outputRange: [0, 1.25, 1],
+                          outputRange: [0, 1.2, 1],
                         }),
                       },
                     ],
                   },
                 ]}
               >
-                <Ionicons name="checkmark" size={40} color="#FFFFFF" />
+                <Ionicons name="checkmark" size={38} color="#FFFFFF" />
               </Animated.View>
             </View>
 
-            <Text style={styles.successTitle}>Job Posted Successfully! 🎉</Text>
-            <Text style={styles.successSubtitle}>
-              Your job request for{" "}
-              <Text style={{ fontWeight: "800", color: "#0F1F14" }}>
-                "{store.title || store.roleName}"
-              </Text>{" "}
-              is now active. Nearby workers will be notified instantly.
-            </Text>
+            {/* Title & Status */}
+            <Text style={styles.successTitle}>Job Posted Successfully!</Text>
+            <View style={styles.liveBroadcastBadge}>
+              <View style={styles.pulsingGreenDot} />
+              <Text style={styles.liveBroadcastText}>LIVE & MATCHING WORKERS</Text>
+            </View>
 
-            {/* Quick Summary Pill */}
-            <View style={styles.successPill}>
-              <View style={styles.successPillItem}>
-                <Ionicons name="location-sharp" size={13} color={colors.green} />
-                <Text style={styles.successPillText} numberOfLines={1}>
-                  {store.locality}
-                </Text>
+            {/* ── PREMIUM POSTED JOB SUMMARY CARD ── */}
+            <View style={styles.postedJobSummaryCard}>
+              {/* Job Header */}
+              <View style={styles.postedSummaryHeader}>
+                <View style={styles.postedSummaryIconBox}>
+                  <Text style={{ fontSize: 20 }}>{roleIcon || "💼"}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.postedSummaryTitle} numberOfLines={1}>
+                    {store.title || store.roleName || "Job Request"}
+                  </Text>
+                  <Text style={styles.postedSummaryCategory} numberOfLines={1}>
+                    {store.categoryName || "Work"} • {store.roleName || "Worker"}
+                  </Text>
+                </View>
+                <View style={styles.postedPayBadge}>
+                  <Text style={styles.postedPayBadgeText}>
+                    ₹{store.payAmount || "0"}
+                  </Text>
+                  <Text style={styles.postedPayBadgeUnit}>/{store.payUnit}</Text>
+                </View>
               </View>
-              <View style={styles.successPillDivider} />
-              <View style={styles.successPillItem}>
-                <Ionicons name="cash-outline" size={13} color={colors.green} />
-                <Text style={styles.successPillText}>
-                  ₹{store.payAmount}/{store.payUnit}
+
+              <View style={styles.postedSummaryDivider} />
+
+              {/* 2x2 Mini Info Grid */}
+              <View style={styles.postedGrid}>
+                {/* Location */}
+                <View style={styles.postedGridItem}>
+                  <Ionicons name="location-sharp" size={14} color={colors.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.postedGridLabel}>Location</Text>
+                    <Text style={styles.postedGridVal} numberOfLines={1}>
+                      {store.locality || "Selected Location"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Workers Needed */}
+                <View style={styles.postedGridItem}>
+                  <Ionicons name="people-sharp" size={14} color={colors.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.postedGridLabel}>Workers</Text>
+                    <Text style={styles.postedGridVal} numberOfLines={1}>
+                      {store.workers} {store.workers === 1 ? "Person" : "People"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Schedule */}
+                <View style={styles.postedGridItem}>
+                  <Ionicons name="calendar-sharp" size={14} color={colors.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.postedGridLabel}>Schedule</Text>
+                    <Text style={styles.postedGridVal} numberOfLines={1}>
+                      {formatDate(store.startDate || new Date())}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Hours */}
+                <View style={styles.postedGridItem}>
+                  <Ionicons name="time-sharp" size={14} color={colors.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.postedGridLabel}>Timing</Text>
+                    <Text style={styles.postedGridVal} numberOfLines={1}>
+                      {store.hours === "full" ? "Full Day" : `${formatTime(store.startTime)} - ${formatTime(store.endTime)}`}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Live Worker Broadcast Banner */}
+              <View style={styles.broadcastBanner}>
+                <Ionicons name="radio" size={14} color={colors.green} />
+                <Text style={styles.broadcastBannerText} numberOfLines={1}>
+                  Broadcasting to verified workers in {store.locality || "your area"}
                 </Text>
               </View>
             </View>
 
-            {/* Actions: View Job & Go Home */}
+            {/* ── ACTION BUTTONS ── */}
             <View style={styles.successActions}>
+              {/* Primary: View Job in Activity */}
               <Pressable
                 onPress={handleViewJob}
                 style={({ pressed }) => [
@@ -504,10 +597,12 @@ export default function PostWorkReviewScreen() {
                   pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
                 ]}
               >
-                <Ionicons name="eye-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.btnPrimaryText}>View Job</Text>
+                <Ionicons name="eye" size={18} color="#FFFFFF" />
+                <Text style={styles.btnPrimaryText}>View Job Details</Text>
+                <Ionicons name="arrow-forward" size={16} color="#FFFFFF" style={{ marginLeft: "auto" }} />
               </Pressable>
 
+              {/* Secondary: Go Home (Provider Home) */}
               <Pressable
                 onPress={handleGoHome}
                 style={({ pressed }) => [
@@ -516,7 +611,7 @@ export default function PostWorkReviewScreen() {
                 ]}
               >
                 <Ionicons name="home-outline" size={18} color={colors.green} />
-                <Text style={styles.btnSecondaryText}>Go Home</Text>
+                <Text style={styles.btnSecondaryText}>Go to Provider Home</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -763,93 +858,205 @@ const styles = StyleSheet.create({
   // ── Success Popup ──
   successCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 26,
-    padding: 24,
+    borderRadius: 28,
+    padding: 22,
     width: "100%",
-    maxWidth: 380,
+    maxWidth: 390,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 18,
-    elevation: 10,
+    shadowColor: "#052E16",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    elevation: 12,
   },
   celebrationArea: {
-    width: 100,
-    height: 100,
+    width: 96,
+    height: 96,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: 12,
     position: "relative",
   },
   radarCircle: {
     position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: "#D2F4E2",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#DCFCE7",
     borderWidth: 2,
     borderColor: colors.green,
   },
+  radarCircleOuter: {
+    backgroundColor: "#F0FDF4",
+    borderColor: "#86EFAC",
+  },
+  sparkleTopRight: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    zIndex: 10,
+  },
+  sparkleBottomLeft: {
+    position: "absolute",
+    bottom: -2,
+    left: -4,
+    zIndex: 10,
+  },
   successCheckBadge: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     backgroundColor: colors.green,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: colors.green,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 8,
   },
   successTitle: {
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: "900",
     color: "#0F1F14",
     textAlign: "center",
-    marginBottom: 8,
-    letterSpacing: -0.3,
+    marginBottom: 6,
+    letterSpacing: -0.4,
   },
-  successSubtitle: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#6B8A74",
-    textAlign: "center",
-    lineHeight: 18,
-    marginBottom: 16,
-    paddingHorizontal: 8,
-  },
-  successPill: {
+  liveBroadcastBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F2FBF6",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
+    gap: 6,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#C8EADA",
-    marginBottom: 20,
-    gap: 8,
-    maxWidth: "100%",
+    borderColor: "#A7F3D0",
+    marginBottom: 16,
   },
-  successPillItem: {
+  pulsingGreenDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: "#10B981",
+  },
+  liveBroadcastText: {
+    fontSize: 10.5,
+    fontWeight: "900",
+    color: "#047857",
+    letterSpacing: 0.8,
+  },
+
+  // ── Posted Job Summary Card in Modal ──
+  postedJobSummaryCard: {
+    width: "100%",
+    backgroundColor: "#F8FAF9",
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "#DCEAE2",
+    padding: 14,
+    marginBottom: 18,
+  },
+  postedSummaryHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    flexShrink: 1,
+    gap: 10,
   },
-  successPillText: {
-    fontSize: 12,
-    fontWeight: "700",
+  postedSummaryIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: "#E8F5EE",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#C5E6D5",
+  },
+  postedSummaryTitle: {
+    fontSize: 14.5,
+    fontWeight: "800",
     color: "#0F1F14",
   },
-  successPillDivider: {
-    width: 1,
-    height: 14,
-    backgroundColor: "#C8EADA",
+  postedSummaryCategory: {
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: "#6B8A74",
+    marginTop: 1,
   },
+  postedPayBadge: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  postedPayBadgeText: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#047857",
+  },
+  postedPayBadgeUnit: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#059669",
+  },
+  postedSummaryDivider: {
+    height: 1,
+    backgroundColor: "#E4ECE7",
+    marginVertical: 10,
+  },
+  postedGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  postedGridItem: {
+    width: "48%",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E9F0EB",
+  },
+  postedGridLabel: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    color: "#8FA89B",
+    textTransform: "uppercase",
+  },
+  postedGridVal: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#0F1F14",
+    marginTop: 1,
+  },
+  broadcastBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    marginTop: 10,
+  },
+  broadcastBannerText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#15803D",
+    flex: 1,
+  },
+
+  // ── Actions ──
   successActions: {
     width: "100%",
     gap: 10,
@@ -861,12 +1068,13 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: colors.green,
     paddingVertical: 14,
+    paddingHorizontal: 18,
     borderRadius: 14,
     shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
   },
   btnPrimaryText: {
     fontSize: 15,
