@@ -627,8 +627,8 @@ export default function PostWorkReviewScreen() {
                 </View>
               </View>
 
-              {/* ── Side-by-Side Action Buttons inside Green Parent Dock ── */}
-              <View style={styles.successActionsParent}>
+              {/* ── Premium Side-by-Side Action Buttons ── */}
+              <View style={styles.modalActionsRow}>
                 <Pressable
                   style={({ pressed }) => [
                     styles.btnSuccessHome,
@@ -636,9 +636,9 @@ export default function PostWorkReviewScreen() {
                   ]}
                   onPress={handleGoHome}
                   accessibilityRole="button"
-                  accessibilityLabel="Go to Provider Home"
+                  accessibilityLabel="Go to Home"
                 >
-                  <Ionicons name="home-outline" size={17} color="#FFFFFF" />
+                  <Ionicons name="home" size={17} color="#15803D" />
                   <Text style={styles.btnSuccessHomeText}>Home</Text>
                 </Pressable>
 
@@ -651,9 +651,9 @@ export default function PostWorkReviewScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="View Posted Job Details"
                 >
-                  <Ionicons name="eye-outline" size={17} color={colors.green} />
+                  <Ionicons name="eye" size={17} color="#FFFFFF" />
                   <Text style={styles.btnSuccessViewJobText}>View Job</Text>
-                  <Ionicons name="arrow-forward" size={15} color={colors.green} />
+                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
                 </Pressable>
               </View>
             </ScrollView>
@@ -1035,7 +1035,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#DCEAE2",
     padding: 12,
-    marginBottom: 10,
+    marginBottom: 0,
   },
   postedSummaryHeader: {
     flexDirection: "row",
@@ -1135,71 +1135,67 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Success Action Buttons inside Green Parent Dock ──
-  successActionsParent: {
+  // ── Modal Action Buttons: Side-by-Side ──
+  modalActionsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
     width: "100%",
-    backgroundColor: colors.green,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#063B1D",
-    padding: 6,
-    marginTop: 6,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginTop: 14,
   },
   btnSuccessHome: {
     flex: 1,
-    height: 46,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: 15,
     borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.4)",
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: "#86EFAC",
+    backgroundColor: "#F0FDF4",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-  },
-  btnSuccessHomePressed: {
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
-    transform: [{ scale: 0.98 }],
-  },
-  btnSuccessHomeText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 0.2,
-  },
-  btnSuccessViewJob: {
-    flex: 1.2,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    shadowColor: "#000",
+    gap: 7,
+    shadowColor: "#059669",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
   },
+  btnSuccessHomePressed: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#4ADE80",
+    transform: [{ scale: 0.97 }],
+  },
+  btnSuccessHomeText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#15803D",
+    letterSpacing: 0.2,
+  },
+  btnSuccessViewJob: {
+    flex: 1.15,
+    height: 50,
+    borderRadius: 15,
+    backgroundColor: colors.green,
+    borderWidth: 1.5,
+    borderColor: "#0A4D27",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    shadowColor: colors.green,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 4,
+  },
   btnSuccessViewJobPressed: {
-    backgroundColor: "#E8F5EE",
-    transform: [{ scale: 0.98 }],
+    backgroundColor: "#064E3B",
+    transform: [{ scale: 0.97 }],
   },
   btnSuccessViewJobText: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: colors.green,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
     letterSpacing: 0.2,
   },
 
