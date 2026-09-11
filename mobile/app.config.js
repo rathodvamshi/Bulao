@@ -34,6 +34,3 @@ export default {
   },
 };
 
-if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-  console.log("STAGING_API=", process.env.EXPO_PUBLIC_API_BASE_URL);
-}
