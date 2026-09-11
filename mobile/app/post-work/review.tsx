@@ -535,7 +535,7 @@ export default function PostWorkReviewScreen() {
                     },
                   ]}
                 >
-                  <Ionicons name="checkmark" size={34} color="#FFFFFF" />
+                  <Ionicons name="checkmark" size={28} color="#FFFFFF" />
                 </Animated.View>
               </View>
 
@@ -932,12 +932,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingTop: 16,
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingBottom: 14,
     width: "100%",
     maxWidth: 390,
-    maxHeight: "90%",
-    alignItems: "center",
-    overflow: "visible",
+    maxHeight: "85%",
     shadowColor: "#052E16",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
@@ -946,7 +944,7 @@ const styles = StyleSheet.create({
   },
   successScrollView: {
     width: "100%",
-    flexShrink: 1,
+    flex: 1,
   },
   successScrollContainer: {
     alignItems: "center",
@@ -954,18 +952,18 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   celebrationArea: {
-    width: 76,
-    height: 76,
+    width: 64,
+    height: 64,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
+    marginBottom: 6,
     position: "relative",
   },
   radarCircle: {
     position: "absolute",
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: "#DCFCE7",
     borderWidth: 2,
     borderColor: colors.green,
@@ -987,9 +985,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   successCheckBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.green,
     alignItems: "center",
     justifyContent: "center",
@@ -1000,12 +998,12 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   successTitle: {
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: "900",
     color: "#0F1F14",
     textAlign: "center",
-    marginBottom: 4,
-    letterSpacing: -0.4,
+    marginBottom: 3,
+    letterSpacing: -0.3,
   },
   liveBroadcastBadge: {
     flexDirection: "row",
@@ -1017,7 +1015,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#A7F3D0",
-    marginBottom: 12,
+    marginBottom: 8,
   },
   pulsingGreenDot: {
     width: 6,
@@ -1143,12 +1141,16 @@ const styles = StyleSheet.create({
   // ── Pinned Bottom Action Buttons ──
   actionBtnContainer: {
     flexDirection: "row",
+    alignItems: "center",
     width: "100%",
     gap: 10,
-    paddingTop: 12,
+    paddingTop: 14,
+    marginTop: 6,
     borderTopWidth: 1,
     borderTopColor: "#E5E7EB",
-    marginTop: 4,
+    flexShrink: 0,
+    flexGrow: 0,
+    minHeight: 52,
   },
   actionBtnOutline: {
     flex: 1,
@@ -1156,7 +1158,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 52,
+    height: 48,
+    minHeight: 48,
     borderRadius: 14,
     borderWidth: 2,
     borderColor: "#10B981",
@@ -1168,12 +1171,13 @@ const styles = StyleSheet.create({
     color: "#059669",
   },
   actionBtnFilled: {
-    flex: 1.3,
+    flex: 1.2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 52,
+    height: 48,
+    minHeight: 48,
     borderRadius: 14,
     backgroundColor: "#10B981",
     borderWidth: 2,
