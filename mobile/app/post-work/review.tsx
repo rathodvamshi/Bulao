@@ -461,7 +461,7 @@ export default function PostWorkReviewScreen() {
             </Pressable>
 
             <ScrollView
-              style={{ width: "100%" }}
+              style={styles.successScrollView}
               contentContainerStyle={styles.successScrollContainer}
               showsVerticalScrollIndicator={false}
               bounces={false}
@@ -626,37 +626,37 @@ export default function PostWorkReviewScreen() {
                   </Text>
                 </View>
               </View>
-
-              {/* ── Premium Side-by-Side Action Buttons ── */}
-              <View style={styles.modalActionsRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.btnSuccessHome,
-                    pressed && styles.btnSuccessHomePressed,
-                  ]}
-                  onPress={handleGoHome}
-                  accessibilityRole="button"
-                  accessibilityLabel="Go to Home"
-                >
-                  <Ionicons name="home" size={17} color="#15803D" />
-                  <Text style={styles.btnSuccessHomeText}>Home</Text>
-                </Pressable>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.btnSuccessViewJob,
-                    pressed && styles.btnSuccessViewJobPressed,
-                  ]}
-                  onPress={handleViewJob}
-                  accessibilityRole="button"
-                  accessibilityLabel="View Posted Job Details"
-                >
-                  <Ionicons name="eye" size={17} color="#FFFFFF" />
-                  <Text style={styles.btnSuccessViewJobText}>View Job</Text>
-                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
-                </Pressable>
-              </View>
             </ScrollView>
+
+            {/* ── Always Visible Pinned Bottom Action Buttons ── */}
+            <View style={styles.modalActionsRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.btnSuccessHome,
+                  pressed && styles.btnSuccessHomePressed,
+                ]}
+                onPress={handleGoHome}
+                accessibilityRole="button"
+                accessibilityLabel="Go to Home"
+              >
+                <Ionicons name="home" size={17} color="#15803D" />
+                <Text style={styles.btnSuccessHomeText}>Home</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.btnSuccessViewJob,
+                  pressed && styles.btnSuccessViewJobPressed,
+                ]}
+                onPress={handleViewJob}
+                accessibilityRole="button"
+                accessibilityLabel="View Posted Job Details"
+              >
+                <Ionicons name="eye" size={17} color="#FFFFFF" />
+                <Text style={styles.btnSuccessViewJobText}>View Job</Text>
+                <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+              </Pressable>
+            </View>
           </Animated.View>
         </View>
       </Modal>
@@ -942,6 +942,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
+  },
+  successScrollView: {
+    width: "100%",
+    flexShrink: 1,
   },
   successScrollContainer: {
     alignItems: "center",
