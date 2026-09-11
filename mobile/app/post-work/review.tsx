@@ -204,6 +204,16 @@ export default function PostWorkReviewScreen() {
     router.replace("/provider-home");
   };
 
+  const handleViewJob = () => {
+    setShowSuccessModal(false);
+    store.resetFlow();
+    if (createdJobId) {
+      router.replace(`/jobs/${createdJobId}`);
+    } else {
+      router.replace("/activity");
+    }
+  };
+
   const handleConfirmExit = () => {
     setShowExitModal(false);
     store.resetFlow();
@@ -615,6 +625,36 @@ export default function PostWorkReviewScreen() {
                     Broadcasting to workers in {store.locality || "your area"}
                   </Text>
                 </View>
+              </View>
+
+              {/* ── Side-by-Side Action Buttons: Home & View Job ── */}
+              <View style={styles.successActionsRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.btnSuccessHome,
+                    pressed && styles.btnSuccessHomePressed,
+                  ]}
+                  onPress={handleGoHome}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Provider Home"
+                >
+                  <Ionicons name="home-outline" size={17} color={colors.green} />
+                  <Text style={styles.btnSuccessHomeText}>Home</Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.btnSuccessViewJob,
+                    pressed && styles.btnSuccessViewJobPressed,
+                  ]}
+                  onPress={handleViewJob}
+                  accessibilityRole="button"
+                  accessibilityLabel="View Posted Job Details"
+                >
+                  <Ionicons name="eye-outline" size={17} color="#FFFFFF" />
+                  <Text style={styles.btnSuccessViewJobText}>View Job</Text>
+                  <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                </Pressable>
               </View>
             </ScrollView>
           </Animated.View>
@@ -1093,6 +1133,69 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#15803D",
     flex: 1,
+  },
+
+  // ── Success Action Buttons (Side by Side) ──
+  successActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    marginTop: 6,
+  },
+  btnSuccessHome: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.green,
+    backgroundColor: "#F0FDF4",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    shadowColor: colors.green,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  btnSuccessHomePressed: {
+    backgroundColor: "#DCFCE7",
+    transform: [{ scale: 0.98 }],
+  },
+  btnSuccessHomeText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.green,
+    letterSpacing: 0.2,
+  },
+  btnSuccessViewJob: {
+    flex: 1.15,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: colors.green,
+    borderWidth: 1.5,
+    borderColor: "#047857",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    shadowColor: colors.green,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  btnSuccessViewJobPressed: {
+    backgroundColor: "#0D532B",
+    transform: [{ scale: 0.98 }],
+  },
+  btnSuccessViewJobText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.2,
   },
 
   modalCloseBtn: {
