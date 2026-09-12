@@ -2,7 +2,7 @@
 -- Existing users.phone already has a UNIQUE constraint and stores E.164 numbers.
 ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN updated_at INTEGER;
-ALTER TABLE users ADD COLUMN last_login_at INTEGER;
+ALTER TABLE users ADD COLUMN last_login_at IsuccessNTEGER;
 ALTER TABLE sessions ADD COLUMN created_at INTEGER;
 ALTER TABLE sessions ADD COLUMN revoked_at INTEGER;
 CREATE INDEX sessions_user_id ON sessions(user_id);
@@ -15,7 +15,7 @@ CREATE TABLE auth_events (
   ip_hash TEXT,
   event_type TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  success INTEGER NOT NULL CHECK(success IN (0,1)),
+  success INTEGER NOT NULL CHECK( IN (0,1)),
   code TEXT
 );
 CREATE INDEX auth_events_user_id ON auth_events(user_id);

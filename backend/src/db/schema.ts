@@ -51,6 +51,7 @@ export const roles = sqliteTable("roles", {
     .notNull()
     .references(() => categories.id),
   name: text("name").notNull(),
+  icon: text("icon").notNull().default("👤"),
 });
 export const locations = sqliteTable("locations", {
   id: text("id").primaryKey(),

@@ -53,13 +53,36 @@ jobRoutes.post("/", requireAuth, async (c) => {
       (input.duration !== "few" && input.endsAt !== null) ||
       (input.hours === "custom" && input.endTime <= input.startTime))
     throw new ApiError("INVALID_SCHEDULE", 400, "Please check the end date and working hours.");
-  const role = await db
+  let role = await db
     .select()
     .from(roles)
     .where(eq(roles.id, input.roleId))
     .get();
-  if (!role || role.categoryId !== input.categoryId)
-    throw new ApiError("INVALID_ROLE");
+
+  if (!role) {
+    role = await db
+      .select()
+      .from(roles)
+      .where(eq(roles.categoryId, input.categoryId))
+      .get();
+    if (role) {
+      input.roleId = role.id;
+    }
+  }
+
+  if (role && role.categoryId !== input.categoryId) {
+    input.categoryId = role.categoryId;
+  }
+
+  if (!role) {
+    const defaultRole = await db.select().from(roles).get();
+    if (defaultRole) {
+      input.roleId = defaultRole.id;
+      input.categoryId = defaultRole.categoryId;
+    } else {
+      throw new ApiError("INVALID_ROLE");
+    }
+  }
   await rateLimit(c.env.DB, `publish:${c.get("userId")}`, 30, 86400);
   const id = crypto.randomUUID();
   await db
@@ -121,10 +144,26 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
   return ok(c, { id });
 });
 
+function asCount(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function trendPct(current: number, previous: number): number | null {
+  if (current === 0 && previous === 0) return null;
+  if (previous === 0) return 100;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
 jobRoutes.get("/provider/stats", requireAuth, async (c) => {
   const userId = c.get("userId");
-  
-  const stats = await c.env.DB.prepare(`
+  const period = (c.req.query("period") || "month").toLowerCase();
+  const nowSec = now();
+  const windowSec = period === "week" ? 7 * 86400 : period === "all" ? nowSec : 30 * 86400;
+  const currentStart = period === "all" ? 0 : nowSec - windowSec;
+  const previousStart = period === "all" ? 0 : nowSec - windowSec * 2;
+
+  const snapshot = await c.env.DB.prepare(`
     SELECT 
       COUNT(*) as total,
       SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END) as active,
@@ -135,73 +174,152 @@ jobRoutes.get("/provider/stats", requireAuth, async (c) => {
     WHERE owner_id = ?
   `).bind(userId).first();
 
-  const applications = await c.env.DB.prepare(`
+  const pending = await c.env.DB.prepare(`
     SELECT COUNT(*) as count
     FROM interactions
     WHERE owner_id = ? AND kind = 'job' AND status = 'PENDING'
   `).bind(userId).first();
 
+  const allResponses = await c.env.DB.prepare(`
+    SELECT COUNT(*) as count
+    FROM interactions
+    WHERE owner_id = ? AND kind = 'job'
+  `).bind(userId).first();
+
+  const periodJobs = await c.env.DB.prepare(`
+    SELECT
+      SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as currentCount,
+      SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) as previousCount,
+      SUM(CASE WHEN created_at >= ? AND status = 'FILLED' THEN 1 ELSE 0 END) as hiredCurrent,
+      SUM(CASE WHEN created_at >= ? AND created_at < ? AND status = 'FILLED' THEN 1 ELSE 0 END) as hiredPrevious
+    FROM jobs
+    WHERE owner_id = ?
+  `).bind(currentStart, previousStart, currentStart, currentStart, previousStart, currentStart, userId).first();
+
+  const periodResponses = await c.env.DB.prepare(`
+    SELECT
+      SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as currentCount,
+      SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) as previousCount
+    FROM interactions
+    WHERE owner_id = ? AND kind = 'job'
+  `).bind(currentStart, previousStart, currentStart, userId).first();
+
+  const jobsPosted = period === "all" ? asCount(snapshot?.total) : asCount(periodJobs?.currentCount);
+  const hired = period === "all" ? asCount(snapshot?.hired) : asCount(periodJobs?.hiredCurrent);
+  const interested = period === "all" ? asCount(allResponses?.count) : asCount(periodResponses?.currentCount);
+  const active = asCount(snapshot?.active);
+
   return ok(c, {
-    jobsPosted: stats?.total || 0,
-    active: stats?.active || 0,
-    interested: applications?.count || 0,
-    hired: stats?.hired || 0,
-    completed: stats?.completed || 0,
+    jobsPosted,
+    active,
+    interested,
+    hired,
+    completed: asCount(snapshot?.completed),
+    pendingResponses: asCount(pending?.count),
+    period,
+    trends: {
+      jobsPosted: trendPct(jobsPosted, asCount(periodJobs?.previousCount)),
+      interested: trendPct(interested, asCount(periodResponses?.previousCount)),
+      hired: trendPct(hired, asCount(periodJobs?.hiredPrevious)),
+      active: null,
+    },
   });
 });
 
 jobRoutes.get("/provider/recent", requireAuth, async (c) => {
   const userId = c.get("userId");
   
-  const recentJobs = await c.env.DB.prepare(`
-    SELECT 
-      j.id,
-      j.role_id as roleId,
-      j.category_id as categoryId,
-      r.name as title,
-      c.name as categoryName,
-      j.area,
-      j.lat,
-      j.lng,
-      j.pay_paise as payPaise,
-      j.pay_unit as payUnit,
-      j.status,
-      j.created_at as createdAt,
-      (SELECT COUNT(*) FROM interactions WHERE job_id = j.id AND kind = 'job') as applicantCount
-    FROM jobs j
-    JOIN roles r ON r.id = j.role_id
-    JOIN categories c ON c.id = j.category_id
-    WHERE j.owner_id = ?
-    ORDER BY j.created_at DESC
-    LIMIT 20
-  `).bind(userId).all();
+  try {
+    // Simplified query without subquery to avoid potential issues
+    const recentJobs = await c.env.DB.prepare(`
+      SELECT 
+        j.id,
+        j.role_id as roleId,
+        j.category_id as categoryId,
+        COALESCE(r.name, j.title, 'Job') as title,
+        COALESCE(r.icon, '💼') as roleIcon,
+        COALESCE(cat.name, 'General') as categoryName,
+        COALESCE(cat.icon, '📋') as categoryIcon,
+        j.area,
+        j.latitude,
+        j.longitude,
+        j.pay_paise as payPaise,
+        j.pay_unit as payUnit,
+        j.status,
+        j.created_at as createdAt
+      FROM jobs j
+      LEFT JOIN roles r ON r.id = j.role_id
+      LEFT JOIN categories cat ON cat.id = j.category_id
+      WHERE j.owner_id = ?
+      ORDER BY j.created_at DESC
+      LIMIT 20
+    `).bind(userId).all();
 
-  const jobsList = recentJobs.results || [];
-  const jobsWithApplicants = await Promise.all(
-    jobsList.map(async (job: any) => {
-      if (job.applicantCount > 0) {
-        const applicantsRes = await c.env.DB.prepare(`
-          SELECT 
-            u.id,
-            u.name,
-            u.photo_url as photoUrl
-          FROM interactions i
-          JOIN users u ON u.id = i.worker_id
-          WHERE i.job_id = ? AND i.kind = 'job'
-          ORDER BY i.created_at DESC
-          LIMIT 4
-        `).bind(job.id).all();
+    if (!recentJobs.success) {
+      console.error('DB query failed:', recentJobs.error);
+      throw new ApiError("DATABASE_ERROR", 500, "Database query failed");
+    }
+
+    const jobsList = recentJobs.results || [];
+    
+    // Get applicant counts for all jobs in one query
+    const jobIds = jobsList.map((job: any) => job.id);
+    const applicantCounts = new Map<string, number>();
+    
+    if (jobIds.length > 0) {
+      const countsQuery = await c.env.DB.prepare(`
+        SELECT job_id, COUNT(*) as count
+        FROM interactions
+        WHERE job_id IN (${jobIds.map(() => '?').join(',')}) AND kind = 'job'
+        GROUP BY job_id
+      `).bind(...jobIds).all();
+      
+      if (countsQuery.results) {
+        countsQuery.results.forEach((row: any) => {
+          applicantCounts.set(row.job_id, Number(row.count) || 0);
+        });
+      }
+    }
+
+    // Build final results with applicant data
+    const jobsWithApplicants = await Promise.all(
+      jobsList.map(async (job: any) => {
+        const applicantCount = applicantCounts.get(job.id) || 0;
+        
+        let applicants = [];
+        if (applicantCount > 0) {
+          try {
+            const applicantsRes = await c.env.DB.prepare(`
+              SELECT 
+                u.id,
+                u.name,
+                u.photo_url as photoUrl
+              FROM interactions i
+              JOIN users u ON u.id = i.worker_id
+              WHERE i.job_id = ? AND i.kind = 'job'
+              ORDER BY i.created_at DESC
+              LIMIT 4
+            `).bind(job.id).all();
+            applicants = applicantsRes.results || [];
+          } catch (err) {
+            console.error(`Error fetching applicants for job ${job.id}:`, err);
+            // Continue with empty applicants array
+          }
+        }
+        
         return {
           ...job,
-          applicants: applicantsRes.results || [],
+          applicantCount,
+          applicants,
         };
-      }
-      return {
-        ...job,
-        applicants: [],
-      };
-    })
-  );
+      })
+    );
 
-  return ok(c, jobsWithApplicants);
+    return ok(c, jobsWithApplicants);
+  } catch (error: any) {
+    console.error('Error in /provider/recent:', error);
+    console.error('Error stack:', error?.stack);
+    console.error('Error message:', error?.message);
+    throw new ApiError("INTERNAL_ERROR", 500, "Failed to fetch recent jobs");
+  }
 });
