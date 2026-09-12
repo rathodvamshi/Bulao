@@ -41,9 +41,7 @@ export const useLocation = create<LocationState>()(
     }),
     {
       name: "bulao-location",
-      storage: createJSONStorage(() => 
-        Platform.OS === "web" ? window.localStorage : AsyncStorage
-      ),
+      storage: createJSONStorage(() => AsyncStorage),
       // Only persist the selected location — don't persist sheet state or saved list
       partialize: (state) => ({ location: state.location }),
     }

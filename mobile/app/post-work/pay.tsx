@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, Pressable, StyleSheet, TextInput, Alert, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../../src/components/ui";
@@ -22,6 +22,15 @@ export default function PostWorkPayScreen() {
   const [localDescription, setLocalDescription] = useState(description);
   const [showExitModal, setShowExitModal] = useState(false);
 
+  // Auto-seed and sync from store whenever editing or store values change
+  useEffect(() => {
+    if (payAmount) setLocalAmount(payAmount);
+    if (payUnit) setLocalUnit(payUnit);
+    if (payWhen) setLocalWhen(payWhen);
+    if (extras && extras.length > 0) setLocalExtras(extras);
+    if (description) setLocalDescription(description);
+  }, [payAmount, payUnit, payWhen, extras, description]);
+
   const payUnits: { value: PayUnit; label: string }[] = [
     { value: "day", label: "Day" },
     { value: "job", label: "Task" },
@@ -36,8 +45,30 @@ export default function PostWorkPayScreen() {
 
   const benefitOptions = ["🍽️ Meals", "🚗 Travel", "🏨 Stay"];
 
+  const isBenefitActive = (benefit: string) => {
+    const raw = benefit.toLowerCase().replace(/[^a-z]/g, "");
+    return localExtras.some((e) => {
+      const eRaw = e.toLowerCase().replace(/[^a-z]/g, "");
+      return eRaw.includes(raw) || raw.includes(eRaw);
+    });
+  };
+
   const toggleBenefit = (benefit: string) => {
-    setLocalExtras(prev => prev.includes(benefit) ? prev.filter(b => b !== benefit) : [...prev, benefit]);
+    const raw = benefit.toLowerCase().replace(/[^a-z]/g, "");
+    setLocalExtras((prev) => {
+      const exists = prev.some((e) => {
+        const eRaw = e.toLowerCase().replace(/[^a-z]/g, "");
+        return eRaw.includes(raw) || raw.includes(eRaw);
+      });
+      if (exists) {
+        return prev.filter((e) => {
+          const eRaw = e.toLowerCase().replace(/[^a-z]/g, "");
+          return !eRaw.includes(raw) && !raw.includes(eRaw);
+        });
+      } else {
+        return [...prev, benefit];
+      }
+    });
   };
 
   const handleNext = () => {
@@ -122,8 +153,8 @@ export default function PostWorkPayScreen() {
           <Text style={styles.label}>Benefits (Optional)</Text>
           <View style={styles.benefitRow}>
             {benefitOptions.map(benefit => (
-              <Pressable key={benefit} onPress={() => toggleBenefit(benefit)} style={[styles.benefitChip, localExtras.includes(benefit) && styles.benefitChipActive]}>
-                <Text style={[styles.benefitText, localExtras.includes(benefit) && styles.benefitTextActive]}>{benefit}</Text>
+              <Pressable key={benefit} onPress={() => toggleBenefit(benefit)} style={[styles.benefitChip, isBenefitActive(benefit) && styles.benefitChipActive]}>
+                <Text style={[styles.benefitText, isBenefitActive(benefit) && styles.benefitTextActive]}>{benefit}</Text>
               </Pressable>
             ))}
           </View>

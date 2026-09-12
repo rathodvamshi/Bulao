@@ -1,16 +1,40 @@
-import { useState } from "react";
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Image } from "react-native";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Modal,
+  TextInput,
+  Linking,
+  Platform,
+  Animated,
+  LayoutAnimation,
+  UIManager,
+  Easing,
+} from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, Copy, colors } from "../src/components/ui";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../src/api/client";
 import { getExactRoleIcon } from "../src/utils/nameVerification";
+import { ProviderBottomNav } from "../src/components/provider/ProviderBottomNav";
+import { dash } from "../src/components/provider/palette";
+import { useJobsNotification } from "../src/store/jobsNotification";
+import { JobApplicationsModal } from "../src/components/JobApplicationsModal";
 
 type Applicant = {
   id: string;
   name: string;
   photoUrl?: string | null;
+  phone?: string | null;
+  message?: string;
+  appliedAt?: number;
 };
 
 type Job = {
@@ -23,19 +47,11 @@ type Job = {
   payPaise: number;
   payUnit: string;
   status: string;
+  workers?: number;
   applicantCount: number;
   createdAt?: number | string;
   startsAt?: number;
   applicants?: Applicant[];
-};
-
-type Interaction = {
-  id: string;
-  jobId: string;
-  jobTitle: string;
-  area: string;
-  status: string;
-  createdAt: number;
 };
 
 const AVATAR_PALETTES = [
@@ -168,8 +184,8 @@ function getJobStatusMeta(status: string) {
     default:
       return {
         label: status || "Open",
-        dotColor: colors.muted,
-        textColor: colors.ink,
+        dotColor: "#6B7280",
+        textColor: "#374151",
         bgColor: "#F3F4F6",
         borderColor: "#E5E7EB",
       };
@@ -197,13 +213,13 @@ function ApplicantAvatarStack({
             <View
               key={app.id || index}
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
+                width: 26,
+                height: 26,
+                borderRadius: 13,
                 backgroundColor: palette.bg,
                 borderWidth: 2,
                 borderColor: "#FFFFFF",
-                marginLeft: index === 0 ? 0 : -10,
+                marginLeft: index === 0 ? 0 : -7,
                 alignItems: "center",
                 justifyContent: "center",
                 overflow: "hidden",
@@ -224,7 +240,7 @@ function ApplicantAvatarStack({
               ) : (
                 <Text
                   style={{
-                    fontSize: 13,
+                    fontSize: 11,
                     fontWeight: "800",
                     color: palette.text,
                   }}
@@ -240,17 +256,17 @@ function ApplicantAvatarStack({
       {remaining > 0 && (
         <View
           style={{
-            marginLeft: -8,
+            marginLeft: -5,
             backgroundColor: "#EEF2FF",
-            paddingHorizontal: 7,
-            paddingVertical: 4,
-            borderRadius: 12,
+            paddingHorizontal: 5,
+            paddingVertical: 2,
+            borderRadius: 8,
             borderWidth: 1.5,
             borderColor: "#FFFFFF",
             zIndex: 1,
           }}
         >
-          <Text style={{ fontSize: 11, fontWeight: "800", color: "#4F46E5" }}>
+          <Text style={{ fontSize: 10, fontWeight: "800", color: "#4F46E5" }}>
             +{remaining}
           </Text>
         </View>
@@ -259,582 +275,1517 @@ function ApplicantAvatarStack({
   );
 }
 
-export default function ActivityScreen() {
-  const params = useLocalSearchParams<{ filter?: string }>();
-  const [activeTab, setActiveTab] = useState<"posted" | "applied">("posted");
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+function SmoothPausedBanner({ isPaused }: { isPaused: boolean }) {
+  const anim = useRef(new Animated.Value(isPaused ? 1 : 0)).current;
+  const [rendered, setRendered] = useState(isPaused);
+
+  useEffect(() => {
+    if (isPaused) {
+      setRendered(true);
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else {
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) {
+          setRendered(false);
+        }
+      });
+    }
+  }, [isPaused, anim]);
+
+  if (!rendered && !isPaused) return null;
+
+  const maxHeight = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 48],
+  });
+
+  const opacity = anim.interpolate({
+    inputRange: [0, 0.25, 1],
+    outputRange: [0, 0.4, 1],
+  });
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-6, 0],
+  });
 
   return (
-    <Screen title="Activity" back>
-      {/* Top Main Tab Toggle */}
-      <View
-        style={{
-          flexDirection: "row",
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
-        <Pressable
-          onPress={() => setActiveTab("posted")}
-          style={{
-            flex: 1,
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 14,
-            backgroundColor: activeTab === "posted" ? colors.green : colors.white,
-            borderWidth: 1.5,
-            borderColor: activeTab === "posted" ? colors.green : "#E2ECE6",
-            shadowColor: activeTab === "posted" ? colors.green : "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: activeTab === "posted" ? 0.2 : 0.03,
-            shadowRadius: 6,
-            elevation: activeTab === "posted" ? 3 : 1,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 14.5,
-              fontWeight: "800",
-              color: activeTab === "posted" ? colors.white : colors.ink,
-              textAlign: "center",
-            }}
-          >
-            Jobs Posted
+    <Animated.View
+      style={{
+        maxHeight,
+        opacity,
+        overflow: "hidden",
+        transform: [{ translateY }],
+        width: "100%",
+      }}
+    >
+      <View style={styles.pausedNoticeBar}>
+        <View style={styles.pausedNoticeLeft}>
+          <Ionicons name="pause-circle" size={15} color="#D97706" />
+          <Text style={styles.pausedNoticeText}>
+            Posting stopped • Not visible to workers
           </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab("applied")}
-          style={{
-            flex: 1,
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 14,
-            backgroundColor: activeTab === "applied" ? colors.green : colors.white,
-            borderWidth: 1.5,
-            borderColor: activeTab === "applied" ? colors.green : "#E2ECE6",
-            shadowColor: activeTab === "applied" ? colors.green : "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: activeTab === "applied" ? 0.2 : 0.03,
-            shadowRadius: 6,
-            elevation: activeTab === "applied" ? 3 : 1,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 14.5,
-              fontWeight: "800",
-              color: activeTab === "applied" ? colors.white : colors.ink,
-              textAlign: "center",
-            }}
-          >
-            Applications
-          </Text>
-        </Pressable>
+        </View>
+        <View style={styles.pausedBadge}>
+          <Text style={styles.pausedBadgeText}>STOPPED</Text>
+        </View>
       </View>
-
-      {activeTab === "posted" ? <PostedJobsTab initialFilter={params.filter} /> : <ApplicationsTab />}
-    </Screen>
+    </Animated.View>
   );
 }
 
-function PostedJobsTab({ initialFilter }: { initialFilter?: string }) {
-  const [selectedFilter, setSelectedFilter] = useState<string>(initialFilter || "all");
+export default function ActivityScreen() {
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ filter?: string }>();
+  const [selectedFilter, setSelectedFilter] = useState<string>(params.filter || "active");
+  const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
+  const [jobToPause, setJobToPause] = useState<Job | null>(null);
+  const [applicationsJob, setApplicationsJob] = useState<Job | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: jobs, isLoading, error } = useQuery<Job[]>({
+  const client = useQueryClient();
+
+  const {
+    getAdjustedWorkers,
+    incrementWorkers,
+  } = useJobsNotification();
+
+  const showToast = useCallback(
+    (msg: string) => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+      setToastMessage(msg);
+      toastAnim.setValue(0);
+      Animated.spring(toastAnim, {
+        toValue: 1,
+        friction: 6.5,
+        tension: 50,
+        useNativeDriver: true,
+      }).start();
+
+      toastTimeoutRef.current = setTimeout(() => {
+        Animated.timing(toastAnim, {
+          toValue: 0,
+          duration: 260,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) {
+            setToastMessage(null);
+          }
+        });
+      }, 2600);
+    },
+    [toastAnim]
+  );
+
+  const {
+    data: jobs,
+    isLoading,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery<Job[]>({
     queryKey: ["my-jobs"],
     queryFn: () => api<Job[]>("/jobs/provider/recent"),
   });
 
-  const filterOptions = [
-    { key: "all", label: "All" },
-    { key: "active", label: "🟢 Active" },
-    { key: "interested", label: "👥 With Applicants" },
-    { key: "hired", label: "🤝 Hired" },
-    { key: "completed", label: "✓ Done" },
+  const counts = useMemo(() => {
+    if (!jobs) return { active: 0, interested: 0, hired: 0, completed: 0, total: 0, live: 0, paused: 0 };
+    const live = jobs.filter((j) => j.status === "PUBLISHED").length;
+    const paused = jobs.filter((j) => j.status === "PAUSED").length;
+    return {
+      total: jobs.length,
+      active: live + paused,
+      live,
+      paused,
+      interested: jobs.filter((j) => (j.applicantCount || 0) > 0).length,
+      hired: jobs.filter((j) => j.status === "FILLED").length,
+      completed: jobs.filter((j) => j.status === "COMPLETED").length,
+    };
+  }, [jobs]);
+
+  // Removed "All" filter; defaults to Active jobs
+  const filterOptions: {
+    key: string;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    activeIcon: keyof typeof Ionicons.glyphMap;
+    count: number;
+    color: string;
+  }[] = [
+    {
+      key: "active",
+      label: "Active",
+      icon: "flash-outline",
+      activeIcon: "flash",
+      count: counts.active,
+      color: "#10B981",
+    },
+    {
+      key: "interested",
+      label: "With Applicants",
+      icon: "people-outline",
+      activeIcon: "people",
+      count: counts.interested,
+      color: "#3B82F6",
+    },
+    {
+      key: "hired",
+      label: "Hired",
+      icon: "briefcase-outline",
+      activeIcon: "briefcase",
+      count: counts.hired,
+      color: "#8B5CF6",
+    },
+    {
+      key: "completed",
+      label: "Done",
+      icon: "checkmark-done-circle-outline",
+      activeIcon: "checkmark-done-circle",
+      count: counts.completed,
+      color: "#059669",
+    },
   ];
 
-  if (isLoading) {
-    return (
-      <View style={{ paddingVertical: 50, alignItems: "center" }}>
-        <ActivityIndicator size="large" color={colors.green} />
-      </View>
-    );
-  }
+  const filteredJobs = useMemo(() => {
+    if (!jobs) return [];
+    return jobs.filter((job) => {
+      if (selectedFilter === "active") return job.status === "PUBLISHED" || job.status === "PAUSED";
+      if (selectedFilter === "interested") return (job.applicantCount || 0) > 0;
+      if (selectedFilter === "hired") return job.status === "FILLED";
+      if (selectedFilter === "completed") return job.status === "COMPLETED";
+      return true;
+    });
+  }, [jobs, selectedFilter]);
 
-  if (error) {
-    return (
-      <View
-        style={{
-          backgroundColor: "#FEF2F2",
-          padding: 18,
-          borderRadius: 16,
-          borderWidth: 1,
-          borderColor: "#FEE2E2",
-          alignItems: "center",
-        }}
-      >
-        <Ionicons name="alert-circle-outline" size={36} color="#EF4444" />
-        <Text style={{ fontSize: 15, fontWeight: "700", color: "#991B1B", marginTop: 8 }}>
-          Failed to load jobs
-        </Text>
-        <Text style={{ fontSize: 13, color: "#B91C1C", textAlign: "center", marginTop: 4 }}>
-          Please check your connection and try again.
-        </Text>
-      </View>
-    );
-  }
-
-  const filteredJobs = jobs?.filter((job) => {
-    if (selectedFilter === "active") return job.status === "PUBLISHED";
-    if (selectedFilter === "interested") return (job.applicantCount || 0) > 0;
-    if (selectedFilter === "hired") return job.status === "FILLED";
-    if (selectedFilter === "completed") return job.status === "COMPLETED";
-    return true;
+  // Job Action Mutation (pause / publish / cancel)
+  const actionMutation = useMutation({
+    mutationFn: ({ jobId, action }: { jobId: string; action: "pause" | "publish" | "cancel" }) =>
+      api(`/jobs/${jobId}/action`, { action }),
+    onSuccess: (_, { action }) => {
+      setJobToPause(null);
+      setJobToDelete(null);
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      const msg =
+        action === "pause"
+          ? "Job paused. Posting is stopped."
+          : action === "publish"
+          ? "Job resumed and live for workers!"
+          : "Job posting deleted.";
+      showToast(msg);
+      void client.invalidateQueries({ queryKey: ["my-jobs"] });
+      void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Action failed. Please try again.");
+    },
   });
 
-  return (
-    <View style={{ flex: 1 }}>
-      {/* Quick Filter Chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 8, paddingBottom: 14 }}
-      >
-        {filterOptions.map((opt) => {
-          const isSelected = selectedFilter === opt.key;
-          return (
-            <Pressable
-              key={opt.key}
-              onPress={() => setSelectedFilter(opt.key)}
-              style={{
-                backgroundColor: isSelected ? colors.ink : colors.white,
-                paddingHorizontal: 14,
-                paddingVertical: 7,
-                borderRadius: 20,
-                borderWidth: 1,
-                borderColor: isSelected ? colors.ink : "#E2ECE6",
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: "700",
-                  color: isSelected ? colors.white : "#4B5563",
-                }}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+  const handleIncrementWorkers = (job: Job) => {
+    const currentTotal = getAdjustedWorkers(job.id, job.workers || 1);
+    incrementWorkers(job.id);
+    showToast(`Updated to ${currentTotal + 1} workers needed for "${job.title}"`);
+  };
 
-      {/* Jobs List */}
-      {!filteredJobs || filteredJobs.length === 0 ? (
-        <View
-          style={{
-            backgroundColor: colors.white,
-            padding: 30,
-            borderRadius: 22,
-            alignItems: "center",
-            borderWidth: 1.5,
-            borderColor: "#EAEFEA",
-            marginTop: 10,
-          }}
+  return (
+    <View style={styles.container}>
+      {/* Toast Feedback Banner with Smooth Spring & Fade Animation */}
+      {!!toastMessage && (
+        <Animated.View
+          style={[
+            styles.toast,
+            {
+              opacity: toastAnim,
+              transform: [
+                {
+                  translateY: toastAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-24, 0],
+                  }),
+                },
+                {
+                  scale: toastAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.94, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
         >
-          <View
-            style={{
-              width: 60,
-              height: 60,
-              borderRadius: 30,
-              backgroundColor: "#F0FDF4",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 14,
-              borderWidth: 1,
-              borderColor: "#DCFCE7",
-            }}
-          >
-            <Text style={{ fontSize: 28 }}>💼</Text>
+          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </Animated.View>
+      )}
+
+      {/* Top Header */}
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 8, 16) }]}>
+        <View style={styles.headerContent}>
+          <View style={styles.headerTop}>
+            <View style={styles.titleArea}>
+              <View style={styles.titleRow}>
+                <Text style={styles.title}>Posted Jobs</Text>
+                <View style={styles.headerCountGroup}>
+                  <View style={styles.activeBadge}>
+                    <View style={styles.activeDot} />
+                    <Text style={styles.activeBadgeText}>{counts.live} Active</Text>
+                  </View>
+                  <View style={[styles.inactiveBadge, counts.paused > 0 && styles.inactiveBadgeActive]}>
+                    <View style={[styles.inactiveDot, counts.paused > 0 && styles.inactiveDotActive]} />
+                    <Text style={[styles.inactiveBadgeText, counts.paused > 0 && styles.inactiveBadgeTextActive]}>
+                      {counts.paused} Inactive
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              <Text style={styles.subtitle}>
+                {counts.interested > 0
+                  ? `${counts.interested} listing${counts.interested === 1 ? "" : "s"} with applicants waiting`
+                  : "Manage your listings and track candidate responses"}
+              </Text>
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Post a new job"
+              onPress={() => router.push("/post-work")}
+              style={({ pressed }) => [
+                styles.postBtn,
+                pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
+              ]}
+            >
+              <Ionicons name="add" size={18} color="#FFFFFF" />
+              <Text style={styles.postBtnText}>Post Job</Text>
+            </Pressable>
           </View>
-          <Text
-            style={{
-              fontSize: 17,
-              fontWeight: "800",
-              color: colors.ink,
-              textAlign: "center",
-            }}
+        </View>
+
+        {/* Horizontal Filter Tabs (Active, With Applicants, Hired, Done) */}
+        <View style={styles.filterContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
           >
-            {selectedFilter !== "all" ? `No ${selectedFilter} jobs found` : "No jobs posted yet"}
-          </Text>
-          <Text
-            style={{
-              fontSize: 13,
-              color: colors.muted,
-              textAlign: "center",
-              marginTop: 6,
-              lineHeight: 18,
-              paddingHorizontal: 20,
-            }}
-          >
-            {selectedFilter !== "all"
-              ? "Try switching to a different filter above."
-              : "Post a job to get matched with skilled workers nearby in minutes."}
-          </Text>
-          {selectedFilter === "all" && (
+            {filterOptions.map((opt) => {
+              const isSelected = selectedFilter === opt.key;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => setSelectedFilter(opt.key)}
+                  style={[styles.filterChip, isSelected && styles.filterChipActive]}
+                >
+                  <Ionicons
+                    name={isSelected ? opt.activeIcon : opt.icon}
+                    size={14}
+                    color={isSelected ? "#FFFFFF" : opt.color}
+                  />
+                  <Text style={[styles.filterChipText, isSelected && styles.filterChipTextActive]}>
+                    {opt.label}
+                  </Text>
+                  {opt.count > 0 && (
+                    <View style={[styles.filterCountBadge, isSelected && styles.filterCountBadgeActive]}>
+                      <Text style={[styles.filterCountText, isSelected && styles.filterCountTextActive]}>
+                        {opt.count}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+
+      {/* Main Jobs Content */}
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={refetch}
+            tintColor={dash.primary}
+            colors={[dash.primary]}
+          />
+        }
+      >
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={dash.primary} />
+            <Text style={styles.loadingText}>Loading jobs...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle-outline" size={40} color={dash.error} />
+            <Text style={styles.errorTitle}>Failed to load jobs</Text>
+            <Text style={styles.errorMessage}>Please check your connection and try again.</Text>
+            <Pressable onPress={() => refetch()} style={styles.retryBtn}>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : filteredJobs.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="briefcase-outline" size={32} color={dash.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>
+              {selectedFilter === "active" ? "No active jobs right now" : `No ${selectedFilter} jobs`}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              {selectedFilter === "active"
+                ? "You don't have any active jobs currently. Post a new job requirement to find skilled workers nearby."
+                : "Switch filter above or post a job to match with candidates."}
+            </Text>
             <Pressable
               onPress={() => router.push("/post-work")}
-              style={({ pressed }) => ({
-                backgroundColor: colors.green,
-                paddingHorizontal: 22,
-                paddingVertical: 11,
-                borderRadius: 14,
-                marginTop: 16,
-                opacity: pressed ? 0.9 : 1,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-              })}
+              style={({ pressed }) => [styles.emptyActionBtn, pressed && { opacity: 0.9 }]}
             >
-              <Ionicons name="add-circle-outline" size={18} color={colors.white} />
-              <Text style={{ color: colors.white, fontSize: 14, fontWeight: "800" }}>
-                Post a Job
-              </Text>
+              <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+              <Text style={styles.emptyActionBtnText}>Post a Job Now</Text>
             </Pressable>
-          )}
-        </View>
-      ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-          <View style={{ gap: 14 }}>
+          </View>
+        ) : (
+          <View style={styles.jobsList}>
             {filteredJobs.map((job) => {
+              const isPaused = job.status === "PAUSED";
               const statusMeta = getJobStatusMeta(job.status);
               const roleTheme = getRoleTheme(
                 job.roleId,
                 job.title,
                 job.categoryName || job.categoryId
               );
+              const workersCount = getAdjustedWorkers(job.id, job.workers || 1);
 
               return (
-                <Pressable
-                  key={job.id}
-                  onPress={() => router.push(`/jobs/${job.id}`)}
-                  style={({ pressed }) => ({
-                    backgroundColor: colors.white,
-                    borderRadius: 22,
-                    padding: 16,
-                    borderWidth: 1.5,
-                    borderColor: "#E2ECE6",
-                    shadowColor: "#0F291E",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.05,
-                    shadowRadius: 12,
-                    elevation: 3,
-                    opacity: pressed ? 0.92 : 1,
-                    transform: [{ scale: pressed ? 0.985 : 1 }],
-                    gap: 14,
-                  })}
-                >
-                  {/* Top Row: Squircle Role Icon + Title/Location + Status Pill */}
-                  <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-                    {/* Squircle Role Icon */}
-                    <View
-                      style={{
-                        width: 52,
-                        height: 52,
-                        borderRadius: 16,
-                        backgroundColor: roleTheme.bg,
-                        borderWidth: 1.5,
-                        borderColor: roleTheme.border,
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text style={{ fontSize: 26 }}>{roleTheme.icon}</Text>
-                    </View>
-
-                    {/* Title, Locality & Time */}
-                    <View style={{ flex: 1, justifyContent: "center" }}>
-                      <Text
-                        style={{
-                          fontSize: 16.5,
-                          fontWeight: "800",
-                          color: "#0F1F14",
-                          letterSpacing: -0.3,
-                        }}
-                        numberOfLines={1}
-                      >
-                        {job.title}
-                      </Text>
-
+                <View key={job.id} style={styles.jobCard}>
+                  {/* Top Row: Role Icon + Title/Status on Left; Delete Icon on Top Right */}
+                  <View style={styles.cardHeaderTop}>
+                    {/* Left: Icon and Title */}
+                    <View style={styles.roleTitleGroup}>
                       <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                          marginTop: 4,
-                        }}
+                        style={[
+                          styles.roleIconBox,
+                          { backgroundColor: roleTheme.bg, borderColor: roleTheme.border },
+                        ]}
                       >
-                        <Ionicons name="location" size={13} color={colors.green} />
-                        <Text
-                          style={{
-                            fontSize: 12.5,
-                            color: "#4B5563",
-                            fontWeight: "600",
-                            maxWidth: "60%",
-                          }}
-                          numberOfLines={1}
-                        >
-                          {job.area || "Nearby"}
-                        </Text>
-                        {!!job.createdAt && (
-                          <>
-                            <Text style={{ fontSize: 10, color: "#9CA3AF" }}>•</Text>
-                            <Text style={{ fontSize: 11.5, color: "#9CA3AF", fontWeight: "500" }}>
-                              {formatRelativeTime(job.createdAt)}
+                        <Text style={{ fontSize: 24 }}>{roleTheme.icon}</Text>
+                      </View>
+
+                      <View style={styles.cardHeaderText}>
+                        <View style={styles.titleStatusRow}>
+                          <Text style={styles.jobTitle} numberOfLines={1}>
+                            {job.title}
+                          </Text>
+                          <View
+                            style={[
+                              styles.statusPill,
+                              { backgroundColor: statusMeta.bgColor, borderColor: statusMeta.borderColor },
+                            ]}
+                          >
+                            <View style={[styles.statusDot, { backgroundColor: statusMeta.dotColor }]} />
+                            <Text style={[styles.statusText, { color: statusMeta.textColor }]}>
+                              {statusMeta.label}
                             </Text>
-                          </>
-                        )}
+                          </View>
+                        </View>
+
+                        <View style={styles.cardMetaRow}>
+                          <Ionicons name="location-outline" size={13} color={dash.muted} />
+                          <Text style={styles.cardLocationText} numberOfLines={1}>
+                            {job.area || "Nearby"}
+                          </Text>
+                          {!!job.createdAt && (
+                            <>
+                              <Text style={styles.metaDot}>•</Text>
+                              <Text style={styles.cardTimeText}>
+                                {formatRelativeTime(job.createdAt)}
+                              </Text>
+                            </>
+                          )}
+                        </View>
                       </View>
                     </View>
 
-                    {/* Status Pill */}
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 4,
-                        paddingHorizontal: 9,
-                        paddingVertical: 4.5,
-                        borderRadius: 20,
-                        backgroundColor: statusMeta.bgColor,
-                        borderWidth: 1,
-                        borderColor: statusMeta.borderColor,
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 6.5,
-                          height: 6.5,
-                          borderRadius: 3.5,
-                          backgroundColor: statusMeta.dotColor,
-                        }}
-                      />
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: "800",
-                          color: statusMeta.textColor,
-                          letterSpacing: 0.2,
-                        }}
+                    {/* Top Right Corner Action Icons: Stop/Resume Pill + Delete Button */}
+                    <View style={styles.topRightActions}>
+                      {job.status === "PUBLISHED" ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Stop posting this job"
+                          onPress={() => setJobToPause(job)}
+                          style={({ pressed }) => [
+                            styles.topActionPill,
+                            styles.topStopPill,
+                            pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] },
+                          ]}
+                        >
+                          <Ionicons name="pause-circle" size={14} color="#D97706" />
+                          <Text style={styles.topStopPillText}>Stop</Text>
+                        </Pressable>
+                      ) : job.status === "PAUSED" ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Resume posting this job"
+                          disabled={actionMutation.isPending}
+                          onPress={() => actionMutation.mutate({ jobId: job.id, action: "publish" })}
+                          style={({ pressed }) => [
+                            styles.topActionPill,
+                            styles.topResumePill,
+                            pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] },
+                          ]}
+                        >
+                          {actionMutation.isPending &&
+                          (actionMutation.variables as any)?.jobId === job.id &&
+                          (actionMutation.variables as any)?.action === "publish" ? (
+                            <ActivityIndicator size="small" color="#15803D" />
+                          ) : (
+                            <Ionicons name="play-circle" size={14} color="#15803D" />
+                          )}
+                          <Text style={styles.topResumePillText}>Resume</Text>
+                        </Pressable>
+                      ) : null}
+
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete job"
+                        onPress={() => setJobToDelete(job)}
+                        style={({ pressed }) => [
+                          styles.topIconBtn,
+                          styles.topDeleteBtn,
+                          pressed && { opacity: 0.75, transform: [{ scale: 0.95 }] },
+                        ]}
                       >
-                        {statusMeta.label}
-                      </Text>
+                        <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                      </Pressable>
                     </View>
                   </View>
 
-                  {/* Rate & Category Badges Row */}
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      paddingVertical: 2,
-                    }}
-                  >
-                    {/* Offered Pay Pill */}
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "baseline",
-                        gap: 2,
-                        backgroundColor: "#F0FDF4",
-                        paddingHorizontal: 9,
-                        paddingVertical: 4,
-                        borderRadius: 9,
-                        borderWidth: 0.5,
-                        borderColor: "#BBF7D0",
-                      }}
-                    >
-                      <Text style={{ fontSize: 11, fontWeight: "600", color: "#166534" }}>
-                        Pay:
-                      </Text>
-                      <Text style={{ fontSize: 14.5, fontWeight: "900", color: colors.green }}>
-                        ₹{((job.payPaise || 0) / 100).toLocaleString("en-IN")}
-                      </Text>
-                      <Text style={{ fontSize: 11, fontWeight: "700", color: "#166534" }}>
-                        /{formatPayUnit(job.payUnit)}
-                      </Text>
+                  {/* Smooth Animated Notice Banner if Job is Stopped/Paused */}
+                  <SmoothPausedBanner isPaused={isPaused} />
+
+                  {/* Essential Provider Data Grid */}
+                  <View style={styles.essentialDataGrid}>
+                    {/* Pay Rate */}
+                    <View style={styles.dataItem}>
+                      <Text style={styles.dataLabel}>PAY RATE</Text>
+                      <View style={styles.payRow}>
+                        <Text style={styles.payAmount}>
+                          ₹{((job.payPaise || 0) / 100).toLocaleString("en-IN")}
+                        </Text>
+                        <Text style={styles.payUnit}>/{formatPayUnit(job.payUnit)}</Text>
+                      </View>
                     </View>
 
-                    {/* Category Pill */}
+                    {/* Workers Needed with Quick +1 */}
+                    <View style={styles.dataItem}>
+                      <Text style={styles.dataLabel}>WORKERS NEEDED</Text>
+                      <View style={styles.workerRow}>
+                        <Text style={styles.workerCountText}>{workersCount} Required</Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Add 1 worker"
+                          onPress={() => handleIncrementWorkers(job)}
+                          style={({ pressed }) => [
+                            styles.inlineAddWorkerBtn,
+                            pressed && { opacity: 0.8 },
+                          ]}
+                        >
+                          <Ionicons name="add" size={12} color="#FFFFFF" />
+                          <Text style={styles.inlineAddWorkerText}>+1</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    {/* Category */}
                     {!!job.categoryName && (
-                      <View
-                        style={{
-                          backgroundColor: "#F8FAFC",
-                          paddingHorizontal: 9,
-                          paddingVertical: 4,
-                          borderRadius: 9,
-                          borderWidth: 0.5,
-                          borderColor: "#E2E8F0",
-                        }}
-                      >
-                        <Text style={{ fontSize: 11.5, fontWeight: "600", color: "#64748B" }}>
+                      <View style={styles.dataItem}>
+                        <Text style={styles.dataLabel}>CATEGORY</Text>
+                        <Text style={styles.dataValue} numberOfLines={1}>
                           {job.categoryName}
                         </Text>
                       </View>
                     )}
                   </View>
 
-                  {/* Dedicated Applications Banner with Avatars & Count */}
-                  <View
-                    style={{
-                      backgroundColor: (job.applicantCount || 0) > 0 ? "#F5F7FF" : "#F8FAF8",
-                      borderRadius: 14,
-                      paddingHorizontal: 13,
-                      paddingVertical: 10,
-                      borderWidth: 1,
-                      borderColor: (job.applicantCount || 0) > 0 ? "#E0E7FF" : "#EAF0EC",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    {(job.applicantCount || 0) > 0 ? (
-                      <>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                          {/* Avatar stack */}
-                          <ApplicantAvatarStack
-                            applicants={job.applicants}
-                            totalCount={job.applicantCount}
-                          />
-                          <View>
-                            <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#3730A3" }}>
-                              {job.applicantCount} {job.applicantCount === 1 ? "Worker Applied" : "Workers Applied"}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: "#6366F1", fontWeight: "600" }}>
-                              Tap to view profiles
-                            </Text>
-                          </View>
-                        </View>
+                  {/* Applicants Summary */}
+                  {(job.applicantCount || 0) > 0 ? (
+                    <Pressable
+                      onPress={() => setApplicationsJob(job)}
+                      style={styles.applicantBar}
+                    >
+                      <ApplicantAvatarStack
+                        applicants={job.applicants}
+                        totalCount={job.applicantCount}
+                      />
+                      <View style={{ marginLeft: 8, flex: 1 }}>
+                        <Text style={styles.applicantBarTitle}>
+                          {job.applicantCount} {job.applicantCount === 1 ? "Candidate Applied" : "Candidates Applied"}
+                        </Text>
+                        <Text style={styles.applicantBarHint}>
+                          Tap to view candidate details
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={15} color="#2563EB" />
+                    </Pressable>
+                  ) : (
+                    <View style={styles.noApplicantBar}>
+                      <Ionicons name="people-outline" size={15} color={dash.muted} />
+                      <Text style={styles.noApplicantText}>
+                        0 Applicants so far • Ready for workers to apply
+                      </Text>
+                    </View>
+                  )}
 
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 2,
-                            backgroundColor: "#FFFFFF",
-                            paddingHorizontal: 8,
-                            paddingVertical: 4,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: "#C7D2FE",
-                          }}
-                        >
-                          <Text style={{ fontSize: 11, fontWeight: "700", color: "#4F46E5" }}>
-                            Review
+                  {/* Bottom Management Actions: View Applications + View Details */}
+                  <View style={styles.cardFooterActions}>
+                    {/* View Applications Button Column */}
+                    <View style={styles.actionBtnCol}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="View applications for this job"
+                        onPress={() => setApplicationsJob(job)}
+                        style={({ pressed }) => ({
+                          opacity: pressed ? 0.82 : 1,
+                          width: "100%",
+                        })}
+                      >
+                        <View style={[styles.footerBtnBase, styles.viewAppsBtn]}>
+                          <Ionicons name="people" size={16} color={dash.primary} />
+                          <Text style={styles.viewAppsBtnText} numberOfLines={1}>
+                            View Applications
                           </Text>
-                          <Ionicons name="chevron-forward" size={12} color="#4F46E5" />
+                          {(job.applicantCount || 0) > 0 && (
+                            <View style={styles.appsCountBadge}>
+                              <Text style={styles.appsCountBadgeText}>
+                                {job.applicantCount}
+                              </Text>
+                            </View>
+                          )}
                         </View>
-                      </>
-                    ) : (
-                      <>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                          <View
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: "#E8F5EE",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <Ionicons name="radio-outline" size={14} color={colors.green} />
-                          </View>
-                          <Text style={{ fontSize: 12, fontWeight: "600", color: "#64748B" }}>
-                            Live listing • Awaiting applications
-                          </Text>
-                        </View>
+                      </Pressable>
+                    </View>
 
-                        <Ionicons name="chevron-forward" size={14} color={colors.mutedLight} />
-                      </>
-                    )}
+                    {/* View Details Button Column */}
+                    <View style={styles.actionBtnCol}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="View job details"
+                        onPress={() => router.push(`/jobs/${job.id}`)}
+                        style={({ pressed }) => ({
+                          opacity: pressed ? 0.85 : 1,
+                          width: "100%",
+                        })}
+                      >
+                        <View style={[styles.footerBtnBase, styles.viewJobBtn]}>
+                          <Text style={styles.viewJobBtnText} numberOfLines={1}>
+                            View Details
+                          </Text>
+                          <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                        </View>
+                      </Pressable>
+                    </View>
                   </View>
-                </Pressable>
+                </View>
               );
             })}
           </View>
-        </ScrollView>
-      )}
+        )}
+      </ScrollView>
+
+      {/* Stop Posting / Pause Confirmation Modal with Clear Explanation */}
+      <Modal
+        visible={!!jobToPause}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setJobToPause(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setJobToPause(null)} />
+          <View style={styles.confirmModalBox}>
+            <View style={styles.pauseIconCircle}>
+              <Ionicons name="pause" size={22} color="#D97706" />
+            </View>
+
+            <Text style={styles.confirmModalTitle}>Stop Posting?</Text>
+            <Text style={styles.confirmModalDesc} numberOfLines={1}>
+              Workers won't see this job until you turn it back on.
+            </Text>
+
+            <View style={styles.confirmModalBtns}>
+              <Pressable
+                onPress={() => setJobToPause(null)}
+                style={styles.cancelActionBtn}
+              >
+                <Text style={styles.cancelActionText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  if (jobToPause) {
+                    actionMutation.mutate({ jobId: jobToPause.id, action: "pause" });
+                  }
+                }}
+                disabled={actionMutation.isPending}
+                style={styles.confirmPauseBtn}
+              >
+                {actionMutation.isPending ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmPauseText}>Stopping...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmPauseText}>Stop</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={!!jobToDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setJobToDelete(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setJobToDelete(null)} />
+          <View style={styles.confirmModalBox}>
+            <View style={styles.deleteIconCircle}>
+              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            </View>
+
+            <Text style={styles.confirmModalTitle}>Delete Job?</Text>
+            <Text style={styles.confirmModalDesc} numberOfLines={1}>
+              This job will be permanently removed.
+            </Text>
+
+            <View style={styles.confirmModalBtns}>
+              <Pressable
+                onPress={() => setJobToDelete(null)}
+                style={styles.cancelActionBtn}
+              >
+                <Text style={styles.cancelActionText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  if (jobToDelete) {
+                    actionMutation.mutate({ jobId: jobToDelete.id, action: "cancel" });
+                  }
+                }}
+                disabled={actionMutation.isPending}
+                style={styles.confirmDeleteBtn}
+              >
+                {actionMutation.isPending ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmDeleteText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmDeleteText}>Delete</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Dedicated Applications Bottom Sheet Modal */}
+      <JobApplicationsModal
+        visible={!!applicationsJob}
+        jobId={applicationsJob?.id}
+        jobTitle={applicationsJob?.title}
+        initialApplicants={applicationsJob?.applicants}
+        initialApplicantCount={applicationsJob?.applicantCount}
+        onClose={() => setApplicationsJob(null)}
+      />
+
+      {/* Floating Bottom Navigation Bar */}
+      <ProviderBottomNav active="jobs" />
     </View>
   );
 }
 
-function ApplicationsTab() {
-  const { data: applications, isLoading } = useQuery<Interaction[]>({
-    queryKey: ["my-applications"],
-    queryFn: async () => {
-      return [];
-    },
-  });
-
-  if (isLoading) {
-    return (
-      <View style={{ paddingVertical: 40, alignItems: "center" }}>
-        <ActivityIndicator size="large" color={colors.green} />
-      </View>
-    );
-  }
-
-  return (
-    <View
-      style={{
-        backgroundColor: colors.white,
-        padding: 30,
-        borderRadius: 22,
-        alignItems: "center",
-        borderWidth: 1.5,
-        borderColor: "#EAEFEA",
-        marginTop: 10,
-      }}
-    >
-      <View
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: 30,
-          backgroundColor: "#F0FDF4",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 14,
-          borderWidth: 1,
-          borderColor: "#DCFCE7",
-        }}
-      >
-        <Ionicons name="document-text-outline" size={30} color={colors.green} />
-      </View>
-      <Text
-        style={{
-          fontSize: 17,
-          fontWeight: "800",
-          color: colors.ink,
-          textAlign: "center",
-        }}
-      >
-        No applications yet
-      </Text>
-      <Text
-        style={{
-          fontSize: 13,
-          color: colors.muted,
-          textAlign: "center",
-          marginTop: 6,
-          lineHeight: 18,
-          paddingHorizontal: 20,
-        }}
-      >
-        Your job applications and work requests will appear here with live tracking.
-      </Text>
-    </View>
-  );
-}
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F8FAF7",
+    width: "100%",
+    maxWidth: "100%",
+  },
+  toast: {
+    position: "absolute",
+    top: 60,
+    alignSelf: "center",
+    zIndex: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#1E293B",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  toastText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  header: {
+    backgroundColor: "#FFFFFF",
+    width: "100%",
+    borderBottomWidth: 1,
+    borderBottomColor: "#EBF0EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  headerContent: {
+    width: "100%",
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  titleArea: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: "900",
+    color: dash.ink,
+    letterSpacing: -0.6,
+  },
+  headerCountGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  activeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: dash.softGreen,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D1EAD8",
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: dash.secondary,
+  },
+  activeBadgeText: {
+    color: dash.primary,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  inactiveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  inactiveBadgeActive: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FDE68A",
+  },
+  inactiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#94A3B8",
+  },
+  inactiveDotActive: {
+    backgroundColor: "#D97706",
+  },
+  inactiveBadgeText: {
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  inactiveBadgeTextActive: {
+    color: "#B45309",
+  },
+  subtitle: {
+    fontSize: 13,
+    color: dash.muted,
+    marginTop: 3,
+    lineHeight: 18,
+  },
+  postBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: dash.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 18,
+    shadowColor: dash.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+    flexShrink: 0,
+    marginTop: 2,
+  },
+  postBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  filterContainer: {
+    width: "100%",
+    overflow: "hidden",
+  },
+  filterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "#F3F6F4",
+    borderWidth: 1,
+    borderColor: "#E5EBE6",
+  },
+  filterChipActive: {
+    backgroundColor: dash.primary,
+    borderColor: dash.primary,
+  },
+  filterChipText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: dash.muted,
+  },
+  filterChipTextActive: {
+    color: "#FFFFFF",
+  },
+  filterCountBadge: {
+    backgroundColor: "#E2E8E4",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  filterCountBadgeActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+  },
+  filterCountText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: dash.ink,
+  },
+  filterCountTextActive: {
+    color: "#FFFFFF",
+  },
+  scrollView: {
+    flex: 1,
+    width: "100%",
+  },
+  scrollContent: {
+    width: "100%",
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 115, // clearance for floating navbar
+  },
+  loadingContainer: {
+    paddingVertical: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: dash.muted,
+  },
+  errorCard: {
+    backgroundColor: "#FEF2F2",
+    padding: 24,
+    borderRadius: 20,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FEE2E2",
+    marginTop: 20,
+  },
+  errorTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#991B1B",
+    marginTop: 8,
+  },
+  errorMessage: {
+    fontSize: 13,
+    color: "#B91C1C",
+    textAlign: "center",
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  retryBtn: {
+    backgroundColor: "#DC2626",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  retryBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 32,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E6ECE8",
+    marginTop: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: dash.softGreen,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: dash.ink,
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: dash.muted,
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 18,
+    paddingHorizontal: 14,
+    marginBottom: 20,
+  },
+  emptyActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: dash.primary,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 16,
+    shadowColor: dash.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  emptyActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  jobsList: {
+    width: "100%",
+    gap: 14,
+  },
+  jobCard: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E6ECE8",
+    shadowColor: "#0A281E",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+    gap: 12,
+  },
+  pausedNoticeBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFBEB",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  pausedNoticeLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
+  pausedNoticeText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#B45309",
+    flex: 1,
+  },
+  pausedBadge: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+  },
+  pausedBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#D97706",
+    letterSpacing: 0.5,
+  },
+  cardHeaderTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  roleTitleGroup: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    flex: 1,
+  },
+  roleIconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardHeaderText: {
+    flex: 1,
+  },
+  titleStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  jobTitle: {
+    fontSize: 15.5,
+    fontWeight: "800",
+    color: dash.ink,
+    letterSpacing: -0.3,
+  },
+  cardMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginTop: 3,
+  },
+  cardLocationText: {
+    fontSize: 12,
+    color: dash.muted,
+    fontWeight: "600",
+    maxWidth: "60%",
+  },
+  metaDot: {
+    fontSize: 10,
+    color: "#94A3B8",
+    marginHorizontal: 2,
+  },
+  cardTimeText: {
+    fontSize: 11.5,
+    color: "#94A3B8",
+    fontWeight: "500",
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 5.5,
+    height: 5.5,
+    borderRadius: 2.75,
+  },
+  statusText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  topRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  topActionPill: {
+    height: 32,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4.5,
+  },
+  topStopPill: {
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1.2,
+    borderColor: "#FDE68A",
+  },
+  topStopPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#D97706",
+  },
+  topResumePill: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1.2,
+    borderColor: "#BBF7D0",
+  },
+  topResumePillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+  topIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  topDeleteBtn: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1.2,
+    borderColor: "#FEE2E2",
+  },
+  essentialDataGrid: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#F9FAF9",
+    padding: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#EEF2EE",
+  },
+  dataItem: {
+    flex: 1,
+  },
+  dataLabel: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  payRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 2,
+  },
+  payAmount: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: dash.primary,
+  },
+  payUnit: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: dash.primarySoft,
+  },
+  workerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  workerCountText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: dash.ink,
+  },
+  inlineAddWorkerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: dash.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  inlineAddWorkerText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  dataValue: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  applicantBar: {
+    backgroundColor: "#F5F8FF",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  applicantBarTitle: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#1E40AF",
+  },
+  applicantBarHint: {
+    fontSize: 11,
+    color: "#3B82F6",
+    fontWeight: "600",
+    marginTop: 1,
+  },
+  noApplicantBar: {
+    backgroundColor: "#F8FAF8",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#EAEFEA",
+  },
+  noApplicantText: {
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: dash.muted,
+  },
+  cardFooterActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F2",
+    width: "100%",
+  },
+  actionBtnCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  footerBtnBase: {
+    width: "100%",
+    height: 44,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  viewAppsBtn: {
+    backgroundColor: dash.softGreen,
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
+    borderRadius: 14,
+  },
+  viewAppsBtnText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: dash.primary,
+    letterSpacing: -0.2,
+  },
+  appsCountBadge: {
+    backgroundColor: dash.primary,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 9.5,
+    paddingHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 2,
+  },
+  appsCountBadgeText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  viewJobBtn: {
+    backgroundColor: dash.primary,
+    borderRadius: 14,
+    shadowColor: dash.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  viewJobBtnText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: -0.2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  confirmModalBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 18,
+    width: "100%",
+    maxWidth: 310,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 10,
+    gap: 10,
+  },
+  pauseIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmModalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: dash.ink,
+    textAlign: "center",
+  },
+  confirmModalDesc: {
+    fontSize: 12,
+    color: dash.muted,
+    textAlign: "center",
+    lineHeight: 16,
+    paddingHorizontal: 4,
+  },
+  confirmModalBtns: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+    width: "100%",
+  },
+  cancelActionBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelActionText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  confirmPauseBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#D97706",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmPauseText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  confirmDeleteBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmDeleteText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+});

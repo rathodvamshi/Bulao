@@ -4,24 +4,28 @@ import { router } from "expo-router";
 import { BlurView } from "expo-blur";
 import { dash } from "./palette";
 
-type NavId = "bulao" | "jobs" | "post" | "activity" | "profile";
+type NavId = "bulao" | "home" | "jobs" | "job" | "post" | "activity" | "profile";
 
 const ITEMS: {
-  id: NavId;
+  id: "bulao" | "home" | "post" | "jobs" | "profile";
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   activeIcon: keyof typeof Ionicons.glyphMap;
   path: string;
   center?: boolean;
 }[] = [
-  { id: "bulao", label: "Bulao", icon: "home-outline", activeIcon: "home", path: "/provider-home" },
-  { id: "jobs", label: "Jobs", icon: "briefcase-outline", activeIcon: "briefcase", path: "/activity" },
+  { id: "bulao", label: "Bulao", icon: "home-outline", activeIcon: "home", path: "/(tabs)" },
+  { id: "home", label: "Home", icon: "home-outline", activeIcon: "home", path: "/provider-home" },
   { id: "post", label: "Post", icon: "add", activeIcon: "add", path: "/post-work", center: true },
-  { id: "activity", label: "Activity", icon: "stats-chart-outline", activeIcon: "stats-chart", path: "/activity" },
+  { id: "jobs", label: "Job", icon: "briefcase-outline", activeIcon: "briefcase", path: "/activity" },
   { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/profile" },
 ];
 
-export function ProviderBottomNav({ active = "bulao" }: { active?: NavId }) {
+export function ProviderBottomNav({
+  active = "home",
+}: {
+  active?: NavId;
+}) {
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
       {/* Blur overlay for content below navbar */}
@@ -38,14 +42,19 @@ export function ProviderBottomNav({ active = "bulao" }: { active?: NavId }) {
           <View style={[StyleSheet.absoluteFill, styles.webFrost]} />
           <View style={styles.row}>
             {ITEMS.map((item) => {
-              const isActive = item.id === active;
+              const isActive =
+                item.id === active ||
+                (item.id === "jobs" && (active === "job" || active === "activity"));
               if (item.center) {
                 return (
                   <View key={item.id} style={styles.slot}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Post a new job"
-                      onPress={() => router.push(item.path)}
+                      onPress={() => {
+                        if (active === "post") return;
+                        router.push(item.path);
+                      }}
                       style={({ pressed }) => [
                         styles.plus,
                         { transform: [{ scale: pressed ? 0.94 : 1 }] },
@@ -56,6 +65,7 @@ export function ProviderBottomNav({ active = "bulao" }: { active?: NavId }) {
                       </View>
                     </Pressable>
                     <Text style={[styles.label, styles.plusLabel]}>{item.label}</Text>
+                    <View style={styles.indicatorContainer} />
                   </View>
                 );
               }
@@ -66,31 +76,57 @@ export function ProviderBottomNav({ active = "bulao" }: { active?: NavId }) {
                   accessibilityRole="button"
                   accessibilityState={{ selected: isActive }}
                   onPress={() => {
+                    // Prevent reloading if already on the current page
+                    if (isActive) {
+                      return;
+                    }
+
                     if (item.id === "bulao") {
+                      // Redirect directly to the main Bulao home page in one tap
+                      router.replace("/(tabs)");
+                      return;
+                    }
+                    if (item.id === "home") {
                       router.replace("/provider-home");
+                      return;
+                    }
+                    if (item.id === "jobs") {
+                      router.replace("/activity");
                       return;
                     }
                     router.push(item.path);
                   }}
                   style={styles.slot}
                 >
-                  {item.id === "bulao" ? (
-                    // Custom "B" text for Bulao
-                    <View style={[styles.bulaoIcon, isActive && styles.bulaoIconActive]}>
-                      <Text style={[styles.bulaoText, isActive && styles.bulaoTextActive]}>B</Text>
-                    </View>
-                  ) : (
-                    // Regular icons for other items
-                    <Ionicons
-                      name={isActive ? item.activeIcon : item.icon}
-                      size={22}
-                      color={isActive ? dash.primary : "#8A9699"}
-                    />
-                  )}
+                  <View style={styles.iconBox}>
+                    {item.id === "bulao" ? (
+                      // Custom "B" badge for Bulao with back arrow in front of the B char
+                      <View style={[styles.bulaoIcon, isActive && styles.bulaoIconActive]}>
+                        <Ionicons
+                          name="arrow-back"
+                          size={11}
+                          color={isActive ? "#FFFFFF" : dash.primary}
+                          style={styles.bulaoArrow}
+                        />
+                        <Text style={[styles.bulaoText, isActive && styles.bulaoTextActive]}>B</Text>
+                      </View>
+                    ) : (
+                      // Regular icons for other items
+                      <View style={styles.regularIconWrap}>
+                        <Ionicons
+                          name={isActive ? item.activeIcon : item.icon}
+                          size={22}
+                          color={isActive ? dash.primary : "#8A9699"}
+                        />
+                      </View>
+                    )}
+                  </View>
                   <Text style={[styles.label, isActive && styles.labelActive]}>
                     {item.label}
                   </Text>
-                  {isActive ? <View style={styles.activeUnderline} /> : <View style={styles.dotSpacer} />}
+                  <View style={styles.indicatorContainer}>
+                    {isActive ? <View style={styles.activeUnderline} /> : null}
+                  </View>
                 </Pressable>
               );
             })}
@@ -154,37 +190,54 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "flex-end",
     height: 64,
-    paddingBottom: 2,
+    paddingBottom: 6,
+  },
+  iconBox: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  regularIconWrap: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
   },
   label: {
-    marginTop: 3,
+    marginTop: 4,
     fontSize: 11,
     fontWeight: "600",
     color: "#8A9699",
+    lineHeight: 14,
+    textAlign: "center",
   },
   labelActive: {
     color: dash.primary,
     fontWeight: "700",
+  },
+  indicatorContainer: {
+    height: 3,
+    width: 20,
+    marginTop: 4,
+    alignItems: "center",
+    justifyContent: "center",
   },
   activeUnderline: {
     width: 20,
     height: 3,
     borderRadius: 2,
     backgroundColor: dash.primary,
-    marginTop: 4,
-  },
-  dotSpacer: {
-    height: 7,
-    marginTop: 4,
   },
   plus: {
-    marginTop: -28,
+    marginTop: -26,
     marginBottom: 2,
   },
   plusRing: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: dash.primary,
     alignItems: "center",
     justifyContent: "center",
@@ -201,15 +254,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   bulaoIcon: {
-    width: 28,
+    minWidth: 32,
     height: 28,
     borderRadius: 8,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: dash.softGreen,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
+    paddingHorizontal: 4,
+    shadowColor: dash.primary,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.08,
     shadowRadius: 2,
     elevation: 1,
   },
@@ -222,12 +277,17 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   bulaoText: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#9CA3AF",
+    fontSize: 14,
+    fontWeight: "900",
+    color: dash.primary,
     letterSpacing: -0.5,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   bulaoTextActive: {
     color: "#FFFFFF",
+  },
+  bulaoArrow: {
+    marginRight: 2,
   },
 });

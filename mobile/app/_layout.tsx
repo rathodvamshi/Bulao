@@ -60,7 +60,13 @@ function AppContent() {
   return (
     <View style={{ flex: 1 }}>
       <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: "default",
+            gestureEnabled: true,
+          }}
+        />
       </SafeAreaView>
       <LocationSheet />
     </View>

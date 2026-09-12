@@ -17,16 +17,47 @@ export type Catalog = {
 export type Job = {
   id: string;
   ownerId: string;
+  categoryId?: string;
+  categoryName?: string;
+  categoryIcon?: string;
+  roleId?: string;
+  roleName?: string;
+  roleIcon?: string;
   title: string;
+  customTitle?: string;
   area: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
   startsAt: number;
+  duration?: string;
+  endsAt?: number | null;
+  hours?: string;
+  startTime?: string;
+  endTime?: string;
   workers: number;
+  experience?: string;
   payPaise: number;
   payUnit: string;
+  paidWhen?: string;
+  extras?: string[];
   details: string;
   status: string;
   ownerName: string;
+  ownerPhone?: string;
+  ownerPhotoUrl?: string;
+  applicantCount?: number;
+  applicants?: {
+    id: string;
+    name: string;
+    phone?: string;
+    area?: string;
+    photoUrl?: string;
+    appliedAt?: number;
+    status?: string;
+  }[];
   distanceKm?: number;
+  createdAt?: number;
 };
 export type Professional = {
   userId: string;

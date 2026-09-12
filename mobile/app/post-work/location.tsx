@@ -204,14 +204,14 @@ export default function PostWorkLocationScreen() {
     return savedPlaces[0] ?? null;
   }, [savedPlaceIdStore, savedLocality, savedLat, savedLng, savedAddress, savedPlaces]);
 
-  // Set initial
+  // Set initial and auto-seed when store location changes
   useEffect(() => {
-    if (!selectedPlace && initialSelected) {
+    if (initialSelected) {
       setSelectedPlace(initialSelected);
       setSelectedChipId(initialSelected.id);
       cardFade.setValue(1);
     }
-  }, [initialSelected, selectedPlace]);
+  }, [initialSelected]);
 
   // Animate map to selected place
   useEffect(() => {

@@ -33,6 +33,7 @@ export interface JobPostedSuccessModalProps {
   onViewJob?: (jobId?: string) => void;
   onGoHome?: () => void;
   jobDetails?: JobPostedDetails;
+  isEditing?: boolean;
 }
 
 export function JobPostedSuccessModal({
@@ -41,6 +42,7 @@ export function JobPostedSuccessModal({
   onViewJob,
   onGoHome,
   jobDetails,
+  isEditing = false,
 }: JobPostedSuccessModalProps) {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
 
@@ -265,13 +267,15 @@ export function JobPostedSuccessModal({
 
             {/* ── Main Heading ── */}
             <Text style={styles.heading} adjustsFontSizeToFit numberOfLines={1}>
-              Job Posted Successfully!
+              {isEditing ? "Job Updated Successfully!" : "Job Posted Successfully!"}
             </Text>
 
             {/* ── Live Matching Status Badge ── */}
             <View style={styles.liveBadge}>
               <Animated.View style={[styles.liveDot, { opacity: dotPulse }]} />
-              <Text style={styles.liveBadgeText}>LIVE & MATCHING WORKERS</Text>
+              <Text style={styles.liveBadgeText}>
+                {isEditing ? "CHANGES SAVED & LIVE" : "LIVE & MATCHING WORKERS"}
+              </Text>
             </View>
 
             {/* ── Job Summary Card ── */}

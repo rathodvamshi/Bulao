@@ -11,6 +11,7 @@ import { jobApi } from "../src/api/jobApi";
 import type { Job } from "../src/api/types";
 import { JobCard } from "../src/components/JobCard";
 import { JobDetailsSheet } from "../src/components/JobDetailsSheet";
+import { JobApplicationsModal } from "../src/components/JobApplicationsModal";
 
 const tabs = [
   { key: "home", label: "Home", icon: "arrow-back" },
@@ -106,6 +107,7 @@ export default function FindWork() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [appsModalJob, setAppsModalJob] = useState<Job | null>(null);
 
   const fetchJobs = useCallback(async () => {
     if (!location?.latitude || !location?.longitude) return;
@@ -231,7 +233,12 @@ export default function FindWork() {
               }
             >
               {filteredJobs.map((job) => (
-                <JobCard key={job.id} job={job} onViewDetails={setSelectedJob} />
+                <JobCard
+                  key={job.id}
+                  job={job}
+                  onViewDetails={(j) => router.push(`/jobs/${j.id}`)}
+                  onViewApplications={(j) => setAppsModalJob(j)}
+                />
               ))}
             </ScrollView>
           ) : (
@@ -259,8 +266,14 @@ export default function FindWork() {
               accessibilityLabel={tab.key === "home" ? "Back to home" : tab.label}
               accessibilityState={{ selected }}
               onPress={() => {
-                if (tab.key === "home") router.dismissTo("/(tabs)");
-                else setActiveTab(tab.key);
+                if (tab.key === "home") {
+                  router.replace("/(tabs)");
+                  return;
+                }
+                if (selected) {
+                  return; // Don't reload if already on current tab
+                }
+                setActiveTab(tab.key);
               }}
               style={styles.tab}
             >
@@ -281,6 +294,14 @@ export default function FindWork() {
       </View>
 
       <JobDetailsSheet job={selectedJob} onClose={() => setSelectedJob(null)} />
+      <JobApplicationsModal
+        visible={!!appsModalJob}
+        jobId={appsModalJob?.id}
+        jobTitle={appsModalJob?.customTitle || appsModalJob?.title}
+        initialApplicants={appsModalJob?.applicants}
+        initialApplicantCount={appsModalJob?.applicantCount || appsModalJob?.applicants?.length}
+        onClose={() => setAppsModalJob(null)}
+      />
     </SafeAreaView>
   );
 }

@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, Pressable, StyleSheet, Alert, Platform, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -26,6 +26,16 @@ export default function PostWorkScheduleScreen() {
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
+
+  // Auto-seed and sync from store whenever editing or store values change
+  useEffect(() => {
+    if (startDate) setLocalStartDate(startDate);
+    if (duration) setLocalDuration(duration);
+    setLocalEndDate(endDate);
+    if (hours) setLocalHours(hours);
+    if (startTime) setLocalStartTime(startTime);
+    if (endTime) setLocalEndTime(endTime);
+  }, [startDate, duration, endDate, hours, startTime, endTime]);
 
   const today = new Date();
   const tomorrow = new Date(today);

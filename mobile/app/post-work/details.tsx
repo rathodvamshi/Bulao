@@ -78,6 +78,30 @@ export default function PostWorkDetailsScreen() {
     return [dynamicExperienceOptions[0]?.value || "any"];
   });
 
+  // Auto-seed and sync store data whenever editing or store values change
+  React.useEffect(() => {
+    if (title) setLocalTitle(title);
+    if (savedDescription) setLocalDescription(savedDescription);
+    if (workers) setLocalWorkers(workers);
+    if (savedGenderType) setLocalGenderType(savedGenderType);
+    if (savedMaleWorkers !== undefined) setLocalMaleWorkers(savedMaleWorkers);
+    if (savedFemaleWorkers !== undefined) setLocalFemaleWorkers(savedFemaleWorkers);
+    if (savedExperiences && savedExperiences.length > 0) {
+      setLocalExperiences(savedExperiences);
+    } else if (experience) {
+      setLocalExperiences([experience]);
+    }
+  }, [
+    title,
+    savedDescription,
+    workers,
+    savedGenderType,
+    savedMaleWorkers,
+    savedFemaleWorkers,
+    savedExperiences,
+    experience,
+  ]);
+
   const { width } = useWindowDimensions();
 
   // Verification Results

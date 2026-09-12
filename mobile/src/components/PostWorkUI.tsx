@@ -15,6 +15,7 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import { verifyCustomName } from "../utils/nameVerification";
+import { usePostWorkStore } from "../features/post-work/store";
 
 export { JobPostedSuccessModal } from "./JobPostedSuccessModal";
 export type { JobPostedDetails, JobPostedSuccessModalProps } from "./JobPostedSuccessModal";
@@ -243,25 +244,25 @@ export function StageProgressIndicator({
   currentStep: number;
   onStepPress?: (step: number) => void;
 }) {
+  const isEditing = Boolean(usePostWorkStore((s) => s.editingJobId));
   const { width } = useWindowDimensions();
   const isCompact = width < 480;
 
   // Smooth progress track animation with easing
-  const progressAnim = useRef(new Animated.Value(currentStep)).current;
+  const progressAnim = useRef(new Animated.Value(isEditing ? STAGES.length : currentStep)).current;
 
   useEffect(() => {
     Animated.timing(progressAnim, {
-      toValue: currentStep,
+      toValue: isEditing ? STAGES.length : currentStep,
       duration: 600,
       easing: (t: number) => {
-        // Custom smooth easing - ease-in-out cubic
         return t < 0.5
           ? 4 * t * t * t
           : 1 - Math.pow(-2 * t + 2, 3) / 2;
       },
       useNativeDriver: false,
     }).start();
-  }, [currentStep]);
+  }, [currentStep, isEditing]);
 
   // Width of the smooth active green progress line
   const fillWidth = progressAnim.interpolate({
@@ -290,7 +291,7 @@ export function StageProgressIndicator({
         <View style={styles.nodesContainer}>
           {STAGES.map((stage) => {
             const stepNum = stage.step;
-            const isCompleted = stepNum < currentStep;
+            const isCompleted = isEditing ? stepNum !== currentStep : stepNum < currentStep;
             const isActive = stepNum === currentStep;
 
             return (
@@ -302,6 +303,7 @@ export function StageProgressIndicator({
                 isCompleted={isCompleted}
                 isActive={isActive}
                 isCompact={isCompact}
+                isEditing={isEditing}
                 onStepPress={onStepPress}
               />
             );
@@ -319,6 +321,7 @@ function StageNodeItem({
   isCompleted,
   isActive,
   isCompact,
+  isEditing,
   onStepPress,
 }: {
   stage: (typeof STAGES)[number];
@@ -327,6 +330,7 @@ function StageNodeItem({
   isCompleted: boolean;
   isActive: boolean;
   isCompact: boolean;
+  isEditing: boolean;
   onStepPress?: (step: number) => void;
 }) {
   // Smooth spring scale entrance animation for tick mark with better flow
@@ -362,10 +366,21 @@ function StageNodeItem({
     outputRange: ['0deg', '360deg'],
   });
 
+  const canPress = isEditing || stepNum <= currentStep;
+
+  const handlePress = () => {
+    if (onStepPress) {
+      onStepPress(stepNum);
+    }
+    if (isEditing && stage.route) {
+      router.push(stage.route as any);
+    }
+  };
+
   return (
     <Pressable
-      disabled={stepNum > currentStep}
-      onPress={() => onStepPress && onStepPress(stepNum)}
+      disabled={!canPress}
+      onPress={handlePress}
       style={styles.stageNodePressable}
       accessibilityRole="button"
       accessibilityLabel={`Stage ${stepNum}: ${stage.label}`}
@@ -475,7 +490,9 @@ export function PostWorkFooter({
             nextDisabled && styles.primaryButtonTextDisabled,
           ]}
         >
-          {loading ? "Posting..." : primaryText}
+          {loading
+            ? (primaryText.toLowerCase().includes("update") ? "Updating..." : "Posting...")
+            : primaryText}
         </Text>
         {!isFinalStage && !loading && (
           <Ionicons

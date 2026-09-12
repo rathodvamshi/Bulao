@@ -156,6 +156,7 @@ export default function PostWorkCategoryScreen() {
     role,
     categoryName,
     roleName,
+    editingJobId,
   } = usePostWorkStore();
 
   const [stage, setStage] = useState<1 | 2>(1);
@@ -183,15 +184,38 @@ export default function PostWorkCategoryScreen() {
   });
 
   useEffect(() => {
-    resetFlow();
-  }, []);
+    if (!editingJobId) {
+      resetFlow();
+    }
+  }, [editingJobId]);
 
   useEffect(() => {
     if (catalog && category) {
       const categoryRoles = catalog.roles.filter((r) => r.categoryId === category);
       setRoles(categoryRoles);
+      const matchedCat = catalog.categories.find((c) => c.id === category);
+      if (matchedCat && !categoryName) {
+        setCategory(matchedCat.id, matchedCat.name);
+      }
+      if (role && !roleName) {
+        const matchedRole = categoryRoles.find((r) => r.id === role);
+        if (matchedRole) {
+          setRole(matchedRole.id, matchedRole.name);
+        }
+      }
     }
-  }, [category, catalog]);
+  }, [category, catalog, role, categoryName, roleName]);
+
+  useEffect(() => {
+    if (editingJobId) {
+      if ((category === "other" || category === "other-work") && categoryName) {
+        setCustomCategoryName(categoryName);
+      }
+      if ((role === "other-role" || role === "other-work-role") && roleName) {
+        setCustomRoleName(roleName);
+      }
+    }
+  }, [editingJobId, category, role, categoryName, roleName]);
 
   const handleCategorySelect = (catId: string, catName: string) => {
     if (catId === "other") {
@@ -269,9 +293,14 @@ export default function PostWorkCategoryScreen() {
   };
 
   const handleConfirmExit = () => {
+    const targetId = editingJobId;
     setShowExitModal(false);
     resetFlow();
-    router.replace("/provider-home");
+    if (targetId) {
+      router.replace(`/jobs/${targetId}`);
+    } else {
+      router.replace("/provider-home");
+    }
   };
 
   const handleStepPress = (stepNum: number) => {
@@ -279,6 +308,12 @@ export default function PostWorkCategoryScreen() {
       setStage(1);
     } else if (stepNum === 2 && isStage1Valid) {
       setStage(2);
+    } else if (editingJobId) {
+      if (stepNum === 3) router.push("/post-work/details");
+      else if (stepNum === 4) router.push("/post-work/location");
+      else if (stepNum === 5) router.push("/post-work/schedule");
+      else if (stepNum === 6) router.push("/post-work/pay");
+      else if (stepNum === 7) router.push("/post-work/review");
     }
   };
 
@@ -299,7 +334,7 @@ export default function PostWorkCategoryScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Top Header with ← Exit button */}
       <PostWorkHeader
-        title="Post Job"
+        title={editingJobId ? "Edit Job" : "Post Job"}
         currentStep={stage}
         totalSteps={7}
         onExit={() => setShowExitModal(true)}

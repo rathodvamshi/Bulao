@@ -24,11 +24,14 @@ import {
   JobPostedDetails,
 } from "../../src/components/JobPostedSuccessModal";
 import { usePostWorkStore } from "../../src/features/post-work/store";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../src/api/client";
 import { getExactRoleIcon } from "../../src/utils/nameVerification";
 
 export default function PostWorkReviewScreen() {
   const store = usePostWorkStore();
+  const queryClient = useQueryClient();
+  const isEditing = Boolean(store.editingJobId);
   const [posting, setPosting] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
 
@@ -262,7 +265,23 @@ export default function PostWorkReviewScreen() {
         submissionKey,
       };
 
-      const result = await api<{ id?: string }>("/jobs", jobData, "POST");
+      let result: { id?: string; updated?: boolean } | undefined;
+      if (isEditing && store.editingJobId) {
+        result = await api<{ id?: string; updated?: boolean }>(
+          `/jobs/${store.editingJobId}`,
+          jobData,
+          "PUT"
+        );
+        void queryClient.invalidateQueries({ queryKey: ["job", store.editingJobId] });
+        void queryClient.invalidateQueries({ queryKey: ["providerJobs"] });
+        void queryClient.invalidateQueries({ queryKey: ["activity"] });
+        void queryClient.invalidateQueries({ queryKey: ["nearby"] });
+      } else {
+        result = await api<{ id?: string }>("/jobs", jobData, "POST");
+        void queryClient.invalidateQueries({ queryKey: ["providerJobs"] });
+        void queryClient.invalidateQueries({ queryKey: ["activity"] });
+        void queryClient.invalidateQueries({ queryKey: ["nearby"] });
+      }
 
       // Save posted details for confirmation display
       setPostedJobDetails({
@@ -277,7 +296,7 @@ export default function PostWorkReviewScreen() {
         hours,
         startTime,
         endTime,
-        jobId: result?.id,
+        jobId: result?.id || store.editingJobId || undefined,
       });
 
       setShowSuccessModal(true);
@@ -285,6 +304,8 @@ export default function PostWorkReviewScreen() {
       const msg =
         error instanceof Error
           ? error.message
+          : isEditing
+          ? "Could not update the job. Please check your connection and details."
           : "Could not post the job. Please check your connection and details.";
       triggerErrorPopup(msg);
     } finally {
@@ -293,32 +314,43 @@ export default function PostWorkReviewScreen() {
   };
 
   const handleCloseSuccess = () => {
+    const targetId = store.editingJobId;
     setShowSuccessModal(false);
     store.resetFlow();
-    router.replace("/provider-home");
+    if (targetId) {
+      router.replace(`/jobs/${targetId}`);
+    } else {
+      router.replace("/provider-home");
+    }
   };
 
   const handleViewJob = (jobId?: string) => {
+    const targetId = jobId || store.editingJobId;
     setShowSuccessModal(false);
     store.resetFlow();
-    if (jobId) {
-      router.replace(`/jobs/${jobId}`);
+    if (targetId) {
+      router.replace(`/jobs/${targetId}`);
     } else {
       router.replace("/provider-home");
     }
   };
 
   const handleConfirmExit = () => {
+    const targetId = store.editingJobId;
     setShowExitModal(false);
     store.resetFlow();
-    router.replace("/provider-home");
+    if (targetId) {
+      router.replace(`/jobs/${targetId}`);
+    } else {
+      router.replace("/provider-home");
+    }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Top Header with ← Exit */}
       <PostWorkHeader
-        title="Review Job"
+        title={isEditing ? "Edit Job" : "Review Job"}
         currentStep={7}
         totalSteps={7}
         onExit={() => setShowExitModal(true)}
@@ -341,10 +373,16 @@ export default function PostWorkReviewScreen() {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.stageTag}>FINAL STAGE (7 OF 7)</Text>
-        <Text style={styles.heading}>Review & Post Work</Text>
+        <Text style={styles.stageTag}>
+          {isEditing ? "EDIT MODE (STAGE 7 OF 7)" : "FINAL STAGE (7 OF 7)"}
+        </Text>
+        <Text style={styles.heading}>
+          {isEditing ? "Review & Update Job" : "Review & Post Work"}
+        </Text>
         <Text style={styles.subtitle}>
-          Check everything below. Once posted, nearby verified workers will be notified.
+          {isEditing
+            ? "Check your changes below before saving updates to your posting."
+            : "Check everything below. Once posted, nearby verified workers will be notified."}
         </Text>
 
         {/* ── Main Review Card ── */}
@@ -522,6 +560,7 @@ export default function PostWorkReviewScreen() {
         onNext={handlePost}
         isFinalStage={true}
         loading={posting}
+        nextLabel={isEditing ? "Update Job" : "Post"}
       />
 
       {/* ─── ERROR POPUP MODAL ─── */}
@@ -545,7 +584,9 @@ export default function PostWorkReviewScreen() {
               <Ionicons name="alert-circle" size={38} color="#DC2626" />
             </View>
 
-            <Text style={styles.errorTitle}>Could Not Post Job</Text>
+            <Text style={styles.errorTitle}>
+              {isEditing ? "Could Not Update Job" : "Could Not Post Job"}
+            </Text>
             <Text style={styles.errorDesc}>{errorMessage}</Text>
 
             {/* Error Actions */}
@@ -588,6 +629,7 @@ export default function PostWorkReviewScreen() {
       {/* Premium Job Posted Confirmation Modal */}
       <JobPostedSuccessModal
         visible={showSuccessModal}
+        isEditing={isEditing}
         jobDetails={postedJobDetails || undefined}
         onClose={handleCloseSuccess}
         onGoHome={handleCloseSuccess}

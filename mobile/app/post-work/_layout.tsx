@@ -5,6 +5,8 @@ export default function PostWorkLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
+        animation: "default",
+        gestureEnabled: true,
       }}
     >
       <Stack.Screen name="index" />

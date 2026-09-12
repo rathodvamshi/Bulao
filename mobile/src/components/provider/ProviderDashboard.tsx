@@ -420,7 +420,7 @@ export default function ProviderDashboard() {
         </View>
       </View>
 
-      <ProviderBottomNav active="bulao" />
+      <ProviderBottomNav active="home" />
 
       <PeriodSheet
         visible={periodOpen}

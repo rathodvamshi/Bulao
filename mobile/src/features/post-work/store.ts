@@ -58,6 +58,9 @@ export type PostWorkState = {
   photoUrl: string | null;
   description: string;
 
+  // Editing mode
+  editingJobId: string | null;
+
   // Current step
   currentStep: number;
 
@@ -101,10 +104,12 @@ export type PostWorkState = {
   nextStep: () => void;
   prevStep: () => void;
   goToStep: (step: number) => void;
+  initForEdit: (job: any) => void;
   resetFlow: () => void;
 };
 
 const initialState = {
+  editingJobId: null as string | null,
   category: "",
   categoryName: "",
   role: "",
@@ -210,5 +215,113 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
   goToStep: (step) =>
     set({ currentStep: Math.max(1, Math.min(6, step)) }),
 
+  initForEdit: (job: any) => {
+    const rawExtras: string[] = Array.isArray(job.extras)
+      ? job.extras
+      : typeof job.extras === "string"
+      ? (() => {
+          try {
+            const parsed = JSON.parse(job.extras);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+
+    let startDate = new Date();
+    if (job.startsAt) {
+      const sNum = typeof job.startsAt === "number" ? job.startsAt : parseInt(String(job.startsAt), 10);
+      if (!isNaN(sNum)) {
+        startDate = sNum > 1e11 ? new Date(sNum) : new Date(sNum * 1000);
+      }
+    }
+
+    let endDate: Date | null = null;
+    if (job.endsAt) {
+      const eNum = typeof job.endsAt === "number" ? job.endsAt : parseInt(String(job.endsAt), 10);
+      if (!isNaN(eNum)) {
+        endDate = eNum > 1e11 ? new Date(eNum) : new Date(eNum * 1000);
+      }
+    }
+
+    let payAmount = "";
+    if (job.payPaise !== undefined && job.payPaise !== null) {
+      const p = Number(job.payPaise);
+      if (!isNaN(p)) payAmount = String(Math.round(p / 100));
+    } else if (job.payAmount !== undefined && job.payAmount !== null) {
+      payAmount = String(job.payAmount);
+    }
+
+    const rawWorkers = parseInt(String(job.workers), 10);
+    const workers = !isNaN(rawWorkers) && rawWorkers > 0 ? rawWorkers : 1;
+
+    const rawLat = job.latitude !== undefined && job.latitude !== null ? parseFloat(String(job.latitude)) : NaN;
+    const rawLng = job.longitude !== undefined && job.longitude !== null ? parseFloat(String(job.longitude)) : NaN;
+
+    const rawExp = job.experience ? String(job.experience).toLowerCase() : "any";
+    const experience: ExperienceLevel = rawExp.includes("expert") ? "expert" : rawExp.includes("some") ? "some" : "any";
+
+    const rawDuration = job.duration ? String(job.duration).toLowerCase() : "one";
+    const duration: Duration = (rawDuration === "few" || rawDuration === "ongoing") ? rawDuration : "one";
+
+    const rawHours = job.hours ? String(job.hours).toLowerCase() : "full";
+    const hours: Hours = rawHours === "custom" ? "custom" : "full";
+
+    const rawPayUnit = job.payUnit ? String(job.payUnit).toLowerCase() : "day";
+    const payUnit: PayUnit = ["hour", "day", "job", "month"].includes(rawPayUnit) ? (rawPayUnit as PayUnit) : "day";
+
+    const rawPaidWhen = (job.paidWhen || job.payWhen) ? String(job.paidWhen || job.payWhen).toLowerCase() : "after";
+    const payWhen: PayWhen = ["after", "daily", "weekly", "monthly"].includes(rawPaidWhen) ? (rawPaidWhen as PayWhen) : "after";
+
+    const rawGender = (job.gender || job.genderType) ? String(job.gender || job.genderType).toLowerCase() : "any";
+    const genderType: GenderType = rawGender === "male" ? "male" : rawGender === "female" ? "female" : "any";
+
+    const categoryId = job.categoryId || job.category || "";
+    const roleId = job.roleId || job.role || "";
+    const categoryName = job.categoryName || "";
+    const roleName = job.roleName || job.title || "";
+    const title = job.customTitle || job.title || "";
+    const description = job.details || job.description || "";
+    const locality = job.area || job.locality || "";
+    const address = job.address || "";
+
+    set({
+      ...initialState,
+      editingJobId: job.id || null,
+      category: categoryId,
+      categoryName,
+      role: roleId,
+      roleName,
+      title,
+      workers,
+      genderType,
+      maleWorkers: workers,
+      femaleWorkers: 0,
+      experience,
+      experiences: [experience],
+      latitude: !isNaN(rawLat) ? rawLat : null,
+      longitude: !isNaN(rawLng) ? rawLng : null,
+      locality,
+      address,
+      savedPlaceId: null,
+      startDate: !isNaN(startDate.getTime()) ? startDate : new Date(),
+      duration,
+      endDate: endDate && !isNaN(endDate.getTime()) ? endDate : null,
+      hours,
+      startTime: job.startTime || "09:00",
+      endTime: job.endTime || "17:00",
+      payAmount,
+      payUnit,
+      payWhen,
+      extras: rawExtras,
+      benefits: rawExtras,
+      photoUrl: null,
+      description,
+      currentStep: 1,
+    });
+  },
+
   resetFlow: () => set(initialState),
 }));
+

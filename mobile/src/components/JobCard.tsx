@@ -1,15 +1,27 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import type { Job } from "../api/types";
+import { useAuth } from "../auth";
+import { JobApplicationsModal } from "./JobApplicationsModal";
 
 interface JobCardProps {
   job: Job;
   onViewDetails: (job: Job) => void;
+  onViewApplications?: (job: Job) => void;
 }
 
-export function JobCard({ job, onViewDetails }: JobCardProps) {
+export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps) {
+  const { user, session } = useAuth();
+  const [appsModalVisible, setAppsModalVisible] = useState(false);
+  const currentUserId = user?.id || session?.userId;
+  const isOwner = Boolean(
+    currentUserId &&
+    job.ownerId &&
+    String(currentUserId).trim().toLowerCase() === String(job.ownerId).trim().toLowerCase()
+  );
+
   const payInRupees = job.payPaise / 100;
   const payDisplay = `₹${payInRupees} / ${job.payUnit.toLowerCase()}`;
 
@@ -26,13 +38,33 @@ export function JobCard({ job, onViewDetails }: JobCardProps) {
     minute: "2-digit"
   });
 
+  const handlePrimaryPress = () => {
+    if (isOwner) {
+      if (onViewApplications) {
+        onViewApplications(job);
+      } else {
+        setAppsModalVisible(true);
+      }
+    } else {
+      onViewDetails(job);
+    }
+  };
+
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={styles.title} numberOfLines={2}>
-            {job.title}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+            <Text style={styles.title} numberOfLines={2}>
+              {job.title}
+            </Text>
+          </View>
+          {isOwner && (
+            <View style={styles.ownerBadge}>
+              <Ionicons name="person" size={11} color={colors.green} />
+              <Text style={styles.ownerBadgeText}>Your Job Posting</Text>
+            </View>
+          )}
         </View>
         <View style={styles.payBadge}>
           <Text style={styles.payText}>{payDisplay}</Text>
@@ -78,17 +110,38 @@ export function JobCard({ job, onViewDetails }: JobCardProps) {
         <View style={{ flex: 1 }}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => onViewDetails(job)}
+            onPress={handlePrimaryPress}
             style={({ pressed }) => ({
               opacity: pressed ? 0.7 : 1,
             })}
           >
-            <View style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit>Apply</Text>
+            <View style={[styles.primaryButton, isOwner && styles.ownerButton]}>
+              <Ionicons
+                name={isOwner ? "people-outline" : "paper-plane-outline"}
+                size={15}
+                color="#FFFFFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit>
+                {isOwner
+                  ? (job.applicantCount && job.applicantCount > 0
+                      ? `Applications (${job.applicantCount})`
+                      : "View Applications")
+                  : "Apply"}
+              </Text>
             </View>
           </Pressable>
         </View>
       </View>
+
+      <JobApplicationsModal
+        visible={appsModalVisible}
+        jobId={job.id}
+        jobTitle={job.customTitle || job.title}
+        initialApplicants={job.applicants}
+        initialApplicantCount={job.applicantCount || job.applicants?.length}
+        onClose={() => setAppsModalVisible(false)}
+      />
     </View>
   );
 }
@@ -160,6 +213,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     paddingVertical: 12,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
@@ -169,5 +223,25 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontWeight: "600",
+  },
+  ownerButton: {
+    backgroundColor: "#065F46",
+  },
+  ownerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.greenLight,
+    alignSelf: "flex-start",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  ownerBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.green,
   },
 });
