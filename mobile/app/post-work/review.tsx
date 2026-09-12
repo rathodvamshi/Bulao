@@ -19,6 +19,10 @@ import {
   PostWorkFooter,
   ExitModal,
 } from "../../src/components/PostWorkUI";
+import {
+  JobPostedSuccessModal,
+  JobPostedDetails,
+} from "../../src/components/JobPostedSuccessModal";
 import { usePostWorkStore } from "../../src/features/post-work/store";
 import { api } from "../../src/api/client";
 import { getExactRoleIcon } from "../../src/utils/nameVerification";
@@ -27,6 +31,10 @@ export default function PostWorkReviewScreen() {
   const store = usePostWorkStore();
   const [posting, setPosting] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
+
+  // Success Modal State
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [postedJobDetails, setPostedJobDetails] = useState<JobPostedDetails | null>(null);
 
   // Error Modal State & Animation
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -99,36 +107,180 @@ export default function PostWorkReviewScreen() {
         }
       }
 
-      const submissionKey = `${store.category}-${store.role}-${Date.now()}`;
-      const payPaise = Math.round(parseFloat(store.payAmount || "0") * 100);
+      // Valid database role to category catalog mapping
+      const roleToCategoryMap: Record<string, string> = {
+        "construction-helper": "construction",
+        mason: "construction",
+        painter: "construction",
+        carpenter: "construction",
+        electrician: "construction",
+        plumber: "construction",
+        "tile-worker": "construction",
+        welder: "construction",
+        housekeeper: "household",
+        "cook-home": "household",
+        nanny: "household",
+        "personal-driver": "household",
+        gardener: "household",
+        chef: "food",
+        "kitchen-helper": "food",
+        waiter: "food",
+        barista: "food",
+        baker: "food",
+        "catering-staff": "food",
+        dishwasher: "food",
+        "food-packer": "food",
+        "delivery-person": "transport",
+        "bike-rider": "transport",
+        driver: "transport",
+        loader: "transport",
+        courier: "transport",
+        "sales-assistant": "shops",
+        cashier: "shops",
+        "shop-helper": "shops",
+        "inventory-manager": "shops",
+        merchandiser: "shops",
+        "event-helper": "events",
+        "event-server": "events",
+        decorator: "events",
+        "event-coordinator": "events",
+        "security-guard": "security",
+        watchman: "security",
+        bouncer: "security",
+      };
+
+      let roleId = store.role?.trim() || "plumber";
+      let categoryId = store.category?.trim() || "construction";
+
+      const mappedCat = roleToCategoryMap[roleId];
+      if (mappedCat) {
+        categoryId = mappedCat;
+      } else {
+        const defaultRolePerCat: Record<string, string> = {
+          construction: "plumber",
+          household: "housekeeper",
+          food: "chef",
+          transport: "driver",
+          shops: "sales-assistant",
+          events: "event-helper",
+          security: "security-guard",
+        };
+        const mappedRole = defaultRolePerCat[categoryId];
+        if (mappedRole) {
+          roleId = mappedRole;
+        } else {
+          categoryId = "construction";
+          roleId = "plumber";
+        }
+      }
+
+      const title = (store.title || store.roleName || "Work Needed").trim().slice(0, 100);
+      const workers = Math.max(1, Math.min(100, store.workers || 1));
+      
+      const latitude =
+        typeof store.latitude === "number" && !isNaN(store.latitude) && store.latitude >= -90 && store.latitude <= 90
+          ? store.latitude
+          : 17.3850; // Default Hyderabad lat
+      const longitude =
+        typeof store.longitude === "number" && !isNaN(store.longitude) && store.longitude >= -180 && store.longitude <= 180
+          ? store.longitude
+          : 78.4867; // Default Hyderabad lng
+
+      const area =
+        store.locality && store.locality.trim().length >= 2
+          ? store.locality.trim().slice(0, 100)
+          : "Hyderabad";
+
+      const address = (store.address || "").trim().slice(0, 300);
+
+      const parsedPay = parseFloat(store.payAmount || "500");
+      const payPaise = Math.max(
+        100,
+        Math.min(100000000, Math.round((isNaN(parsedPay) ? 500 : parsedPay) * 100))
+      );
+
+      const payUnit = ["hour", "day", "job", "month"].includes(store.payUnit)
+        ? store.payUnit
+        : "day";
+      const paidWhen = ["after", "daily", "weekly", "monthly"].includes(store.payWhen)
+        ? store.payWhen
+        : "after";
+      const duration = ["one", "few", "ongoing"].includes(store.duration)
+        ? store.duration
+        : "one";
+      const hours = ["full", "custom"].includes(store.hours) ? store.hours : "full";
+      const experience = ["any", "some", "expert"].includes(store.experience)
+        ? store.experience
+        : "any";
+
+      const formatHHMM = (val?: string, defaultVal = "09:00") => {
+        if (!val || typeof val !== "string") return defaultVal;
+        const parts = val.split(":");
+        if (parts.length !== 2) return defaultVal;
+        const p0 = parts[0];
+        const p1 = parts[1];
+        if (p0 === undefined || p1 === undefined) return defaultVal;
+        const h = parseInt(p0, 10);
+        const m = parseInt(p1, 10);
+        if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return defaultVal;
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      };
+
+      const startTime = formatHHMM(store.startTime, "09:00");
+      const endTime = formatHHMM(store.endTime, "17:00");
+
+      const submissionKey = `${categoryId}-${roleId}-${Date.now()}`;
+
+      const extras = [...(store.extras || []), ...(store.benefits || [])]
+        .map((e) => (typeof e === "string" ? e.trim() : ""))
+        .filter((e) => e.length >= 1 && e.length <= 60)
+        .slice(0, 10);
+
+      const details = (store.description || "").trim().slice(0, 1000);
 
       const jobData = {
-        categoryId: store.category,
-        roleId: store.role,
-        title: store.title,
-        workers: store.workers,
-        experience: store.experience,
-        latitude: store.latitude,
-        longitude: store.longitude,
-        area: store.locality,
-        address: store.address,
+        categoryId,
+        roleId,
+        title,
+        workers,
+        experience,
+        latitude,
+        longitude,
+        area,
+        address,
         startsAt,
-        duration: store.duration,
+        duration,
         endsAt,
-        hours: store.hours,
-        startTime: store.startTime,
-        endTime: store.endTime,
+        hours,
+        startTime,
+        endTime,
         payPaise,
-        payUnit: store.payUnit,
-        paidWhen: store.payWhen,
-        extras: [...store.extras, ...store.benefits],
-        details: store.description,
+        payUnit,
+        paidWhen,
+        extras,
+        details,
         submissionKey,
       };
 
       const result = await api<{ id?: string }>("/jobs", jobData, "POST");
-      store.resetFlow();
-      router.replace("/provider-home");
+
+      // Save posted details for confirmation display
+      setPostedJobDetails({
+        title,
+        categoryName: store.categoryName || "Work",
+        roleName: store.roleName || "Worker",
+        payAmount: store.payAmount || `${payPaise / 100}`,
+        payUnit,
+        locality: area,
+        workers,
+        startDate: store.startDate,
+        hours,
+        startTime,
+        endTime,
+        jobId: result?.id,
+      });
+
+      setShowSuccessModal(true);
     } catch (error) {
       const msg =
         error instanceof Error
@@ -137,6 +289,22 @@ export default function PostWorkReviewScreen() {
       triggerErrorPopup(msg);
     } finally {
       setPosting(false);
+    }
+  };
+
+  const handleCloseSuccess = () => {
+    setShowSuccessModal(false);
+    store.resetFlow();
+    router.replace("/provider-home");
+  };
+
+  const handleViewJob = (jobId?: string) => {
+    setShowSuccessModal(false);
+    store.resetFlow();
+    if (jobId) {
+      router.replace(`/jobs/${jobId}`);
+    } else {
+      router.replace("/provider-home");
     }
   };
 
@@ -415,6 +583,15 @@ export default function PostWorkReviewScreen() {
         visible={showExitModal}
         onClose={() => setShowExitModal(false)}
         onExit={handleConfirmExit}
+      />
+
+      {/* Premium Job Posted Confirmation Modal */}
+      <JobPostedSuccessModal
+        visible={showSuccessModal}
+        jobDetails={postedJobDetails || undefined}
+        onClose={handleCloseSuccess}
+        onGoHome={handleCloseSuccess}
+        onViewJob={handleViewJob}
       />
     </SafeAreaView>
   );

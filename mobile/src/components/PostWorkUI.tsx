@@ -16,6 +16,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import { verifyCustomName } from "../utils/nameVerification";
 
+export { JobPostedSuccessModal } from "./JobPostedSuccessModal";
+export type { JobPostedDetails, JobPostedSuccessModalProps } from "./JobPostedSuccessModal";
+
 export const STAGES = [
   { step: 1, label: "Category", icon: "apps-outline", route: "/post-work" },
   { step: 2, label: "Role", icon: "person-outline", route: "/post-work" },
