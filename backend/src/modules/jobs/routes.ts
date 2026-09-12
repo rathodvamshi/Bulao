@@ -229,82 +229,71 @@ jobRoutes.get("/provider/stats", requireAuth, async (c) => {
 jobRoutes.get("/provider/recent", requireAuth, async (c) => {
   const userId = c.get("userId");
   
-  try {
-    // Simplified query without subquery to avoid potential issues
-    const recentJobs = await c.env.DB.prepare(`
-      SELECT 
-        j.id,
-        j.role_id as roleId,
-        j.category_id as categoryId,
-        COALESCE(r.name, j.title, 'Job') as title,
-        COALESCE(r.icon, '💼') as roleIcon,
-        COALESCE(cat.name, 'General') as categoryName,
-        COALESCE(cat.icon, '📋') as categoryIcon,
-        j.area,
-        j.latitude,
-        j.longitude,
-        j.pay_paise as payPaise,
-        j.pay_unit as payUnit,
-        j.status,
-        j.created_at as createdAt
-      FROM jobs j
-      LEFT JOIN roles r ON r.id = j.role_id
-      LEFT JOIN categories cat ON cat.id = j.category_id
-      WHERE j.owner_id = ?
-      ORDER BY j.created_at DESC
-      LIMIT 20
-    `).bind(userId).all();
+  // Get recent jobs with all needed data
+  const recentJobs = await c.env.DB.prepare(`
+    SELECT 
+      j.id,
+      j.role_id as roleId,
+      j.category_id as categoryId,
+      COALESCE(r.name, j.title, 'Job') as title,
+      COALESCE(r.icon, '💼') as roleIcon,
+      COALESCE(cat.name, 'General') as categoryName,
+      COALESCE(cat.icon, '📋') as categoryIcon,
+      j.area,
+      j.latitude,
+      j.longitude,
+      j.pay_paise as payPaise,
+      j.pay_unit as payUnit,
+      j.status,
+      j.created_at as createdAt
+    FROM jobs j
+    LEFT JOIN roles r ON r.id = j.role_id
+    LEFT JOIN categories cat ON cat.id = j.category_id
+    WHERE j.owner_id = ?
+    ORDER BY j.created_at DESC
+    LIMIT 20
+  `).bind(userId).all();
 
-    if (!recentJobs.success) {
-      console.error('DB query failed:', recentJobs.error);
-      throw new ApiError("DATABASE_ERROR", 500, "Database query failed");
-    }
+  if (!recentJobs.success) {
+    console.error('DB query failed:', recentJobs.error);
+    throw new ApiError("DATABASE_ERROR", 503, "Database query failed");
+  }
 
-    const jobsList = recentJobs.results || [];
-    
-    // Get applicant counts for all jobs in one query
-    const jobIds = jobsList.map((job: any) => job.id);
-    const applicantCounts = new Map<string, number>();
-    
-    if (jobIds.length > 0) {
-      const countsQuery = await c.env.DB.prepare(`
-        SELECT job_id, COUNT(*) as count
-        FROM interactions
-        WHERE job_id IN (${jobIds.map(() => '?').join(',')}) AND kind = 'job'
-        GROUP BY job_id
-      `).bind(...jobIds).all();
-      
-      if (countsQuery.results) {
-        countsQuery.results.forEach((row: any) => {
-          applicantCounts.set(row.job_id, Number(row.count) || 0);
-        });
-      }
-    }
-
-    // Build final results with applicant data
-    const jobsWithApplicants = await Promise.all(
-      jobsList.map(async (job: any) => {
-        const applicantCount = applicantCounts.get(job.id) || 0;
+  const jobsList = recentJobs.results || [];
+  
+  // If no jobs, return empty array
+  if (jobsList.length === 0) {
+    return ok(c, []);
+  }
+  
+  // Build final results with applicant data for each job
+  const jobsWithApplicants = await Promise.all(
+    jobsList.map(async (job: any) => {
+      try {
+        // Get applicant count for this specific job
+        const countRes = await c.env.DB.prepare(`
+          SELECT COUNT(*) as count
+          FROM interactions
+          WHERE job_id = ? AND kind = 'job'
+        `).bind(job.id).first();
         
-        let applicants = [];
+        const applicantCount = Number(countRes?.count || 0);
+        
+        let applicants: any[] = [];
         if (applicantCount > 0) {
-          try {
-            const applicantsRes = await c.env.DB.prepare(`
-              SELECT 
-                u.id,
-                u.name,
-                u.photo_url as photoUrl
-              FROM interactions i
-              JOIN users u ON u.id = i.worker_id
-              WHERE i.job_id = ? AND i.kind = 'job'
-              ORDER BY i.created_at DESC
-              LIMIT 4
-            `).bind(job.id).all();
-            applicants = applicantsRes.results || [];
-          } catch (err) {
-            console.error(`Error fetching applicants for job ${job.id}:`, err);
-            // Continue with empty applicants array
-          }
+          // Get sample applicants
+          const applicantsRes = await c.env.DB.prepare(`
+            SELECT 
+              u.id,
+              u.name,
+              u.photo_url as photoUrl
+            FROM interactions i
+            JOIN users u ON u.id = i.worker_id
+            WHERE i.job_id = ? AND i.kind = 'job'
+            ORDER BY i.created_at DESC
+            LIMIT 4
+          `).bind(job.id).all();
+          applicants = applicantsRes.results || [];
         }
         
         return {
@@ -312,14 +301,17 @@ jobRoutes.get("/provider/recent", requireAuth, async (c) => {
           applicantCount,
           applicants,
         };
-      })
-    );
+      } catch (err) {
+        console.error(`Error processing job ${job.id}:`, err);
+        // Return job with empty applicant data on error
+        return {
+          ...job,
+          applicantCount: 0,
+          applicants: [],
+        };
+      }
+    })
+  );
 
-    return ok(c, jobsWithApplicants);
-  } catch (error: any) {
-    console.error('Error in /provider/recent:', error);
-    console.error('Error stack:', error?.stack);
-    console.error('Error message:', error?.message);
-    throw new ApiError("INTERNAL_ERROR", 500, "Failed to fetch recent jobs");
-  }
+  return ok(c, jobsWithApplicants);
 });
