@@ -39,6 +39,7 @@ export const searchSchema = z.object({
   longitude: z.coerce.number().min(-180).max(180),
   radiusKm: z.coerce.number().min(1).max(50).default(5),
   categoryId: z.string().optional(),
+  categoryIds: z.string().max(500).transform(value => value.split(",")).pipe(z.array(z.string().min(1).max(100)).min(1).max(5)).optional(),
   cursor: z.coerce.number().int().nonnegative().default(0),
 });
 export type Location = z.infer<typeof locationSchema>;

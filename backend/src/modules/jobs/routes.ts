@@ -6,7 +6,7 @@ import { jobSchema } from "@bulao/domain";
 import type { AppEnv } from "../../config/env";
 import { jobs, roles } from "../../db/schema";
 import { ApiError, ok } from "../../middleware/errors";
-import { now, requireAuth, rateLimit } from "../auth/session";
+import { now, requireAuth, rateLimit, identify } from "../auth/session";
 import { nearby } from "../locations/search";
 import { assertUnblocked } from "../trust/permissions";
 export const jobRoutes = new Hono<AppEnv>();
@@ -53,36 +53,10 @@ jobRoutes.post("/", requireAuth, async (c) => {
       (input.duration !== "few" && input.endsAt !== null) ||
       (input.hours === "custom" && input.endTime <= input.startTime))
     throw new ApiError("INVALID_SCHEDULE", 400, "Please check the end date and working hours.");
-  let role = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, input.roleId))
-    .get();
-
-  if (!role) {
-    role = await db
-      .select()
-      .from(roles)
-      .where(eq(roles.categoryId, input.categoryId))
-      .get();
-    if (role) {
-      input.roleId = role.id;
-    }
-  }
-
-  if (role && role.categoryId !== input.categoryId) {
-    input.categoryId = role.categoryId;
-  }
-
-  if (!role) {
-    const defaultRole = await db.select().from(roles).get();
-    if (defaultRole) {
-      input.roleId = defaultRole.id;
-      input.categoryId = defaultRole.categoryId;
-    } else {
-      throw new ApiError("INVALID_ROLE");
-    }
-  }
+  const validRole = await c.env.DB.prepare(
+    "SELECT r.id FROM roles r JOIN categories c ON c.id=r.category_id WHERE r.id=? AND r.category_id=? AND c.kind='job'",
+  ).bind(input.roleId, input.categoryId).first();
+  if (!validRole) throw new ApiError("INVALID_ROLE", 400, "Choose a valid role from the selected job category.");
   await rateLimit(c.env.DB, `publish:${c.get("userId")}`, 30, 86400);
   const id = crypto.randomUUID();
   await db
@@ -102,10 +76,11 @@ jobRoutes.post("/", requireAuth, async (c) => {
   return ok(c, saved);
 });
 jobRoutes.get("/:id", async (c) => {
+  const user = await identify(c.env.DB, c.req.header("Authorization"));
   const job = await c.env.DB.prepare(
-    "SELECT j.id,j.owner_id AS ownerId,r.name AS title,j.area,j.starts_at AS startsAt,j.workers,j.pay_paise AS payPaise,j.pay_unit AS payUnit,j.details,j.status,u.name AS ownerName FROM jobs j JOIN roles r ON r.id=j.role_id JOIN users u ON u.id=j.owner_id WHERE j.id=? AND u.suspended=0",
+    "SELECT j.id,j.owner_id AS ownerId,r.name AS title,j.area,j.starts_at AS startsAt,j.workers,j.pay_paise AS payPaise,j.pay_unit AS payUnit,j.details,j.status,u.name AS ownerName,EXISTS(SELECT 1 FROM interactions i WHERE i.job_id=j.id AND i.worker_id=?) AS hasApplied FROM jobs j JOIN roles r ON r.id=j.role_id JOIN users u ON u.id=j.owner_id WHERE j.id=? AND u.suspended=0",
   )
-    .bind(c.req.param("id"))
+    .bind(user?.id ?? null, c.req.param("id"))
     .first();
   if (!job)
     throw new ApiError(
@@ -113,7 +88,7 @@ jobRoutes.get("/:id", async (c) => {
       404,
       "This job is no longer available.",
     );
-  return ok(c, job);
+  return ok(c, { ...job, hasApplied: Boolean(job.hasApplied) });
 });
 jobRoutes.post("/:id/apply", requireAuth, async (c) => {
   const job = await drizzle(c.env.DB)
@@ -131,16 +106,16 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
   await assertUnblocked(c.env.DB, job.ownerId, c.get("userId"));
   const id = crypto.randomUUID();
   const result = await c.env.DB.prepare(
-    "INSERT INTO interactions(id,kind,job_id,owner_id,worker_id,status,details,created_at) VALUES(?,'job',?,?,?,'PENDING','',?) ON CONFLICT(job_id,worker_id) DO NOTHING RETURNING id",
+    "INSERT INTO interactions(id,kind,job_id,owner_id,worker_id,status,details,created_at) SELECT ?,'job',id,owner_id,?,'PENDING','',? FROM jobs WHERE id=? AND status='PUBLISHED' AND starts_at>=? AND EXISTS(SELECT 1 FROM users u WHERE u.id=jobs.owner_id AND u.suspended=0) ON CONFLICT(job_id,worker_id) DO NOTHING RETURNING id",
   )
-    .bind(id, job.id, job.ownerId, c.get("userId"), now())
+    .bind(id, c.get("userId"), now(), job.id, now())
     .first();
-  if (!result)
-    throw new ApiError(
-      "APPLICATION_EXISTS",
-      409,
-      "You've already applied to this job.",
-    );
+  if (!result) {
+    const existing = await c.env.DB.prepare("SELECT id FROM interactions WHERE job_id=? AND worker_id=?")
+      .bind(job.id, c.get("userId")).first();
+    if (existing) throw new ApiError("APPLICATION_EXISTS", 409, "You've already applied to this job.");
+    throw new ApiError("JOB_NOT_AVAILABLE", 409, "This job is no longer accepting applications.");
+  }
   return ok(c, { id });
 });
 

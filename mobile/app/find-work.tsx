@@ -123,6 +123,21 @@ export default function FindWork() {
     }
   }, [location?.latitude, location?.longitude, radiusKm, category, session?.token]);
 
+  const handleApply = useCallback(async (job) => {
+    if (!session?.token) {
+      Alert.alert("Sign in required", "Please sign in to apply for jobs.");
+      return;
+    }
+    try {
+      await jobApi.apply(job.id, session.token);
+      Alert.alert("Applied!", "You successfully applied for this job!");
+      fetchJobs();
+    } catch (err) {
+      Alert.alert("Could not apply", (err && err.message) ? err.message : "Something went wrong.");
+    }
+  }, [session, fetchJobs]);
+
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -231,7 +246,7 @@ export default function FindWork() {
               }
             >
               {filteredJobs.map((job) => (
-                <JobCard key={job.id} job={job} onViewDetails={setSelectedJob} />
+                <JobCard key={job.id} job={job} onViewDetails={setSelectedJob} onApply={handleApply} />
               ))}
             </ScrollView>
           ) : (
@@ -280,7 +295,7 @@ export default function FindWork() {
         })}
       </View>
 
-      <JobDetailsSheet job={selectedJob} onClose={() => setSelectedJob(null)} />
+      <JobDetailsSheet job={selectedJob} onClose={() => setSelectedJob(null)} onJobUpdated={(updated) => setJobs(items => items.map(item => item.id === updated.id ? { ...item, ...updated } : item))} />
     </SafeAreaView>
   );
 }

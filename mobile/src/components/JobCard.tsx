@@ -7,11 +7,12 @@ import type { Job } from "../api/types";
 interface JobCardProps {
   job: Job;
   onViewDetails: (job: Job) => void;
+  onApply: (job: Job) => void;
 }
 
-export function JobCard({ job, onViewDetails }: JobCardProps) {
+export function JobCard({ job, onViewDetails, onApply }: JobCardProps) {
   const payInRupees = job.payPaise / 100;
-  const payDisplay = `₹${payInRupees} / ${job.payUnit.toLowerCase()}`;
+  const payDisplay = `â‚¹${payInRupees} / ${job.payUnit.toLowerCase()}`;
 
   const startDate = new Date(job.startsAt * 1000);
   const isToday = new Date().toDateString() === startDate.toDateString();
@@ -43,7 +44,7 @@ export function JobCard({ job, onViewDetails }: JobCardProps) {
         <View style={styles.detailRow}>
           <Ionicons name="location-outline" size={16} color={colors.muted} />
           <Text style={styles.detailText} numberOfLines={1}>
-            {job.area} {job.distanceKm !== undefined ? `• ${job.distanceKm} km away` : ""}
+            {job.area} {job.distanceKm !== undefined ? `â€¢ ${job.distanceKm} km away` : ""}
           </Text>
         </View>
 
@@ -78,7 +79,7 @@ export function JobCard({ job, onViewDetails }: JobCardProps) {
         <View style={{ flex: 1 }}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => onViewDetails(job)}
+            onPress={() => onApply(job)}
             style={({ pressed }) => ({
               opacity: pressed ? 0.7 : 1,
             })}

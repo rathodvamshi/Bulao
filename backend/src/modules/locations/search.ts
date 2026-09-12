@@ -7,6 +7,7 @@ type Candidate = {
   latitude: number;
   longitude: number;
   radiusKm?: number;
+  hasApplied?: number;
   [key: string]: unknown;
 };
 export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
@@ -18,7 +19,7 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
   const owner = kind === "job" ? "owner_id" : "user_id";
   const fields =
     kind === "job"
-      ? "p.id,r.name AS title,p.area,p.latitude,p.longitude,p.pay_paise AS payPaise,p.pay_unit AS payUnit,p.starts_at AS startsAt,p.workers"
+      ? "p.id,r.name AS title,p.area,p.latitude,p.longitude,p.pay_paise AS payPaise,p.pay_unit AS payUnit,p.starts_at AS startsAt,p.workers,p.owner_id AS ownerId,u.name AS ownerName,p.details,p.status,EXISTS(SELECT 1 FROM interactions i WHERE i.job_id=p.id AND i.worker_id=?) AS hasApplied"
       : "p.id,p.user_id AS userId,u.name AS title,c.name AS category,p.area,p.latitude,p.longitude,p.radius_km AS radiusKm,p.experience,p.available,(SELECT ROUND(AVG(stars),1) FROM reviews WHERE target_id=p.user_id) AS rating,(SELECT COUNT(*) FROM interactions WHERE status='COMPLETED' AND (owner_id=p.user_id OR worker_id=p.user_id)) AS completed";
   const join =
     kind === "job"
@@ -30,7 +31,7 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
     "p.latitude BETWEEN ? AND ?",
   ];
   const args: unknown[] =
-    kind === "job" ? [box.minLat, box.maxLat] : [box.minLat, box.maxLat];
+    kind === "job" ? [user?.id ?? null, box.minLat, box.maxLat] : [box.minLat, box.maxLat];
   if (!box.allLongitudes) {
     conditions.push(
       box.minLon > box.maxLon
@@ -38,6 +39,10 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
         : "p.longitude BETWEEN ? AND ?",
     );
     args.push(box.minLon, box.maxLon);
+  }
+  if (input.categoryIds) {
+    conditions.push(`p.category_id IN (${input.categoryIds.map(() => "?").join(",")})`);
+    args.push(...input.categoryIds);
   }
   if (input.categoryId) {
     conditions.push("p.category_id=?");
@@ -67,6 +72,7 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
     )
     .map(({ latitude, longitude, ...row }) => ({
       ...row,
+      ...(kind === "job" ? { hasApplied: Boolean(row.hasApplied) } : {}),
       distanceKm: Math.round(row.distanceKm * 10) / 10,
     }));
   return {

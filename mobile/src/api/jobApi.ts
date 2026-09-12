@@ -6,6 +6,7 @@ export interface SearchJobsParams {
   longitude: number;
   radiusKm: number;
   categoryId?: string | null;
+  categoryIds?: readonly string[];
   cursor?: string;
 }
 
@@ -15,6 +16,8 @@ export interface SearchJobsResult {
 }
 
 export const jobApi = {
+  getJob: (id: string, token?: string | null) => apiClient.get<Job>(`/jobs/${encodeURIComponent(id)}`, token),
+  apply: (id: string, token: string) => apiClient.post<{ id: string }>(`/jobs/${encodeURIComponent(id)}/apply`, {}, token),
   searchJobs: async (
     params: SearchJobsParams,
     token?: string | null
@@ -24,6 +27,7 @@ export const jobApi = {
     searchParams.append("longitude", params.longitude.toString());
     searchParams.append("radiusKm", params.radiusKm.toString());
     if (params.categoryId) searchParams.append("categoryId", params.categoryId);
+    if (params.categoryIds?.length) searchParams.append("categoryIds", params.categoryIds.join(","));
     if (params.cursor) searchParams.append("cursor", params.cursor);
 
     return apiClient.get<SearchJobsResult>(`/jobs?${searchParams.toString()}`, token);
