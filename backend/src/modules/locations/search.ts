@@ -25,12 +25,12 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
       ? "JOIN roles r ON r.id=p.role_id"
       : "JOIN categories c ON c.id=p.category_id";
   const conditions = [
-    kind === "job" ? "p.status='PUBLISHED' AND p.starts_at>?" : "p.available=1",
+    kind === "job" ? "p.status='PUBLISHED'" : "p.available=1",
     "u.suspended=0",
     "p.latitude BETWEEN ? AND ?",
   ];
   const args: unknown[] =
-    kind === "job" ? [now(), box.minLat, box.maxLat] : [box.minLat, box.maxLat];
+    kind === "job" ? [box.minLat, box.maxLat] : [box.minLat, box.maxLat];
   if (!box.allLongitudes) {
     conditions.push(
       box.minLon > box.maxLon
@@ -51,8 +51,9 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
   }
   // Candidate pages are explicit: clients continue even if exact filtering yields no items.
   args.push(input.cursor);
+  const orderBy = kind === "job" ? "p.created_at DESC" : "p.id";
   const result = await c.env.DB.prepare(
-    `SELECT ${fields} FROM ${table} p ${join} JOIN users u ON u.id=p.${owner} WHERE ${conditions.join(" AND ")} ORDER BY p.id LIMIT 21 OFFSET ?`,
+    `SELECT ${fields} FROM ${table} p ${join} JOIN users u ON u.id=p.${owner} WHERE ${conditions.join(" AND ")} ORDER BY ${orderBy} LIMIT 21 OFFSET ?`,
   )
     .bind(...args)
     .all<Candidate>();
