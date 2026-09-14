@@ -22,13 +22,13 @@ import { useLocation } from "../src/store/location";
 import { useAuth } from "../src/auth";
 import { jobApi } from "../src/api/jobApi";
 import { api } from "../src/api/client";
+import { getNotificationInbox } from "../src/api/notifications";
 import type { Job, ApplicationItem } from "../src/api/types";
 import { formatDirectPhone } from "../src/utils/phone";
 import { JobCard } from "../src/components/JobCard";
 import { JobDetailsSheet } from "../src/components/JobDetailsSheet";
 import { JobApplicationsModal } from "../src/components/JobApplicationsModal";
 import { CancellationModal } from "../src/components/CancellationModal";
-import { NotificationModal } from "../src/components/NotificationModal";
 
 const tabs = [
   { key: "home", label: "Home", icon: "arrow-back" },
@@ -185,15 +185,14 @@ export default function FindWork() {
 
   // Notifications state
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [isNotificationsVisible, setIsNotificationsVisible] = useState<boolean>(false);
 
   const checkUnread = useCallback(async () => {
     if (!session?.token) return;
     try {
-      const res = await api<{ unreadCount: number }>("/notifications");
+      const res = await getNotificationInbox("seeker");
       setUnreadCount(res?.unreadCount || 0);
     } catch {
-      // safe fallback
+      setUnreadCount(0);
     }
   }, [session?.token]);
 
@@ -401,7 +400,7 @@ export default function FindWork() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Notifications"
-          onPress={() => setIsNotificationsVisible(true)}
+          onPress={() => router.push({ pathname: "/notifications", params: { role: "seeker" } })}
           style={styles.notifications}
         >
           <Ionicons name="notifications-outline" size={24} color={colors.green} />
@@ -799,21 +798,6 @@ export default function FindWork() {
         onConfirm={handleCancelApplicationConfirm}
       />
 
-      {/* Real-time Notifications Drawer */}
-      <NotificationModal
-        visible={isNotificationsVisible}
-        onClose={() => {
-          setIsNotificationsVisible(false);
-          void checkUnread();
-        }}
-        onSelectJob={(jobId) => {
-          const j = jobs.find((x) => x.id === jobId);
-          if (j) setSelectedJob(j);
-        }}
-        onNavigateToApplications={() => {
-          setActiveTab("applications");
-        }}
-      />
     </SafeAreaView>
   );
 }

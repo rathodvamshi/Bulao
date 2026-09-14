@@ -3,6 +3,7 @@ import { now } from "../auth/session";
 
 export interface CreateNotificationParams {
   userId: string;
+  recipientRole: "seeker" | "provider";
   type: string;
   title: string;
   message: string;
@@ -21,13 +22,15 @@ export async function createNotification(
       const fiveMinAgo = now() - 300;
       const existing = await db
         .prepare(
-          "SELECT id FROM notifications WHERE user_id=? AND type=? AND created_at >= ? AND data LIKE ?"
+          "SELECT id FROM notifications WHERE user_id=? AND type=? AND created_at >= ? AND data LIKE ?",
         )
         .bind(params.userId, params.type, fiveMinAgo, `%${entityId}%`)
         .first();
 
       if (existing) {
-        console.log(`[Notifications] Suppressed duplicate notification for user ${params.userId} (${params.type})`);
+        console.log(
+          `[Notifications] Suppressed duplicate notification for user ${params.userId} (${params.type})`,
+        );
         return;
       }
     }
@@ -43,7 +46,7 @@ export async function createNotification(
         params.type,
         params.title,
         params.message,
-        params.data ? JSON.stringify(params.data) : null,
+        JSON.stringify({ ...params.data, recipientRole: params.recipientRole }),
         now(),
       )
       .run();

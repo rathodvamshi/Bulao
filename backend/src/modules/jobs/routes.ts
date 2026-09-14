@@ -562,6 +562,7 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
 
   await createNotification(c.env.DB, {
     userId: job.ownerId,
+    recipientRole: "provider",
     type: "APPLICATION_CREATED",
     title: "New Job Application!",
     message: `${applicantName} applied for "${job.title || "your job posting"}".`,

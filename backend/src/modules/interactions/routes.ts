@@ -195,6 +195,7 @@ interactions.post("/:id/action", async (c) => {
   if (next === "ACCEPTED") {
     await createNotification(c.env.DB, {
       userId: row.worker_id,
+      recipientRole: "seeker",
       type: "APPLICATION_ACCEPTED",
       title: "Application Accepted!",
       message: `Your application for "${title}" was accepted! You can now view the contact details.`,
@@ -203,6 +204,7 @@ interactions.post("/:id/action", async (c) => {
   } else if (next === "REJECTED") {
     await createNotification(c.env.DB, {
       userId: row.worker_id,
+      recipientRole: "seeker",
       type: "APPLICATION_REJECTED",
       title: "Application Update",
       message: `Your application for "${title}" was rejected by the provider.`,
@@ -211,6 +213,7 @@ interactions.post("/:id/action", async (c) => {
   } else if (next === "CANCELLED_BY_SEEKER") {
     await createNotification(c.env.DB, {
       userId: row.owner_id,
+      recipientRole: "provider",
       type: "APPLICATION_CANCELLED_BY_SEEKER",
       title: "Job Cancelled by Seeker",
       message: `The seeker cancelled the job "${title}". Reason: ${reason}`,
@@ -219,6 +222,7 @@ interactions.post("/:id/action", async (c) => {
   } else if (next === "CANCELLED_BY_PROVIDER") {
     await createNotification(c.env.DB, {
       userId: row.worker_id,
+      recipientRole: "seeker",
       type: "APPLICATION_CANCELLED_BY_PROVIDER",
       title: "Job Cancelled by Provider",
       message: `The provider cancelled the job "${title}". Reason: ${reason}`,
@@ -227,6 +231,7 @@ interactions.post("/:id/action", async (c) => {
   } else if ((result as any)?.status === "COMPLETED") {
     await createNotification(c.env.DB, {
       userId: row.worker_id,
+      recipientRole: "seeker",
       type: "JOB_COMPLETED",
       title: "Job Completed!",
       message: `"${title}" was marked completed. Please rate your experience!`,
@@ -234,6 +239,7 @@ interactions.post("/:id/action", async (c) => {
     });
     await createNotification(c.env.DB, {
       userId: row.owner_id,
+      recipientRole: "provider",
       type: "JOB_COMPLETED",
       title: "Job Completed!",
       message: `"${title}" was marked completed. Please rate your experience!`,

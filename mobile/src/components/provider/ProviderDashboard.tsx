@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -12,10 +12,11 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api/client";
+import { getNotificationInbox } from "../../api/notifications";
 import { useAuth } from "../../auth";
 import { useLocation } from "../../store/location";
 import { Skeleton } from "../SkeletonLoader";
@@ -269,8 +270,16 @@ export default function ProviderDashboard() {
     },
   });
 
+  const notificationsQuery = useQuery({
+    queryKey: ["provider-notifications", token],
+    queryFn: () => getNotificationInbox("provider"),
+    enabled: !!token,
+    refetchInterval: 30000,
+  });
+  const { refetch: refreshNotifications } = notificationsQuery;
+  useFocusEffect(useCallback(() => { void refreshNotifications(); }, [refreshNotifications]));
   const photoUrl = me.data?.photoUrl;
-  const unread = (statsQuery.data?.pendingResponses ?? statsQuery.data?.interested ?? 0) > 0;
+  const unread = !notificationsQuery.isError && (notificationsQuery.data?.unreadCount ?? 0) > 0;
   const jobsPosted = statsQuery.data?.jobsPosted ?? 0;
   const isNewProvider = !jobsQuery.isLoading && (jobsQuery.data?.length ?? 0) === 0 && jobsPosted === 0;
 
@@ -397,7 +406,7 @@ export default function ProviderDashboard() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Notifications"
-              onPress={() => router.push("/activity")}
+              onPress={() => router.push({ pathname: "/notifications", params: { role: "provider" } })}
               style={styles.iconBtn}
             >
               <Ionicons name="notifications-outline" size={20} color={dash.ink} />
