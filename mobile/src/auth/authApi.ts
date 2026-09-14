@@ -53,6 +53,7 @@ export async function validateSession(token: string): Promise<UserData> {
       id: data.data.id,
       name: data.data.name || 'User',
       area: data.data.area || '',
+      phone: data.data.phone || '',
     };
   } catch (error) {
     // Network errors (timeout, connection refused, etc.)
@@ -159,6 +160,7 @@ export async function createSession(identifier: string, accessToken: string): Pr
         id: data.data.user.id,
         name: data.data.user.name || 'User',
         area: data.data.user.area || '',
+        phone: data.data.user.phone || identifier,
       },
     };
   } catch (error) {

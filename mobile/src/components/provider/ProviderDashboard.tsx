@@ -406,7 +406,7 @@ export default function ProviderDashboard() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Profile"
-              onPress={() => router.push("/profile")}
+              onPress={() => router.push("/provider-profile")}
             >
               {photoUrl ? (
                 <Image source={{ uri: photoUrl }} style={styles.avatar} />
@@ -497,58 +497,66 @@ function OverviewSection({
   const cards = [
     {
       key: "posted" as const,
-      label: "Jobs Posted",
-      value: stats?.jobsPosted ?? 0,
-      trend: computeStatTrend("posted", stats),
-      bg: "#F0FDF4",
+      label: "Active Jobs",
+      value: stats?.active ?? 0,
+      bg: "#F2FDF5",
       borderColor: "#DCFCE7",
-      iconBg: "#DCFCE7",
+      iconBg: "#FFFFFF",
+      haloColor: "#10B981",
       icon: "document-text" as const,
-      iconColor: "#10B981",
-      filter: "posted",
+      iconColor: "#059669",
+      filter: "active",
     },
     {
       key: "responses" as const,
       label: "Responses",
       value: stats?.interested ?? 0,
-      trend: computeStatTrend("responses", stats),
-      bg: "#EFF6FF",
+      bg: "#F0F6FF",
       borderColor: "#DBEAFE",
-      iconBg: "#DBEAFE",
+      iconBg: "#FFFFFF",
+      haloColor: "#3B82F6",
       icon: "people" as const,
-      iconColor: "#3B82F6",
+      iconColor: "#2563EB",
       filter: "interested",
     },
     {
       key: "hired" as const,
       label: "Hired",
       value: stats?.hired ?? 0,
-      trend: computeStatTrend("hired", stats),
-      bg: "#FFFBEB",
+      bg: "#FFFDF0",
       borderColor: "#FEF3C7",
-      iconBg: "#FEF3C7",
+      iconBg: "#FFFFFF",
+      haloColor: "#F59E0B",
       icon: "person" as const,
-      iconColor: "#F59E0B",
+      iconColor: "#D97706",
       filter: "hired",
     },
     {
       key: "completed" as const,
       label: "Completed",
       value: stats?.completed ?? 0,
-      trend: computeStatTrend("completed", stats),
-      bg: "#FEF2F2",
+      bg: "#FFF1F2",
       borderColor: "#FFE4E6",
-      iconBg: "#FFE4E6",
-      icon: "checkmark-circle" as const,
-      iconColor: "#EF4444",
-      filter: "active",
+      iconBg: "#EF4444",
+      haloColor: "#EF4444",
+      icon: "checkmark" as const,
+      iconColor: "#FFFFFF",
+      filter: "completed",
     },
   ];
 
   return (
     <View>
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>Overview</Text>
+        <View>
+          <View style={styles.titleRow}>
+            <Text style={styles.sectionTitle}>Overview</Text>
+            <View style={styles.sparkleIcon}>
+              <Ionicons name="sparkles" size={15} color="#10B981" />
+            </View>
+          </View>
+          <Text style={styles.sectionSubtitle}>Your activity at a glance</Text>
+        </View>
         <Pressable onPress={onOpenPeriod} style={styles.periodBtn} accessibilityRole="button">
           <Text style={styles.periodText}>{periodLabel}</Text>
           <Ionicons name="chevron-down" size={14} color={dash.muted} />
@@ -563,9 +571,11 @@ function OverviewSection({
       ) : loading ? (
         <View style={styles.statsRow}>
           {[0, 1, 2, 3].map((i) => (
-            <View key={i} style={[styles.statCard, { backgroundColor: dash.white }]}>
-              <Skeleton width={32} height={32} borderRadius={16} />
-              <Skeleton width={28} height={20} borderRadius={6} />
+            <View key={i} style={[styles.statCard, { backgroundColor: dash.white, borderColor: dash.border }]}>
+              <View style={[styles.iconBadge, { backgroundColor: "#F3F4F6", borderColor: "#FFFFFF" }]}>
+                <Skeleton width={16} height={16} borderRadius={8} />
+              </View>
+              <Skeleton width={28} height={20} borderRadius={6} style={{ marginBottom: 4 }} />
               <Skeleton width="80%" height={10} borderRadius={4} />
             </View>
           ))}
@@ -573,11 +583,6 @@ function OverviewSection({
       ) : (
         <View style={styles.statsRow}>
           {cards.map((card) => {
-            const trendColor =
-              card.trend > 0 ? "#10B981" : card.trend < 0 ? "#EF4444" : "#64748B";
-            const trendText =
-              card.trend > 0 ? `+${card.trend}%` : `${card.trend}%`;
-
             return (
               <View
                 key={card.key}
@@ -589,6 +594,20 @@ function OverviewSection({
                   },
                 ]}
               >
+                {/* Floating Icon badge at top-left corner */}
+                <View
+                  style={[
+                    styles.iconBadge,
+                    {
+                      backgroundColor: card.iconBg,
+                      borderColor: card.iconBg === "#EF4444" ? "#FFE4E6" : "#FFFFFF",
+                      shadowColor: card.haloColor,
+                    },
+                  ]}
+                >
+                  <Ionicons name={card.icon} size={15} color={card.iconColor} />
+                </View>
+
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => router.push(`/activity?filter=${card.filter}`)}
@@ -597,11 +616,6 @@ function OverviewSection({
                     { opacity: pressed ? 0.85 : 1 },
                   ]}
                 >
-                  {/* Icon badge */}
-                  <View style={[styles.iconBadge, { backgroundColor: card.iconBg }]}>
-                    <Ionicons name={card.icon} size={18} color={card.iconColor} />
-                  </View>
-
                   {/* Value */}
                   <Text style={styles.statValue}>{card.value}</Text>
 
@@ -609,14 +623,6 @@ function OverviewSection({
                   <Text style={styles.statLabel} numberOfLines={1}>
                     {card.label}
                   </Text>
-
-                  {/* Trend: dynamic wave + dynamic percentage text */}
-                  <View style={styles.statTrend}>
-                    <SparkWave trend={card.trend} />
-                    <Text style={[styles.trendPct, { color: trendColor }]}>
-                      {trendText}
-                    </Text>
-                  </View>
                 </Pressable>
               </View>
             );
@@ -1043,77 +1049,100 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
   },
   sectionTitle: {
-    fontSize: 21,
-    fontWeight: "800",
-    color: dash.ink,
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#0B3524",
     letterSpacing: -0.4,
+  },
+  sparkleIcon: {
+    transform: [{ rotate: "12deg" }],
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 2,
   },
   periodBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: radii.pill,
     backgroundColor: dash.white,
     borderWidth: 1,
     borderColor: dash.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   periodText: {
     fontSize: 12,
     fontWeight: "700",
-    color: dash.muted,
+    color: dash.ink,
   },
   statsRow: {
     flexDirection: "row",
     gap: 8,
+    marginTop: 14,
+    overflow: "visible",
   },
   statCard: {
     flex: 1,
     minWidth: 0,
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: "hidden",
-    padding: 10,
-    minHeight: 110,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    overflow: "visible",
+    paddingTop: 22,
+    paddingBottom: 12,
+    paddingHorizontal: 8,
+    minHeight: 88,
+    justifyContent: "center",
   },
   statCardInner: {
     flex: 1,
+    justifyContent: "center",
   },
   iconBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    position: "absolute",
+    top: -14,
+    left: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 6,
+    borderWidth: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 4,
+    zIndex: 2,
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: "800",
+    fontSize: 22,
+    fontWeight: "900",
     color: "#111827",
     letterSpacing: -0.5,
+    lineHeight: 26,
   },
   statLabel: {
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: "700",
     color: "#4B5563",
     marginTop: 2,
-  },
-  statTrend: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: "auto",
-    paddingTop: 6,
-  },
-  trendPct: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#10B981",
+    lineHeight: 14,
   },
   seeAll: {
     flexDirection: "row",

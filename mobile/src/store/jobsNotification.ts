@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { secureStorage } from "./secureStorage";
 
 export type SimpleJob = {
   id: string;
@@ -77,7 +77,7 @@ export const useJobsNotification = create<JobsNotificationState>()(
     }),
     {
       name: "bulao-jobs-notification-store",
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => secureStorage),
     }
   )
 );

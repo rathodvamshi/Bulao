@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { formatDirectPhone } from "@bulao/domain";
 import type { AppEnv } from "../../config/env";
 import { ApiError, ok } from "../../middleware/errors";
 export async function interactionDetail(c: Context<AppEnv>) {
@@ -29,22 +30,30 @@ export async function interactionDetail(c: Context<AppEnv>) {
     }>();
   if (!row)
     throw new ApiError("NOT_FOUND", 404, "This connection could not be found.");
-  const accepted = ["ACCEPTED", "IN_PROGRESS"].includes(row.status);
+  const accepted = ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(row.status);
   const owner = c.get("userId") === row.owner_id;
   return ok(c, {
     id: row.id,
+    jobId: (row as any).job_id,
     title: row.title,
     status: row.status,
     details: row.details,
     area: row.area ?? row.job_area,
     scheduledAt: row.scheduled_at ?? row.job_starts_at,
     otherName: owner ? row.worker_name : row.owner_name,
-    phone: accepted ? (owner ? row.worker_phone : row.owner_phone) : null,
+    otherId: owner ? row.worker_id : row.owner_id,
+    phone: accepted ? formatDirectPhone(owner ? row.worker_phone : row.owner_phone) : null,
     location: accepted
       ? {
           latitude: row.latitude ?? row.job_latitude,
           longitude: row.longitude ?? row.job_longitude,
         }
       : null,
+    cancelledBy: (row as any).cancelled_by,
+    cancellationReason: (row as any).cancellation_reason,
+    cancelledAt: (row as any).cancelled_at,
+    acceptedAt: (row as any).accepted_at,
+    rejectedAt: (row as any).rejected_at,
+    createdAt: (row as any).created_at,
   });
 }

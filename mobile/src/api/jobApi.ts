@@ -4,9 +4,10 @@ import type { Job } from "./types";
 export interface SearchJobsParams {
   latitude: number;
   longitude: number;
-  radiusKm: number;
+  radiusKm?: number;
   categoryId?: string | null;
   cursor?: string;
+  all?: boolean;
 }
 
 export interface SearchJobsResult {
@@ -22,7 +23,12 @@ export const jobApi = {
     const searchParams = new URLSearchParams();
     searchParams.append("latitude", params.latitude.toString());
     searchParams.append("longitude", params.longitude.toString());
-    searchParams.append("radiusKm", params.radiusKm.toString());
+    if (params.radiusKm !== undefined) {
+      searchParams.append("radiusKm", params.radiusKm.toString());
+    }
+    if (params.all) {
+      searchParams.append("all", "true");
+    }
     if (params.categoryId) searchParams.append("categoryId", params.categoryId);
     if (params.cursor) searchParams.append("cursor", params.cursor);
 

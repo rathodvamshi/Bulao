@@ -62,7 +62,7 @@ export function LocationSheet() {
   }, [isLocationSheetVisible, translateY]);
 
   // Auto-show sheet whenever the app opens and user is authenticated with no location set.
-  // Because the location is persisted in AsyncStorage via zustand, if they previously
+  // Because the location is persisted in secure storage via zustand, if they previously
   // chose a location it will be restored and this will NOT trigger.
   const locationFromStore = useLocation((s) => s.location);
   useEffect(() => {

@@ -50,7 +50,9 @@ export type State =
   | "COMPLETED"
   | "REJECTED"
   | "WITHDRAWN"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "CANCELLED_BY_SEEKER"
+  | "CANCELLED_BY_PROVIDER";
 export type Action =
   | "accept"
   | "reject"
@@ -63,12 +65,12 @@ export function transition(
   action: Action,
   side: "owner" | "worker",
 ): State {
-  if (state === "PENDING" && side === "owner" && action === "accept")
+  if ((state === "PENDING" || state === "REJECTED") && side === "owner" && action === "accept")
     return "ACCEPTED";
   if (state === "PENDING" && side === "owner" && action === "reject")
     return "REJECTED";
   if (state === "PENDING" && side === "worker" && action === "withdraw")
-    return "WITHDRAWN";
+    return "CANCELLED_BY_SEEKER";
   if (state === "ACCEPTED" && side === "owner" && action === "start")
     return "IN_PROGRESS";
   if (state === "IN_PROGRESS" && action === "confirm") return "IN_PROGRESS";
@@ -76,7 +78,7 @@ export function transition(
     (state === "PENDING" || state === "ACCEPTED" || state === "IN_PROGRESS") &&
     action === "cancel"
   )
-    return "CANCELLED";
+    return side === "worker" ? "CANCELLED_BY_SEEKER" : "CANCELLED_BY_PROVIDER";
   throw new Error("INVALID_TRANSITION");
 }
 export function distanceKm(
@@ -121,3 +123,23 @@ export function boundingBox(
     allLongitudes: lonDelta === 180,
   };
 }
+
+/**
+ * Formats a phone number for direct user-facing display by removing country codes
+ * (e.g. 91 or +91 for India) and returning the clean 10-digit direct number.
+ */
+export function formatDirectPhone(phone?: string | null): string {
+  if (!phone) return "";
+  const clean = String(phone).replace(/[^0-9]/g, "");
+  if (clean.length === 12 && clean.startsWith("91")) {
+    return clean.slice(2);
+  }
+  if (clean.length === 11 && clean.startsWith("0")) {
+    return clean.slice(1);
+  }
+  if (clean.length > 10) {
+    return clean.slice(-10);
+  }
+  return clean;
+}
+

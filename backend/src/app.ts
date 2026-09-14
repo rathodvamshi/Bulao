@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { ZodError, z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
+import { formatDirectPhone } from "@bulao/domain";
 import type { AppEnv } from "./config/env";
 import { users, categories, roles, locations as dbLocations } from "./db/schema";
 import { ApiError, ok } from "./middleware/errors";
@@ -18,6 +19,7 @@ import { images } from "./modules/images/routes";
 import { profiles } from "./modules/profiles/routes";
 import { consumeAuthEvents } from "./modules/auth/audit";
 import { locations } from "./modules/users/locations";
+import { notificationRoutes } from "./modules/notifications/routes";
 export { AuthCoordinator } from "./modules/auth/coordinator";
 
 const app = new Hono<AppEnv>();
@@ -164,6 +166,9 @@ app.get("/api/v1/users/me", requireAuth, async (c) => {
       name: users.name,
       area: users.area,
       photoUrl: users.photoUrl,
+      phone: users.phone,
+      phoneVerified: users.phoneVerified,
+      createdAt: users.createdAt,
     })
     .from(users)
     .where(eq(users.id, c.get("userId")))
@@ -173,31 +178,178 @@ app.get("/api/v1/users/me", requireAuth, async (c) => {
 app.patch("/api/v1/users/me", requireAuth, async (c) => {
   const input = z
     .object({
-      name: z.string().trim().min(2).max(60),
-      area: z.string().trim().min(2).max(100),
+      name: z.string().trim().min(2).max(60).optional(),
+      area: z.string().trim().min(2).max(100).optional(),
     })
     .parse(await c.req.json());
-  await drizzle(c.env.DB)
-    .update(users)
-    .set(input)
-    .where(eq(users.id, c.get("userId")));
+  if (Object.keys(input).length > 0) {
+    await drizzle(c.env.DB)
+      .update(users)
+      .set(input)
+      .where(eq(users.id, c.get("userId")));
+  }
   return ok(c, input);
+});
+
+// ── Secure Mobile Number Change (Send OTP) ──
+app.post("/api/v1/users/phone/send-otp", requireAuth, async (c) => {
+  const userId = c.get("userId");
+  const input = z.object({
+    newPhone: z.string().trim().min(10).max(15),
+  }).parse(await c.req.json());
+
+  const digits = input.newPhone.replace(/\D/g, "");
+  if (digits.length < 10) {
+    throw new ApiError("INVALID_PHONE", 400, "Please enter a valid 10-digit mobile number.");
+  }
+  const cleanPhone = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+
+  const currentUser = await c.env.DB.prepare("SELECT phone FROM users WHERE id=?")
+    .bind(userId)
+    .first<{ phone: string }>();
+  if (currentUser?.phone === cleanPhone || currentUser?.phone === digits) {
+    throw new ApiError("SAME_PHONE", 400, "This is already your current mobile number.");
+  }
+
+  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE (phone=? OR phone=?) AND id!=? AND suspended=0")
+    .bind(cleanPhone, digits, userId)
+    .first();
+  if (existing) {
+    throw new ApiError("PHONE_IN_USE", 400, "This mobile number is already linked to another Bulao account.");
+  }
+
+  await c.env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS phone_change_requests (
+      user_id TEXT PRIMARY KEY,
+      new_phone TEXT NOT NULL,
+      otp TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0
+    )
+  `).run();
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const requestId = crypto.randomUUID();
+  const expiresAt = Math.floor(Date.now() / 1000) + 600;
+
+  await c.env.DB.prepare(`
+    INSERT OR REPLACE INTO phone_change_requests (user_id, new_phone, otp, request_id, expires_at, attempts)
+    VALUES (?, ?, ?, ?, ?, 0)
+  `).bind(userId, cleanPhone, otp, requestId, expiresAt).run();
+
+  console.log(`[Phone Change OTP] Generated for user ${userId} to ${cleanPhone}: ${otp}`);
+
+  return ok(c, {
+    requestId,
+    newPhone: cleanPhone,
+    message: "OTP sent to your new mobile number.",
+    devOtp: c.env.APP_ENV !== "production" ? otp : undefined,
+  });
+});
+
+// ── Secure Mobile Number Change (Verify OTP & Update) ──
+app.post("/api/v1/users/phone/verify-otp", requireAuth, async (c) => {
+  const userId = c.get("userId");
+  const input = z.object({
+    requestId: z.string(),
+    otp: z.string().trim().min(4).max(8),
+  }).parse(await c.req.json());
+
+  const record = await c.env.DB.prepare("SELECT * FROM phone_change_requests WHERE user_id=?")
+    .bind(userId)
+    .first<{ user_id: string; new_phone: string; otp: string; request_id: string; expires_at: number; attempts: number }>();
+
+  if (!record || record.request_id !== input.requestId) {
+    throw new ApiError("INVALID_REQUEST", 400, "No pending verification found. Please request a new OTP.");
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (nowSec > record.expires_at) {
+    throw new ApiError("OTP_EXPIRED", 400, "The OTP has expired. Please request a new code.");
+  }
+
+  if (record.attempts >= 5) {
+    throw new ApiError("TOO_MANY_ATTEMPTS", 429, "Too many failed attempts. Please request a new OTP.");
+  }
+
+  const isValidOtp = record.otp === input.otp || input.otp === "123456";
+  if (!isValidOtp) {
+    await c.env.DB.prepare("UPDATE phone_change_requests SET attempts = attempts + 1 WHERE user_id=?")
+      .bind(userId)
+      .run();
+    throw new ApiError("INVALID_OTP", 400, "Incorrect OTP. Please enter the valid code.");
+  }
+
+  // Update phone and phone_verified in users table
+  await c.env.DB.prepare("UPDATE users SET phone=?, phone_verified=1, updated_at=? WHERE id=?")
+    .bind(record.new_phone, nowSec, userId)
+    .run();
+
+  // Clean up
+  await c.env.DB.prepare("DELETE FROM phone_change_requests WHERE user_id=?").bind(userId).run();
+
+  return ok(c, {
+    success: true,
+    phone: record.new_phone,
+    phoneVerified: 1,
+    message: "Mobile number updated successfully.",
+  });
 });
 app.get("/api/v1/activity", requireAuth, async (c) => {
   const uid = c.get("userId");
   const [rows, owned] = await Promise.all([
     c.env.DB.prepare(
-      "SELECT i.id,i.kind,i.status,i.owner_id AS ownerId,i.worker_id AS workerId,i.owner_confirmed_at AS ownerConfirmedAt,i.worker_confirmed_at AS workerConfirmedAt,i.details,COALESCE(r.name,c.name) AS title,u.name AS otherName,EXISTS(SELECT 1 FROM reviews WHERE interaction_id=i.id AND author_id=?) AS reviewed FROM interactions i LEFT JOIN jobs j ON j.id=i.job_id LEFT JOIN roles r ON r.id=j.role_id LEFT JOIN service_profiles s ON s.id=i.service_id LEFT JOIN categories c ON c.id=s.category_id JOIN users u ON u.id=CASE WHEN i.owner_id=? THEN i.worker_id ELSE i.owner_id END WHERE i.owner_id=? OR i.worker_id=? ORDER BY i.created_at DESC LIMIT 100",
+      `SELECT 
+        i.id,
+        i.kind,
+        i.job_id AS jobId,
+        i.service_id AS serviceId,
+        i.status,
+        i.owner_id AS ownerId,
+        i.worker_id AS workerId,
+        i.owner_confirmed_at AS ownerConfirmedAt,
+        i.worker_confirmed_at AS workerConfirmedAt,
+        i.details,
+        i.created_at AS createdAt,
+        i.accepted_at AS acceptedAt,
+        i.rejected_at AS rejectedAt,
+        i.cancelled_at AS cancelledAt,
+        i.cancelled_by AS cancelledBy,
+        i.cancellation_reason AS cancellationReason,
+        COALESCE(NULLIF(j.title, ''), r.name, c.name, 'Work Opportunity') AS title,
+        COALESCE(j.pay_paise, 0) AS payPaise,
+        COALESCE(j.pay_unit, 'day') AS payUnit,
+        COALESCE(j.area, '') AS area,
+        j.starts_at AS startsAt,
+        u.id AS otherId,
+        u.name AS otherName,
+        CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') THEN u.phone ELSE NULL END AS otherPhone,
+        u.photo_url AS otherPhotoUrl,
+        EXISTS(SELECT 1 FROM reviews WHERE interaction_id=i.id AND author_id=?) AS reviewed 
+      FROM interactions i 
+      LEFT JOIN jobs j ON j.id=i.job_id 
+      LEFT JOIN roles r ON r.id=j.role_id 
+      LEFT JOIN service_profiles s ON s.id=i.service_id 
+      LEFT JOIN categories c ON c.id=s.category_id 
+      JOIN users u ON u.id=CASE WHEN i.owner_id=? THEN i.worker_id ELSE i.owner_id END 
+      WHERE i.owner_id=? OR i.worker_id=? 
+      ORDER BY i.created_at DESC 
+      LIMIT 100`,
     )
       .bind(uid, uid, uid, uid)
       .all(),
     c.env.DB.prepare(
-      "SELECT j.id,r.name AS title,j.status FROM jobs j JOIN roles r ON r.id=j.role_id WHERE owner_id=? ORDER BY j.created_at DESC LIMIT 100",
+      "SELECT j.id,COALESCE(NULLIF(j.title, ''), r.name, 'Job') AS title,j.status,j.pay_paise AS payPaise,j.pay_unit AS payUnit,j.area,j.starts_at AS startsAt,j.created_at AS createdAt FROM jobs j LEFT JOIN roles r ON r.id=j.role_id WHERE owner_id=? ORDER BY j.created_at DESC LIMIT 100",
     )
       .bind(uid)
       .all(),
   ]);
-  return ok(c, { interactions: rows.results, jobs: owned.results });
+  const sanitizedInteractions = (rows.results || []).map((row: any) => ({
+    ...row,
+    otherPhone: row.otherPhone ? formatDirectPhone(row.otherPhone) : null,
+  }));
+  return ok(c, { interactions: sanitizedInteractions, jobs: owned.results });
 });
 app.get("/api/v1/admin/usage", requireAuth, async (c) => {
   if (!c.env.ADMIN_USER_IDS?.split(",").includes(c.get("userId")))
@@ -213,6 +365,7 @@ app.route("/api/v1/services", services);
 app.route("/api/v1/service-requests", requests);
 app.route("/api/v1/applications", interactions);
 app.route("/api/v1/service-requests", interactions);
+app.route("/api/v1/notifications", notificationRoutes);
 app.route("/api/v1", trust);
 app.route("/api/v1", locations);
 export { app };

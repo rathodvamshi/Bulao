@@ -23,6 +23,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { api } from "../../src/api/client";
 import type { Job } from "../../src/api/types";
 import { useSession } from "../../src/store/session";
+import { formatDirectPhone } from "../../src/utils/phone";
 import { useAuth } from "../../src/auth";
 import { usePostWorkStore } from "../../src/features/post-work/store";
 import {
@@ -30,6 +31,7 @@ import {
   getExperienceOptionsForRole,
 } from "../../src/utils/nameVerification";
 import { JobApplicationsModal } from "../../src/components/JobApplicationsModal";
+import { CancellationModal } from "../../src/components/CancellationModal";
 
 const { width } = Dimensions.get("window");
 
@@ -200,6 +202,23 @@ export default function JobDetailScreen() {
     setApplyModalVisible(true);
   };
 
+  const [cancellingJobModal, setCancellingJobModal] = useState(false);
+
+  const handleCancelApplication = async (reason: string) => {
+    if (!job?.myApplication?.id) return;
+    try {
+      await api(`/applications/${job.myApplication.id}/action`, {
+        action: "cancel",
+        reason,
+      });
+      void client.invalidateQueries({ queryKey: ["job", id] });
+      void client.invalidateQueries({ queryKey: ["activity"] });
+      showToast("Job application cancelled.");
+    } catch (err: any) {
+      Alert.alert("Cancellation Failed", err?.message || "Could not cancel application.");
+    }
+  };
+
   // Edit Job Action: populates all fields into postWorkStore and launches post-work
   const handleEditJob = () => {
     if (!job) return;
@@ -248,7 +267,7 @@ export default function JobDetailScreen() {
     void Linking.openURL(url);
   };
 
-  const handleCall = (phoneNumber?: string) => {
+  const handleCall = (phoneNumber?: string | null) => {
     if (phoneNumber) {
       void Linking.openURL(`tel:${phoneNumber}`);
     } else {
@@ -910,6 +929,14 @@ export default function JobDetailScreen() {
                 <Ionicons name="shield-checkmark" size={13} color={pro.emeraldLight} />
                 <Text style={styles.employerBadgeText}>Identity & Phone Verified Client</Text>
               </View>
+              {!isOwner && job.ownerPhone ? (
+                <View style={styles.employerPhoneRow}>
+                  <Ionicons name="call" size={12} color={pro.emeraldPrimary} />
+                  <Text style={styles.employerPhoneText}>
+                    {formatDirectPhone(job.ownerPhone)}
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
             {!isOwner && job.ownerPhone ? (
@@ -966,6 +993,59 @@ export default function JobDetailScreen() {
               </LinearGradient>
             </Pressable>
           </View>
+        ) : job?.myApplication ? (
+          /* WORKER ALREADY APPLIED */
+          <View style={styles.workerApplyRow}>
+            {job.myApplication.status === "ACCEPTED" || job.myApplication.status === "IN_PROGRESS" ? (
+              <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
+                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: pro.emeraldSoft, borderRadius: 14, paddingVertical: 12 }}>
+                  <Ionicons name="checkmark-circle" size={18} color={pro.emeraldPrimary} />
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: pro.emeraldPrimary }}>
+                    Application Accepted!
+                  </Text>
+                </View>
+                <Pressable
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FECACA", alignItems: "center", justifyContent: "center" }}
+                  onPress={() => setCancellingJobModal(true)}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: "#DC2626" }}>Cancel Job</Text>
+                </Pressable>
+              </View>
+            ) : job.myApplication.status === "PENDING" ? (
+              <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
+                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#FEF3C7", borderRadius: 14, paddingVertical: 12 }}>
+                  <Ionicons name="time-outline" size={18} color="#B45309" />
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: "#B45309" }}>
+                    Pending Review
+                  </Text>
+                </View>
+                <Pressable
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center", justifyContent: "center" }}
+                  onPress={() => setCancellingJobModal(true)}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#64748B" }}>Withdraw</Text>
+                </Pressable>
+              </View>
+            ) : job.myApplication.status === "REJECTED" ? (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FEE2E2", borderRadius: 14, paddingVertical: 14 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#DC2626" }}>
+                  Application Not Selected
+                </Text>
+              </View>
+            ) : job.myApplication.status === "COMPLETED" ? (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#DBEAFE", borderRadius: 14, paddingVertical: 14 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#1E40AF" }}>
+                  Job Completed ✓
+                </Text>
+              </View>
+            ) : (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F1F5F9", borderRadius: 14, paddingVertical: 14 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#64748B" }}>
+                  Application Cancelled
+                </Text>
+              </View>
+            )}
+          </View>
         ) : (
           /* WORKER MODE: Full-width Apply Button */
           <View style={styles.workerApplyRow}>
@@ -1004,10 +1084,19 @@ export default function JobDetailScreen() {
       <JobApplicationsModal
         visible={applicationsModalVisible}
         jobId={id}
-        jobTitle={job.customTitle || job.title}
+        jobTitle={job?.customTitle || job?.title}
         initialApplicants={applicantsList}
         initialApplicantCount={applicantsCount}
         onClose={() => setApplicationsModalVisible(false)}
+      />
+
+      {/* Seeker Job Cancellation Modal */}
+      <CancellationModal
+        visible={cancellingJobModal}
+        title="Cancel Job Application"
+        isProvider={false}
+        onClose={() => setCancellingJobModal(false)}
+        onConfirm={handleCancelApplication}
       />
 
       {/* ============================================================
@@ -1795,6 +1884,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     color: pro.emeraldPrimary,
+  },
+  employerPhoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+    backgroundColor: pro.emeraldSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  employerPhoneText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: pro.emeraldPrimary,
+    letterSpacing: 0.5,
   },
   directCallButton: {
     width: 40,

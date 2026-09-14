@@ -18,7 +18,7 @@ const ITEMS: {
   { id: "home", label: "Home", icon: "home-outline", activeIcon: "home", path: "/provider-home" },
   { id: "post", label: "Post", icon: "add", activeIcon: "add", path: "/post-work", center: true },
   { id: "jobs", label: "Job", icon: "briefcase-outline", activeIcon: "briefcase", path: "/activity" },
-  { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/profile" },
+  { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/provider-profile" },
 ];
 
 export function ProviderBottomNav({
@@ -92,6 +92,10 @@ export function ProviderBottomNav({
                     }
                     if (item.id === "jobs") {
                       router.replace("/activity");
+                      return;
+                    }
+                    if (item.id === "profile") {
+                      router.replace("/provider-profile");
                       return;
                     }
                     router.push(item.path);

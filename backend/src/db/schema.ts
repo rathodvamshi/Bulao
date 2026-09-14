@@ -139,6 +139,11 @@ export const interactions = sqliteTable(
     longitude: real("longitude"),
     scheduledAt: integer("scheduled_at"),
     details: text("details").notNull().default(""),
+    cancelledBy: text("cancelled_by").references(() => users.id),
+    cancellationReason: text("cancellation_reason"),
+    cancelledAt: integer("cancelled_at"),
+    acceptedAt: integer("accepted_at"),
+    rejectedAt: integer("rejected_at"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [
@@ -146,6 +151,22 @@ export const interactions = sqliteTable(
     index("interaction_owner").on(t.ownerId, t.status),
     index("interaction_worker").on(t.workerId, t.status),
   ],
+);
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    data: text("data"),
+    read: integer("read").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("notifications_user_idx").on(t.userId, t.read, t.createdAt)],
 );
 export const reviews = sqliteTable(
   "reviews",

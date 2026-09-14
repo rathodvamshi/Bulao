@@ -13,9 +13,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { Job } from "../api/types";
+import type { Job, JobApplicant } from "../api/types";
+import { CancellationModal } from "./CancellationModal";
+import { formatDirectPhone } from "../utils/phone";
 
 const pro = {
   canvas: "#F4F7F5",
@@ -76,30 +78,30 @@ export function JobApplicationsModal({
   initialApplicantCount,
 }: JobApplicationsModalProps) {
   const insets = useSafeAreaInsets();
-  const [modalRendered, setModalRendered] = useState(visible);
+  const queryClient = useQueryClient();
   const anim = useRef(new Animated.Value(0)).current;
+  const [modalRendered, setModalRendered] = useState(false);
+  const [cancellingApplicant, setCancellingApplicant] = useState<{ id: string; name: string } | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Sync animation with visible prop (smooth & slow glide)
   useEffect(() => {
     if (visible) {
       setModalRendered(true);
-      anim.setValue(0);
       Animated.timing(anim, {
         toValue: 1,
-        duration: 380,
-        easing: Easing.bezier(0.16, 1, 0.3, 1),
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
-    } else if (modalRendered) {
+    } else {
       Animated.timing(anim, {
         toValue: 0,
-        duration: 280,
-        easing: Easing.bezier(0.4, 0, 0.2, 1),
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          setModalRendered(false);
-        }
+      }).start(() => {
+        setModalRendered(false);
       });
     }
   }, [visible]);
@@ -107,14 +109,12 @@ export function JobApplicationsModal({
   const handleClose = () => {
     Animated.timing(anim, {
       toValue: 0,
-      duration: 280,
-      easing: Easing.bezier(0.4, 0, 0.2, 1),
+      duration: 200,
+      easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        setModalRendered(false);
-        onClose();
-      }
+    }).start(() => {
+      setModalRendered(false);
+      onClose();
     });
   };
 
@@ -123,7 +123,7 @@ export function JobApplicationsModal({
     queryKey: ["job", jobId],
     queryFn: () => api<Job>(`/jobs/${jobId}`),
     enabled: visible && !!jobId,
-    staleTime: 10000,
+    staleTime: 5000,
   });
 
   const applicantsList = useMemo(() => {
@@ -142,10 +142,26 @@ export function JobApplicationsModal({
     initialApplicantCount ??
     applicantsList.length;
 
-  const handleCall = (phoneNumber?: string) => {
+  const handleCall = (phoneNumber?: string | null) => {
     if (!phoneNumber) return;
     const cleanPhone = phoneNumber.replace(/[^0-9+]/g, "");
     void Linking.openURL(`tel:${cleanPhone}`);
+  };
+
+  const handleAction = async (applicationId: string, action: "accept" | "reject" | "cancel", reason?: string) => {
+    try {
+      setActionLoadingId(applicationId);
+      await api(`/applications/${applicationId}/action`, {
+        action,
+        reason: reason || undefined,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["job", jobId] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
+    } catch (err: any) {
+      console.error("Failed to perform action:", err);
+    } finally {
+      setActionLoadingId(null);
+    }
   };
 
   if (!modalRendered) return null;
@@ -215,40 +231,130 @@ export function JobApplicationsModal({
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 12 }}
             >
-              {applicantsList.map((cand: any, idx: number) => (
-                <View key={cand.id || idx} style={styles.candidateCard}>
-                  <View style={styles.candidateAvatar}>
-                    <Text style={styles.candidateAvatarText}>
-                      {(cand.name || "W").charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
+              {applicantsList.map((cand: any, idx: number) => {
+                const appId = cand.applicationId || cand.id;
+                const status = cand.status || "PENDING";
+                const isAccepted = status === "ACCEPTED" || status === "IN_PROGRESS" || status === "COMPLETED";
+                const isRejected = status === "REJECTED";
+                const isCancelled = status === "CANCELLED_BY_SEEKER" || status === "CANCELLED_BY_PROVIDER" || status === "CANCELLED";
+                const isPending = status === "PENDING";
+                const isActionLoading = actionLoadingId === appId;
 
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={styles.candidateNameText} numberOfLines={1}>
-                      {cand.name || "Worker Candidate"}
-                    </Text>
-                    {cand.area ? (
-                      <Text style={styles.candidateAreaText} numberOfLines={1}>
-                        {cand.area}
-                      </Text>
-                    ) : null}
-                    <Text style={styles.candidateAppliedAt}>
-                      Applied {formatRelativeTime(cand.appliedAt)}
-                    </Text>
-                  </View>
+                return (
+                  <View key={appId || idx} style={styles.candidateCard}>
+                    <View style={styles.candidateTopRow}>
+                      <View style={styles.candidateAvatar}>
+                        <Text style={styles.candidateAvatarText}>
+                          {(cand.name || "W").charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
 
-                  {cand.phone ? (
-                    <Pressable
-                      style={styles.candidateCallBtn}
-                      onPress={() => handleCall(cand.phone)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Call ${cand.name || "candidate"}`}
-                    >
-                      <Ionicons name="call" size={16} color="#FFFFFF" />
-                    </Pressable>
-                  ) : null}
-                </View>
-              ))}
+                      <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={styles.candidateNameText} numberOfLines={1}>
+                            {cand.name || "Worker Candidate"}
+                          </Text>
+                          {/* Status Badge */}
+                          <View
+                            style={[
+                              styles.statusBadge,
+                              isAccepted && styles.statusAccepted,
+                              isRejected && styles.statusRejected,
+                              isCancelled && styles.statusCancelled,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusBadgeText,
+                                isAccepted && styles.statusAcceptedText,
+                                isRejected && styles.statusRejectedText,
+                                isCancelled && styles.statusCancelledText,
+                              ]}
+                            >
+                              {isAccepted ? "Accepted" : isRejected ? "Rejected" : isCancelled ? "Cancelled" : "Pending"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {cand.area ? (
+                          <Text style={styles.candidateAreaText} numberOfLines={1}>
+                            {cand.area}
+                          </Text>
+                        ) : null}
+                        {cand.phone ? (
+                          <View style={styles.candidatePhoneRow}>
+                            <Ionicons name="call" size={12} color={pro.emeraldPrimary} />
+                            <Text style={styles.candidatePhoneText}>
+                              {formatDirectPhone(cand.phone)}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <Text style={styles.candidateAppliedAt}>
+                          Applied {formatRelativeTime(cand.appliedAt)}
+                        </Text>
+                      </View>
+
+                      {/* Call button if phone is unlocked */}
+                      {cand.phone ? (
+                        <Pressable
+                          style={styles.candidateCallBtn}
+                          onPress={() => handleCall(cand.phone)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Call ${cand.name || "candidate"}`}
+                        >
+                          <Ionicons name="call" size={16} color="#FFFFFF" />
+                        </Pressable>
+                      ) : null}
+                    </View>
+
+                    {/* Action Buttons Row */}
+                    <View style={styles.candidateActionsRow}>
+                      {isActionLoading ? (
+                        <ActivityIndicator size="small" color={pro.emeraldPrimary} style={{ marginVertical: 6 }} />
+                      ) : isPending ? (
+                        <View style={{ flexDirection: "row", gap: 8, flex: 1, marginTop: 8 }}>
+                          <Pressable
+                            style={[styles.actionBtn, styles.acceptBtn]}
+                            onPress={() => handleAction(appId, "accept")}
+                          >
+                            <Ionicons name="checkmark-circle-outline" size={15} color="#FFFFFF" />
+                            <Text style={styles.acceptBtnText}>Accept</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.actionBtn, styles.rejectBtn]}
+                            onPress={() => handleAction(appId, "reject")}
+                          >
+                            <Ionicons name="close-circle-outline" size={15} color="#DC2626" />
+                            <Text style={styles.rejectBtnText}>Reject</Text>
+                          </Pressable>
+                        </View>
+                      ) : isRejected ? (
+                        <View style={{ flexDirection: "row", gap: 8, flex: 1, marginTop: 8 }}>
+                          <Pressable
+                            style={[styles.actionBtn, styles.reAcceptBtn]}
+                            onPress={() => handleAction(appId, "accept")}
+                          >
+                            <Ionicons name="refresh-outline" size={15} color={pro.emeraldPrimary} />
+                            <Text style={styles.reAcceptBtnText}>Re-Accept Candidate</Text>
+                          </Pressable>
+                        </View>
+                      ) : isAccepted ? (
+                        <View style={{ flexDirection: "row", gap: 8, flex: 1, marginTop: 8, alignItems: "center", justifyContent: "space-between" }}>
+                          <Text style={styles.contactUnlockedNotice}>
+                            <Ionicons name="lock-open-outline" size={12} color={pro.emeraldPrimary} /> Contact details unlocked
+                          </Text>
+                          <Pressable
+                            style={styles.cancelLinkBtn}
+                            onPress={() => setCancellingApplicant({ id: appId, name: cand.name || "candidate" })}
+                          >
+                            <Text style={styles.cancelLinkText}>Cancel Job</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
             </ScrollView>
           ) : (
             <View style={styles.emptyApplicantsBox}>
@@ -264,6 +370,19 @@ export function JobApplicationsModal({
             </View>
           )}
         </Animated.View>
+
+        {/* Cancellation Reason Modal */}
+        <CancellationModal
+          visible={!!cancellingApplicant}
+          title={`Cancel Job with ${cancellingApplicant?.name || "Candidate"}`}
+          isProvider={true}
+          onClose={() => setCancellingApplicant(null)}
+          onConfirm={(reason) => {
+            if (cancellingApplicant?.id) {
+              return handleAction(cancellingApplicant.id, "cancel", reason);
+            }
+          }}
+        />
       </View>
     </Modal>
   );
@@ -340,12 +459,99 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   candidateCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
     paddingVertical: 13,
     borderBottomWidth: 1,
     borderBottomColor: pro.borderSubtle,
+  },
+  candidateTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  candidateActionsRow: {
+    paddingLeft: 46,
+  },
+  statusBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: "#FEF3C7",
+  },
+  statusBadgeText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#B45309",
+  },
+  statusAccepted: {
+    backgroundColor: pro.emeraldSoft,
+  },
+  statusAcceptedText: {
+    color: pro.emeraldPrimary,
+  },
+  statusRejected: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusRejectedText: {
+    color: "#DC2626",
+  },
+  statusCancelled: {
+    backgroundColor: "#F1F5F9",
+  },
+  statusCancelledText: {
+    color: "#64748B",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    flex: 1,
+  },
+  acceptBtn: {
+    backgroundColor: pro.emeraldPrimary,
+  },
+  acceptBtnText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  rejectBtn: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  rejectBtnText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  reAcceptBtn: {
+    backgroundColor: pro.emeraldSoft,
+    borderWidth: 1,
+    borderColor: pro.emeraldLight,
+  },
+  reAcceptBtnText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: pro.emeraldPrimary,
+  },
+  contactUnlockedNotice: {
+    fontSize: 12,
+    color: pro.emeraldPrimary,
+    fontWeight: "600",
+  },
+  cancelLinkBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  cancelLinkText: {
+    fontSize: 12,
+    color: "#DC2626",
+    fontWeight: "600",
+    textDecorationLine: "underline",
   },
   candidateAvatar: {
     width: 42,
@@ -374,6 +580,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: pro.muted,
     marginTop: 2,
+  },
+  candidatePhoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 3,
+    backgroundColor: pro.emeraldSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  candidatePhoneText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: pro.emeraldPrimary,
+    letterSpacing: 0.5,
   },
   candidateCallBtn: {
     width: 38,

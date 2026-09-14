@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { jobSchema } from "@bulao/domain";
+import { jobSchema, formatDirectPhone } from "@bulao/domain";
 import type { AppEnv } from "../../config/env";
 import { jobs, roles } from "../../db/schema";
 import { ApiError, ok } from "../../middleware/errors";
-import { now, requireAuth, rateLimit } from "../auth/session";
+import { now, requireAuth, rateLimit, identify } from "../auth/session";
 import { nearby } from "../locations/search";
 import { assertUnblocked } from "../trust/permissions";
+import { createNotification } from "../notifications/service";
 
 export const jobRoutes = new Hono<AppEnv>();
 
@@ -344,6 +345,30 @@ jobRoutes.get("/:id", async (c) => {
     );
   }
 
+  const currentUser = await identify(c.env.DB, c.req.header("Authorization"));
+  const currentUserId = currentUser?.id;
+  const isOwner = Boolean(currentUserId && currentUserId === job.ownerId);
+
+  let myApplication: { id: string; status: string } | null = null;
+  if (currentUserId && !isOwner) {
+    const appRow = await c.env.DB.prepare(
+      "SELECT id, status FROM interactions WHERE job_id = ? AND worker_id = ?"
+    )
+      .bind(job.id, currentUserId)
+      .first<{ id: string; status: string }>();
+    if (appRow) {
+      myApplication = { id: appRow.id, status: appRow.status };
+    }
+  }
+
+  // Privacy barrier: hide provider phone unless viewer is the owner or an accepted applicant
+  const isAccepted = myApplication && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(myApplication.status);
+  if (!isOwner && !isAccepted) {
+    job.ownerPhone = null;
+  } else if (job.ownerPhone) {
+    job.ownerPhone = formatDirectPhone(job.ownerPhone);
+  }
+
   // Fetch applicant count & details for this job
   let applicantCount = 0;
   let applicants: any[] = [];
@@ -358,9 +383,10 @@ jobRoutes.get("/:id", async (c) => {
     if (applicantCount > 0) {
       const applicantsRes = await c.env.DB.prepare(`
         SELECT 
+          i.id as applicationId,
           u.id,
           u.name,
-          u.phone,
+          CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') THEN u.phone ELSE NULL END as phone,
           u.area,
           u.photo_url as photoUrl,
           i.created_at as appliedAt,
@@ -370,7 +396,10 @@ jobRoutes.get("/:id", async (c) => {
         WHERE i.job_id = ? AND i.kind = 'job'
         ORDER BY i.created_at DESC
       `).bind(job.id).all();
-      applicants = applicantsRes.results || [];
+      applicants = (applicantsRes.results || []).map((app: any) => ({
+        ...app,
+        phone: app.phone ? formatDirectPhone(app.phone) : null,
+      }));
     }
   } catch (err) {
     console.error("[API] Error fetching applicant count/details:", err);
@@ -393,6 +422,7 @@ jobRoutes.get("/:id", async (c) => {
     applicantCount,
     applicants,
     extras,
+    myApplication,
   });
 });
 
@@ -487,12 +517,24 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
     .from(jobs)
     .where(eq(jobs.id, c.req.param("id")))
     .get();
-  if (!job || job.status !== "PUBLISHED" || job.startsAt < now())
+  if (!job) {
+    throw new ApiError(
+      "JOB_NOT_FOUND",
+      404,
+      "This job is no longer available.",
+    );
+  }
+  const isExpired =
+    job.endsAt ? job.endsAt < now() - 3600 :
+    job.duration === "ongoing" ? false :
+    job.startsAt < now() - 86400;
+  if (job.status !== "PUBLISHED" || isExpired) {
     throw new ApiError(
       "JOB_NOT_AVAILABLE",
       409,
       "This job is no longer accepting applications.",
     );
+  }
   if (job.ownerId === c.get("userId")) {
     throw new ApiError(
       "SELF_APPLICATION",
@@ -512,5 +554,19 @@ jobRoutes.post("/:id/apply", requireAuth, async (c) => {
       409,
       "You've already applied to this job.",
     );
+
+  const applicant = await c.env.DB.prepare("SELECT name FROM users WHERE id=?")
+    .bind(c.get("userId"))
+    .first<{ name: string }>();
+  const applicantName = applicant?.name || "A seeker";
+
+  await createNotification(c.env.DB, {
+    userId: job.ownerId,
+    type: "APPLICATION_CREATED",
+    title: "New Job Application!",
+    message: `${applicantName} applied for "${job.title || "your job posting"}".`,
+    data: { interactionId: id, jobId: job.id, workerId: c.get("userId") },
+  });
+
   return ok(c, { id });
 });

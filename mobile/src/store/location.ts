@@ -1,13 +1,13 @@
 /**
  * Location Store
  *
- * Persists the user's selected location to AsyncStorage via zustand persist
+ * Persists the user's selected location to secure storage via zustand persist
  * so it survives app restarts. The sheet only auto-shows if the user is
  * authenticated but has NO previously saved location.
  */
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { secureStorage } from "./secureStorage";
 import { Platform } from "react-native";
 import type { Location } from "@bulao/domain";
 import type { SavedLocation } from "../api/locationApi";
@@ -41,7 +41,7 @@ export const useLocation = create<LocationState>()(
     }),
     {
       name: "bulao-location",
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => secureStorage),
       // Only persist the selected location — don't persist sheet state or saved list
       partialize: (state) => ({ location: state.location }),
     }

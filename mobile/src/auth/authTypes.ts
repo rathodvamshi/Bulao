@@ -19,6 +19,7 @@ export type UserData = {
   id: string;
   name: string;
   area: string;
+  phone?: string;
 };
 
 export type AuthState = {

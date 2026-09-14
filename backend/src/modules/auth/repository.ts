@@ -7,14 +7,14 @@ export async function createUserSession(db: D1Database, phone: string, tokenHash
       .bind(crypto.randomUUID(), phone, at, at, at),
     db.prepare("INSERT INTO sessions(hash,user_id,created_at,expires_at) SELECT ?,id,?,? FROM users WHERE phone=? AND suspended=0")
       .bind(tokenHash, at, expiresAt, phone),
-    db.prepare("SELECT id,name,area FROM users WHERE phone=? AND suspended=0").bind(phone),
+    db.prepare("SELECT id,name,area,phone FROM users WHERE phone=? AND suspended=0").bind(phone),
   ]);
-  return results[2]?.results[0] as { id: string; name: string; area: string } | undefined;
+  return results[2]?.results[0] as { id: string; name: string; area: string; phone?: string } | undefined;
 }
 
 export function findActiveSession(db: D1Database, tokenHash: string, at: number) {
-  return db.prepare("SELECT u.id,u.name,u.area,s.expires_at AS expiresAt FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.revoked_at IS NULL AND s.expires_at>? AND u.suspended=0 AND u.phone_verified=1")
-    .bind(tokenHash, at).first<{ id: string; name: string; area: string; expiresAt: number }>();
+  return db.prepare("SELECT u.id,u.name,u.area,u.phone,s.expires_at AS expiresAt FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.revoked_at IS NULL AND s.expires_at>? AND u.suspended=0 AND u.phone_verified=1")
+    .bind(tokenHash, at).first<{ id: string; name: string; area: string; phone?: string; expiresAt: number }>();
 }
 
 export async function revokeSession(db: D1Database, tokenHash: string, at: number) {

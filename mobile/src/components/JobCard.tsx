@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import type { Job } from "../api/types";
@@ -10,17 +10,23 @@ interface JobCardProps {
   job: Job;
   onViewDetails: (job: Job) => void;
   onViewApplications?: (job: Job) => void;
+  onApply?: (job: Job) => Promise<void> | void;
 }
 
-export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps) {
+export function JobCard({ job, onViewDetails, onViewApplications, onApply }: JobCardProps) {
   const { user, session } = useAuth();
   const [appsModalVisible, setAppsModalVisible] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [appliedLocally, setAppliedLocally] = useState(false);
+
   const currentUserId = user?.id || session?.userId;
   const isOwner = Boolean(
     currentUserId &&
     job.ownerId &&
     String(currentUserId).trim().toLowerCase() === String(job.ownerId).trim().toLowerCase()
   );
+
+  const hasApplied = Boolean(job.myApplication || appliedLocally);
 
   const payInRupees = job.payPaise / 100;
   const payDisplay = `₹${payInRupees} / ${job.payUnit.toLowerCase()}`;
@@ -38,6 +44,27 @@ export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps
     minute: "2-digit"
   });
 
+  const handleApplyPress = async () => {
+    if (hasApplied || isApplying) return;
+    if (!currentUserId) {
+      Alert.alert("Sign In Required", "Please sign in to apply for this job.");
+      return;
+    }
+    if (onApply) {
+      try {
+        setIsApplying(true);
+        await onApply(job);
+        setAppliedLocally(true);
+      } catch (err: any) {
+        Alert.alert("Application Error", err?.message || "Failed to submit application.");
+      } finally {
+        setIsApplying(false);
+      }
+    } else {
+      onViewDetails(job);
+    }
+  };
+
   const handlePrimaryPress = () => {
     if (isOwner) {
       if (onViewApplications) {
@@ -46,7 +73,7 @@ export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps
         setAppsModalVisible(true);
       }
     } else {
-      onViewDetails(job);
+      handleApplyPress();
     }
   };
 
@@ -59,10 +86,16 @@ export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps
               {job.title}
             </Text>
           </View>
-          {isOwner && (
+          {isOwner ? (
             <View style={styles.ownerBadge}>
               <Ionicons name="person" size={11} color={colors.green} />
               <Text style={styles.ownerBadgeText}>Your Job Posting</Text>
+            </View>
+          ) : (
+            <View style={styles.roleBadge}>
+              <Text style={styles.roleBadgeText}>
+                {job.roleName || job.categoryName || "General Work"}
+              </Text>
             </View>
           )}
         </View>
@@ -102,7 +135,9 @@ export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps
             })}
           >
             <View style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText} numberOfLines={1} adjustsFontSizeToFit>View Details</Text>
+              <Text style={styles.secondaryButtonText} numberOfLines={1} adjustsFontSizeToFit>
+                View Details
+              </Text>
             </View>
           </Pressable>
         </View>
@@ -111,24 +146,52 @@ export function JobCard({ job, onViewDetails, onViewApplications }: JobCardProps
           <Pressable
             accessibilityRole="button"
             onPress={handlePrimaryPress}
+            disabled={!isOwner && (hasApplied || isApplying)}
             style={({ pressed }) => ({
-              opacity: pressed ? 0.7 : 1,
+              opacity: pressed && !hasApplied ? 0.7 : 1,
             })}
           >
-            <View style={[styles.primaryButton, isOwner && styles.ownerButton]}>
-              <Ionicons
-                name={isOwner ? "people-outline" : "paper-plane-outline"}
-                size={15}
-                color="#FFFFFF"
-                style={{ marginRight: 4 }}
-              />
-              <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit>
-                {isOwner
-                  ? (job.applicantCount && job.applicantCount > 0
-                      ? `Applications (${job.applicantCount})`
-                      : "View Applications")
-                  : "Apply"}
-              </Text>
+            <View
+              style={[
+                styles.primaryButton,
+                isOwner && styles.ownerButton,
+                !isOwner && hasApplied && styles.appliedButton,
+              ]}
+            >
+              {isApplying ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons
+                    name={
+                      isOwner
+                        ? "people-outline"
+                        : hasApplied
+                        ? "checkmark-circle"
+                        : "paper-plane-outline"
+                    }
+                    size={15}
+                    color={!isOwner && hasApplied ? colors.green : "#FFFFFF"}
+                    style={{ marginRight: 4 }}
+                  />
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      !isOwner && hasApplied && styles.appliedButtonText,
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {isOwner
+                      ? job.applicantCount && job.applicantCount > 0
+                        ? `Applications (${job.applicantCount})`
+                        : "View Applications"
+                      : hasApplied
+                      ? "Applied"
+                      : "Apply"}
+                  </Text>
+                </>
+              )}
             </View>
           </Pressable>
         </View>
@@ -243,5 +306,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: colors.green,
+  },
+  roleBadge: {
+    backgroundColor: "#F1F5F9",
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  roleBadgeText: {
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  appliedButton: {
+    backgroundColor: "#E2FBE8",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  appliedButtonText: {
+    color: colors.green,
+    fontWeight: "700",
   },
 });

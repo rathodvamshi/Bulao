@@ -259,7 +259,7 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
       }
       const { user, session } = await completeLogin("91" + phone, verifiedAccessToken.current);
       if (mounted.current) {
-        auth.login(user, session);
+        auth.login({ ...user, phone: user.phone || ("91" + phone) }, session);
         verifiedAccessToken.current = null;
         setOtp(["", "", "", ""]);
         router.replace("/(tabs)/profile");
