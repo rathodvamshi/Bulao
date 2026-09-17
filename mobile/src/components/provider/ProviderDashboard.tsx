@@ -10,7 +10,6 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -23,7 +22,7 @@ import { Skeleton } from "../SkeletonLoader";
 import { ProviderBottomNav } from "./ProviderBottomNav";
 import { dash, radii } from "./palette";
 
-const HERO = require("../../../assets/images/provider/top_2.png");
+import { ProviderStoryHero } from "./ProviderStoryHero";
 
 type Period = "week" | "month" | "all";
 
@@ -72,17 +71,6 @@ function pagePad(width: number) {
   if (width < 360) return 16;
   if (width > 420) return 22;
   return 20;
-}
-
-function heroHeightFor(width: number) {
-  // Get image dimensions to calculate aspect ratio
-  const imageAsset = Image.resolveAssetSource(HERO);
-  if (imageAsset && imageAsset.width && imageAsset.height) {
-    // Auto-calculate height based on image aspect ratio, reduced by 20%
-    return width * (imageAsset.height / imageAsset.width) * 0.8;
-  }
-  // Fallback: assume standard aspect ratio if dimensions not available
-  return width * 0.95;
 }
 
 function jobPriority(job: RecentJob) {
@@ -229,7 +217,9 @@ export default function ProviderDashboard() {
   const { width } = useWindowDimensions();
   const pad = pagePad(width);
 
-  const heroH = heroHeightFor(width);
+  const headerHeight = insets.top + 56;
+  const heroH = headerHeight + Math.min(width, 440) * 0.63 + 64;
+  const [heroVisible, setHeroVisible] = useState(true);
   const auth = useAuth();
   const location = useLocation((s) => s.location);
   const [period, setPeriod] = useState<Period>("month");
@@ -294,7 +284,7 @@ export default function ProviderDashboard() {
 
   return (
     <View style={styles.screen}>
-      <StatusBar style={headerTint > 0.55 ? "dark" : "light"} translucent />
+      <StatusBar style="dark" translucent />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -302,44 +292,13 @@ export default function ProviderDashboard() {
         onScroll={(e) => {
           const y = e.nativeEvent.contentOffset.y;
           setHeaderTint(Math.min(1, Math.max(0, y / 90)));
+          setHeroVisible(y < heroH - headerHeight);
         }}
         contentContainerStyle={{
           paddingBottom: 118 + Math.max(insets.bottom, 8),
         }}
       >
-        {/* Hero: reference image scrolls naturally with the page content */}
-        <View
-          style={{
-            width: "100%",
-            height: heroH,
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          <Image
-            source={HERO}
-            accessibilityLabel="Local worker finding jobs nearby"
-            resizeMode="cover"
-            style={styles.heroImage}
-          />
-          <LinearGradient
-            colors={["rgba(7,91,67,0.22)", "transparent"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 0.16 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <LinearGradient
-            colors={["transparent", "rgba(248,250,247,0.4)", dash.bg]}
-            locations={[0.58, 0.84, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-          <LinearGradient
-            colors={["transparent", "rgba(248,250,247,0.82)"]}
-            start={{ x: 0.55, y: 0.35 }}
-            end={{ x: 0, y: 0.92 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
+        <ProviderStoryHero width={width} height={heroH} headerHeight={headerHeight} visible={heroVisible} />
 
         <View style={{ paddingHorizontal: sidePad, marginTop: -64, elevation: 3, zIndex: 3, alignItems: "center" }}>
           <PostJobCTA />
