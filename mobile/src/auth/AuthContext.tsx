@@ -25,6 +25,7 @@ type AuthContextValue = {
 
   // Actions
   login: (user: UserData, session: SessionData) => void;
+  updateUser: (fields: Partial<UserData>) => void;
   logout: () => Promise<void>;
   retry: () => Promise<void>;
 };
@@ -133,6 +134,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   /**
+   * Update user fields in memory
+   */
+  const updateUser = useCallback((fields: Partial<UserData>) => {
+    setUser((prev) => (prev ? { ...prev, ...fields } : null));
+  }, []);
+
+  /**
    * Logout - revoke session and clear state
    */
   const logout = useCallback(async () => {
@@ -165,6 +173,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     session,
     error,
     login,
+    updateUser,
     logout,
     retry,
   };

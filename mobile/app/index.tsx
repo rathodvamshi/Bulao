@@ -58,16 +58,23 @@ export default function Index() {
 
     // Route based on auth status
     if (auth.status === 'authenticated') {
-      console.log('Index: Authenticated, routing to tabs');
-      setHasNavigated(true);
-      router.replace('/(tabs)');
+      const needsName = !auth.user?.name || auth.user.name.trim() === "" || auth.user.name.trim().toLowerCase() === "user";
+      if (needsName) {
+        console.log('Index: Authenticated but missing name, routing to name step');
+        setHasNavigated(true);
+        router.replace('/auth?step=name');
+      } else {
+        console.log('Index: Authenticated, routing to tabs');
+        setHasNavigated(true);
+        router.replace('/(tabs)');
+      }
     } else if (auth.status === 'unauthenticated') {
       console.log('Index: Unauthenticated, routing to auth');
       setHasNavigated(true);
       router.replace('/auth');
     }
     // If error, stay on this screen to show error + retry
-  }, [navigationReady, showSplash, auth.status, hasNavigated]);
+  }, [navigationReady, showSplash, auth.status, auth.user?.name, hasNavigated]);
 
   // Show splash screen during initial animation
   if (showSplash) {

@@ -63,8 +63,9 @@ for (const action of ["send", "resend", "verify"] as const) {
       const user = await createUserSession(c.env.DB, input.phone, tokenHash, at, expiresAt);
       if (!user) throw new ApiError("UNAUTHORIZED", 403, "This account cannot sign in. Please contact support.");
       userId = user.id;
+      const isNewUser = !user.name || user.name.trim() === "" || user.name.trim().toLowerCase() === "user";
       audit(c, { eventType: "AUTH_OTP_VERIFY_SUCCESS", success: true, userId, phoneHash, ipHash, code: null });
-      return ok(c, { token, expiresAt, user });
+      return ok(c, { token, expiresAt, user, isNewUser });
     } catch (error) {
       audit(c, { eventType: `AUTH_OTP_${action.toUpperCase()}_FAILED`, success: false, userId, phoneHash, ipHash,
         code: error instanceof ApiError ? error.code : "INTERNAL_ERROR" });
@@ -93,8 +94,9 @@ auth.post("/verify-widget-otp", async (c) => {
     const user = await createUserSession(c.env.DB, verifiedPhone.slice(1), await hash(token), at, expiresAt);
     if (!user) throw new ApiError("UNAUTHORIZED", 403, "This account cannot sign in. Please contact support.");
     userId = user.id;
+    const isNewUser = !user.name || user.name.trim() === "" || user.name.trim().toLowerCase() === "user";
     audit(c, { eventType: "AUTH_WIDGET_VERIFY_SUCCESS", success: true, userId, phoneHash, ipHash, code: null });
-    return ok(c, { token, expiresAt, user });
+    return ok(c, { token, expiresAt, user, isNewUser });
   } catch (error) {
     const code = error instanceof ApiError ? error.code : "INTERNAL_ERROR";
     console.error(JSON.stringify({ event: "AUTH_WIDGET_VERIFY_FAILED", requestId: c.get("requestId"), code }));

@@ -16,6 +16,8 @@ import {
   Linking,
   StyleSheet,
   Dimensions,
+  Easing,
+  PanResponder,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -38,28 +40,75 @@ export function LocationSheet() {
   } = useLocation();
 
   const [isLocating, setIsLocating] = useState(false);
+  const [mounted, setMounted] = useState(isLocationSheetVisible);
   const { status, session } = useAuth();
 
-  // Animation value for slide-up
+  // Animation values for smooth in-and-out flow
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const isClosingRef = useRef(false);
+
+  const animateIn = useCallback(() => {
+    isClosingRef.current = false;
+    setMounted(true);
+    translateY.setValue(SHEET_HEIGHT);
+    backdropOpacity.setValue(0);
+
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 24,
+        mass: 0.85,
+        stiffness: 220,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [translateY, backdropOpacity]);
+
+  const animateOut = useCallback(
+    (onComplete?: () => void) => {
+      if (isClosingRef.current) return;
+      isClosingRef.current = true;
+
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: SHEET_HEIGHT,
+          duration: 230,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          setMounted(false);
+          setLocationSheetVisible(false);
+          isClosingRef.current = false;
+          onComplete?.();
+        }
+      });
+    },
+    [translateY, backdropOpacity, setLocationSheetVisible]
+  );
 
   // Animate open/close when visibility changes
   useEffect(() => {
     if (isLocationSheetVisible) {
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        damping: 20,
-        stiffness: 200,
-      }).start();
-    } else {
-      Animated.timing(translateY, {
-        toValue: SHEET_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
+      animateIn();
+    } else if (mounted) {
+      animateOut();
     }
-  }, [isLocationSheetVisible, translateY]);
+  }, [isLocationSheetVisible, animateIn, animateOut, mounted]);
 
   // Auto-show sheet whenever the app opens and user is authenticated with no location set.
   // Because the location is persisted in secure storage via zustand, if they previously
@@ -86,9 +135,37 @@ export function LocationSheet() {
       });
   }, [status, session?.token, setSavedLocations]);
 
-  const dismiss = useCallback(() => {
-    setLocationSheetVisible(false);
-  }, [setLocationSheetVisible]);
+  const dismiss = useCallback(
+    (onComplete?: () => void) => {
+      animateOut(onComplete);
+    },
+    [animateOut]
+  );
+
+  // PanResponder to allow dragging down to dismiss smoothly
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 4,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 80 || gestureState.vy > 0.5) {
+          dismiss();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            damping: 22,
+            stiffness: 240,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   const handleUseCurrentLocation = async () => {
     setIsLocating(true);
@@ -149,25 +226,48 @@ export function LocationSheet() {
     }
   };
 
+  if (!mounted && !isLocationSheetVisible) {
+    return null;
+  }
+
   return (
     <Modal
-      visible={isLocationSheetVisible}
+      visible={mounted || isLocationSheetVisible}
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={dismiss}
+      onRequestClose={() => dismiss()}
     >
-      {/* Backdrop */}
-      <Pressable style={styles.backdrop} onPress={dismiss} />
+      {/* Animated Fade Backdrop */}
+      <Animated.View style={[styles.backdropWrap, { opacity: backdropOpacity }]}>
+        <Pressable style={styles.backdrop} onPress={() => dismiss()} />
+      </Animated.View>
 
       {/* Sheet */}
       <Animated.View
         style={[styles.sheet, { transform: [{ translateY }] }]}
       >
-        {/* Drag handle */}
-        <View style={styles.handle} />
+        {/* Drag handle area with pan responder for fluid swipe-down dismissal */}
+        <View {...panResponder.panHandlers} style={styles.dragHandleArea}>
+          <View style={styles.handle} />
+        </View>
 
-        <Text style={styles.title}>Choose your work location</Text>
+        {/* Title row with close icon at right corner beside the title */}
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Choose your work location</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={() => dismiss()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={({ pressed }) => [
+              styles.closeBtn,
+              { opacity: pressed ? 0.6 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+            ]}
+          >
+            <Ionicons name="close" size={16} color="#000000" />
+          </Pressable>
+        </View>
 
         {/* Use current location */}
         <Pressable
@@ -197,8 +297,9 @@ export function LocationSheet() {
         {/* Search manually */}
         <Pressable
           onPress={() => {
-            dismiss();
-            router.push("/location-search");
+            dismiss(() => {
+              router.push("/location-search");
+            });
           }}
           style={({ pressed }) => ({
             opacity: pressed ? 0.7 : 1,
@@ -287,13 +388,16 @@ export function LocationSheet() {
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  backdropWrap: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.48)",
+  },
+  backdrop: {
+    flex: 1,
   },
   sheet: {
     position: "absolute",
@@ -306,26 +410,49 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingBottom: 32,
-    paddingTop: 12,
+    paddingTop: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.12,
     shadowRadius: 16,
     elevation: 16,
   },
+  dragHandleArea: {
+    width: "100%",
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: 44,
+    height: 4.5,
+    borderRadius: 2.5,
     backgroundColor: colors.line,
-    alignSelf: "center",
-    marginBottom: 20,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: "700",
     color: colors.ink,
-    marginBottom: 16,
+    flex: 1,
+    flexShrink: 1,
+    paddingRight: 10,
+  },
+  closeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#000000",
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
   pillContainer: {
     flexDirection: "row",

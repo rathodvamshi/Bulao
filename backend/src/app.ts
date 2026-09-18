@@ -178,7 +178,13 @@ app.get("/api/v1/users/me", requireAuth, async (c) => {
 app.patch("/api/v1/users/me", requireAuth, async (c) => {
   const input = z
     .object({
-      name: z.string().trim().min(2).max(60).optional(),
+      name: z
+        .string()
+        .trim()
+        .min(2, "Name must be at least 2 characters")
+        .max(60, "Name cannot exceed 60 characters")
+        .regex(/^[\p{L}\s.'-]+$/u, "Name can only contain letters, spaces, dots, and hyphens")
+        .optional(),
       area: z.string().trim().min(2).max(100).optional(),
     })
     .parse(await c.req.json());

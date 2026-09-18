@@ -361,6 +361,237 @@ export function FullScreenSkeleton() {
   );
 }
 
+// ─── Activity / Provider Jobs Listing Skeleton ──────────────────────────────
+export function ActivityJobSkeleton() {
+  return (
+    <View
+      style={{
+        backgroundColor: colors.white,
+        borderRadius: 20,
+        padding: 16,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: "#E5E7EB",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+        gap: 14,
+      }}
+    >
+      {/* Top Header Row */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+          <Skeleton width={44} height={44} borderRadius={12} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Skeleton width="55%" height={16} borderRadius={6} />
+              <Skeleton width={64} height={20} borderRadius={10} />
+            </View>
+            <Skeleton width="40%" height={12} borderRadius={4} />
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          <Skeleton width={56} height={26} borderRadius={13} />
+          <Skeleton width={26} height={26} borderRadius={13} />
+        </View>
+      </View>
+
+      {/* Grid Specs Row */}
+      <View
+        style={{
+          flexDirection: "row",
+          backgroundColor: "#F9FAFB",
+          borderRadius: 12,
+          padding: 12,
+          gap: 12,
+        }}
+      >
+        <View style={{ flex: 1, gap: 6 }}>
+          <Skeleton width={50} height={10} borderRadius={3} />
+          <Skeleton width={80} height={16} borderRadius={4} />
+        </View>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Skeleton width={70} height={10} borderRadius={3} />
+          <Skeleton width={90} height={16} borderRadius={4} />
+        </View>
+      </View>
+
+      {/* Footer Action Bar */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 4 }}>
+        <Skeleton width={110} height={28} borderRadius={14} />
+        <Skeleton width={90} height={32} borderRadius={8} />
+      </View>
+    </View>
+  );
+}
+
+// ─── Job Detail Screen Skeleton ─────────────────────────────────────────────
+export function JobDetailSkeleton() {
+  return (
+    <View style={{ flex: 1, backgroundColor: "#F4F7F5" }}>
+      {/* Top Header Placeholder */}
+      <View style={{ height: 180, backgroundColor: "#075B43", padding: 20, justifyContent: "flex-end" }}>
+        <View style={{ gap: 8, opacity: 0.85 }}>
+          <Skeleton width={90} height={18} borderRadius={9} style={{ backgroundColor: "rgba(255,255,255,0.25)" }} />
+          <Skeleton width="75%" height={26} borderRadius={6} style={{ backgroundColor: "rgba(255,255,255,0.3)" }} />
+          <Skeleton width="45%" height={16} borderRadius={4} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
+        </View>
+      </View>
+
+      {/* Content Container */}
+      <View style={{ padding: 16, gap: 16, marginTop: -20 }}>
+        {/* Main Details Card */}
+        <View
+          style={{
+            backgroundColor: colors.white,
+            borderRadius: 18,
+            padding: 18,
+            gap: 14,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 8,
+            elevation: 2,
+          }}
+        >
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ gap: 6 }}>
+              <Skeleton width={70} height={12} borderRadius={4} />
+              <Skeleton width={120} height={22} borderRadius={6} />
+            </View>
+            <Skeleton width={100} height={36} borderRadius={18} />
+          </View>
+          <View style={{ height: 1, backgroundColor: "#EEF2F0", marginVertical: 4 }} />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <Skeleton width="48%" height={40} borderRadius={8} />
+            <Skeleton width="48%" height={40} borderRadius={8} />
+          </View>
+        </View>
+
+        {/* Map / Location Placeholder */}
+        <View
+          style={{
+            backgroundColor: colors.white,
+            borderRadius: 18,
+            padding: 16,
+            gap: 12,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 8,
+            elevation: 2,
+          }}
+        >
+          <Skeleton width={140} height={18} borderRadius={4} />
+          <Skeleton width="100%" height={130} borderRadius={12} />
+        </View>
+
+        {/* Requirements Card */}
+        <View
+          style={{
+            backgroundColor: colors.white,
+            borderRadius: 18,
+            padding: 16,
+            gap: 10,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 8,
+            elevation: 2,
+          }}
+        >
+          <Skeleton width={120} height={16} borderRadius={4} />
+          <Skeleton width="90%" height={14} borderRadius={4} />
+          <Skeleton width="80%" height={14} borderRadius={4} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Provider Profile Screen Skeleton ───────────────────────────────────────
+export function ProfileScreenSkeleton() {
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.paper, paddingHorizontal: 16 }}>
+      {/* Identity Card Placeholder */}
+      <View
+        style={{
+          backgroundColor: colors.white,
+          borderRadius: 20,
+          padding: 20,
+          marginTop: 16,
+          alignItems: "center",
+          gap: 12,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+          elevation: 2,
+        }}
+      >
+        <SkeletonCircle size={84} />
+        <Skeleton width={160} height={22} borderRadius={6} />
+        <Skeleton width={120} height={14} borderRadius={4} />
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+          <Skeleton width={100} height={24} borderRadius={12} />
+          <Skeleton width={90} height={24} borderRadius={12} />
+        </View>
+      </View>
+
+      {/* Stats Quad Placeholder */}
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          marginTop: 16,
+          gap: 8,
+        }}
+      >
+        {[0, 1, 2, 3].map((i) => (
+          <View
+            key={i}
+            style={{
+              flex: 1,
+              backgroundColor: colors.white,
+              borderRadius: 14,
+              padding: 12,
+              alignItems: "center",
+              gap: 6,
+              borderWidth: 1,
+              borderColor: "#E5E7EB",
+            }}
+          >
+            <Skeleton width={28} height={22} borderRadius={6} />
+            <Skeleton width="80%" height={10} borderRadius={3} />
+          </View>
+        ))}
+      </View>
+
+      {/* Trust & Badges Card Placeholder */}
+      <View
+        style={{
+          backgroundColor: colors.white,
+          borderRadius: 18,
+          padding: 16,
+          marginTop: 16,
+          gap: 12,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+          elevation: 2,
+        }}
+      >
+        <Skeleton width={140} height={18} borderRadius={4} />
+        <Skeleton width="100%" height={56} borderRadius={12} />
+        <Skeleton width="100%" height={56} borderRadius={12} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   skeleton: {
     overflow: "hidden",

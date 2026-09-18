@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -384,26 +385,41 @@ export default function FindWork() {
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
       {/* Top Header */}
-      <View style={styles.header}>
-        <Text numberOfLines={1} adjustsFontSizeToFit style={styles.brand}>Bulao</Text>
+      <View style={styles.topBar}>
+        <View style={styles.brandWrap}>
+          <Text style={styles.brandTitle}>
+            bulao
+            <Text style={styles.brandDot}> ●</Text>
+          </Text>
+        </View>
+
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Use current location: ${location?.area ?? "Choose location"}`}
           onPress={() => setLocationSheetVisible(true)}
-          style={styles.location}
+          style={({ pressed }) => [
+            styles.locationPill,
+            { transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
         >
-          <Ionicons name="location-outline" size={18} color={colors.green} />
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.locationName}>
+          <Ionicons name="location-sharp" size={14} color="#176B58" style={{ flexShrink: 0 }} />
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={styles.locationText}
+          >
             {location?.area ?? "Choose location"}
           </Text>
+          <Ionicons name="chevron-down" size={12} color="#556B60" style={{ flexShrink: 0 }} />
         </Pressable>
+
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Notifications"
           onPress={() => router.push({ pathname: "/notifications", params: { role: "seeker" } })}
-          style={styles.notifications}
+          style={styles.notificationBtn}
         >
-          <Ionicons name="notifications-outline" size={24} color={colors.green} />
+          <Ionicons name="notifications-outline" size={22} color="#176B58" />
           {unreadCount > 0 && (
             <View style={styles.bellBadge}>
               <Text style={styles.bellBadgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
@@ -804,54 +820,141 @@ export default function FindWork() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paper },
-  header: {
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomWidth: 1,
+    borderBottomColor: "#DCE6E0",
+    backgroundColor: "#F5F8F6",
   },
-  brand: { width: "25%", minWidth: 0, fontSize: 30, fontWeight: "900", letterSpacing: -1.5, color: colors.green },
-  location: { width: "50%", minWidth: 0, minHeight: 48, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
-  locationName: { flexShrink: 1, textAlign: "center", fontSize: 14, fontWeight: "600", color: colors.green },
-  notifications: { width: "25%", minWidth: 0, minHeight: 48, alignItems: "flex-end", justifyContent: "center", paddingRight: 4, position: "relative" },
+  brandWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  brandTitle: {
+    fontSize: 26,
+    fontWeight: "900",
+    letterSpacing: -1.2,
+    color: "#176B58",
+  },
+  brandDot: {
+    color: "#B3CF5C",
+  },
+  locationPill: {
+    height: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 9,
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    maxWidth: "50%",
+    overflow: "hidden",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 4,
+      },
+      android: { elevation: 1.5 },
+    }),
+  },
+  locationText: {
+    flex: 1,
+    flexShrink: 1,
+    marginHorizontal: 4,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0D2318",
+  },
+  notificationBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    position: "relative",
+  },
   bellBadge: {
     position: "absolute",
-    top: 6,
-    right: 2,
+    top: 3,
+    right: 3,
     backgroundColor: "#EF4444",
-    borderRadius: 9,
-    minWidth: 18,
-    height: 18,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 3,
   },
   bellBadgeText: {
-    color: colors.white,
-    fontSize: 10,
-    fontWeight: "700",
+    color: "#FFFFFF",
+    fontSize: 9.5,
+    fontWeight: "800",
   },
   content: { flex: 1 },
-  searchContainer: { width: "100%", maxWidth: 680, alignSelf: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  searchBar: { flexDirection: "row", alignItems: "center", minHeight: 54, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
-  searchBarFocused: { borderColor: colors.green },
-  searchInput: { flex: 1, minWidth: 0, paddingLeft: 16, paddingRight: 4, paddingVertical: 14, fontSize: 15, color: colors.ink },
-  searchIcon: { width: 48, minHeight: 52, alignItems: "center", justifyContent: "center" },
+  searchContainer: { width: "100%", maxWidth: 680, alignSelf: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 52,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    backgroundColor: "#FFFFFF",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#0D2318",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 6,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  searchBarFocused: { borderColor: "#176B58" },
+  searchInput: { flex: 1, minWidth: 0, paddingLeft: 16, paddingRight: 4, paddingVertical: 13, fontSize: 14.5, color: "#0D2318", fontWeight: "500" },
+  searchIcon: { width: 48, minHeight: 50, alignItems: "center", justifyContent: "center" },
   radiusFilters: { width: "100%", maxWidth: 680, alignSelf: "center", flexDirection: "row", gap: 6, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10 },
-  radiusButton: { flex: 1, minHeight: 34, alignItems: "center", justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
-  radiusButtonSelected: { backgroundColor: colors.green, borderColor: colors.green },
-  radiusLabel: { fontSize: 12.5, fontWeight: "600", color: colors.green },
-  radiusLabelSelected: { color: colors.white },
-  categoryFilters: { width: "100%", maxWidth: 680, alignSelf: "center", paddingBottom: 12 },
+  radiusButton: {
+    flex: 1,
+    minHeight: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    backgroundColor: "#FFFFFF",
+  },
+  radiusButtonSelected: { backgroundColor: "#176B58", borderColor: "#176B58" },
+  radiusLabel: { fontSize: 12, fontWeight: "700", color: "#0D2318" },
+  radiusLabelSelected: { color: "#FFFFFF" },
+  categoryFilters: { width: "100%", maxWidth: 680, alignSelf: "center", paddingBottom: 10 },
   categoryFilterContent: { paddingHorizontal: 16, gap: 8 },
-  categoryButton: { minHeight: 34, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
+  categoryButton: {
+    minHeight: 34,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    backgroundColor: "#FFFFFF",
+  },
   skeletonCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
     padding: 16,
     marginBottom: 14,
     marginHorizontal: 16,
@@ -863,13 +966,15 @@ const styles = StyleSheet.create({
   },
   appsScreenTitle: {
     fontSize: 22,
-    fontWeight: "800",
-    color: colors.ink,
+    fontWeight: "900",
+    color: "#0D2318",
+    letterSpacing: -0.4,
   },
   appsScreenSubtitle: {
     fontSize: 13,
-    color: colors.muted,
+    color: "#4F6558",
     marginTop: 2,
+    fontWeight: "500",
   },
   appFilterBar: {
     paddingVertical: 8,
@@ -878,28 +983,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
     backgroundColor: "#FFFFFF",
   },
   appFilterChipSelected: {
-    backgroundColor: colors.green,
-    borderColor: colors.green,
+    backgroundColor: "#176B58",
+    borderColor: "#176B58",
   },
   appFilterChipText: {
     fontSize: 13,
-    fontWeight: "600",
-    color: colors.ink,
+    fontWeight: "700",
+    color: "#0D2318",
   },
   appFilterChipTextSelected: {
     color: "#FFFFFF",
   },
   appCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#DCE6E0",
+    padding: 18,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#0D2318",
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+    }),
   },
   appCardHeader: {
     flexDirection: "row",

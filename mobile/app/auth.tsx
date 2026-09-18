@@ -2,12 +2,13 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, Animated, ActivityIndicator,
-  ImageBackground, Pressable,
+  ImageBackground, Pressable, BackHandler,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { OTPWidget, widgetProof } from "../src/features/auth/widget";
 import { useAuth, completeLogin } from "../src/auth";
+import { api } from "../src/api/client";
 
 // MSG91 Widget Configuration from environment
 const MSG91_WIDGET_ID = process.env.EXPO_PUBLIC_MSG91_WIDGET_ID || "3669686e4b46393237373639";
@@ -29,10 +30,14 @@ const COLORS = {
 };
 
 export default function Auth() {
+  const params = useLocalSearchParams<{ step?: string }>();
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [step, setStep] = useState<"phone" | "otp">("phone");
+  const [step, setStep] = useState<"phone" | "otp" | "name">(() => {
+    if (params.step === "name") return "name";
+    return "phone";
+  });
   const [focused, setFocused] = useState(false);
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
   const sending = useRef(false);
@@ -43,6 +48,40 @@ export default function Auth() {
 
   const auth = useAuth();
   const router = useRouter();
+
+  // Redirect if already authenticated with a completed name; or enforce name step if missing
+  useEffect(() => {
+    if (auth.status === "authenticated") {
+      const hasName = auth.user?.name && auth.user.name.trim() !== "" && auth.user.name.trim().toLowerCase() !== "user";
+      if (hasName) {
+        router.replace("/(tabs)");
+      } else if (step !== "name") {
+        setStep("name");
+      }
+    }
+  }, [auth.status, auth.user?.name, step, router]);
+
+  // Handle Android hardware back press cleanly
+  useEffect(() => {
+    const onBackPress = () => {
+      if (step === "otp") {
+        setChallenge(null);
+        setStep("phone");
+        return true;
+      }
+      if (step === "name") {
+        // Prevent accidental return to expired/used OTP form
+        if (Platform.OS === "android") {
+          BackHandler.exitApp();
+        }
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+    return () => sub.remove();
+  }, [step]);
 
   // Initialize MSG91 Widget on mount
   useEffect(() => {
@@ -75,6 +114,28 @@ export default function Auth() {
         Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, friction: 8, tension: 50 }),
       ]).start();
     });
+  };
+
+  const transitionToName = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: -30, duration: 200, useNativeDriver: true }),
+    ]).start(() => {
+      setStep("name");
+      slideAnim.setValue(30);
+      Animated.parallel([
+        Animated.timing(fadeAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, friction: 8, tension: 50 }),
+      ]).start();
+    });
+  };
+
+  const handleOtpVerified = (isNew: boolean) => {
+    if (isNew) {
+      transitionToName();
+    } else {
+      router.replace("/(tabs)");
+    }
   };
 
   const onContinue = async () => {
@@ -140,8 +201,17 @@ export default function Auth() {
                   isValid={isValid}
                   onContinue={onContinue}
                 />
+              ) : step === "otp" ? (
+                <OtpStep
+                  phone={phone}
+                  challenge={challenge!}
+                  onChangePhone={() => { setChallenge(null); setStep("phone"); }}
+                  onVerified={handleOtpVerified}
+                />
               ) : (
-                <OtpStep phone={phone} challenge={challenge!} onChangePhone={() => { setChallenge(null); setStep("phone"); }} />
+                <NameStep
+                  onComplete={() => router.replace("/(tabs)")}
+                />
               )}
             </Animated.View>
           </View>
@@ -211,7 +281,17 @@ function PhoneStep({ phone, setPhone, error, loading, focused, setFocused, isVal
   );
 }
 
-function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge: OtpChallenge; onChangePhone: () => void }) {
+function OtpStep({
+  phone,
+  challenge,
+  onChangePhone,
+  onVerified,
+}: {
+  phone: string;
+  challenge: OtpChallenge;
+  onChangePhone: () => void;
+  onVerified: (isNew: boolean) => void;
+}) {
   const [current, setCurrent] = useState(challenge);
   const [otp, setOtp] = useState(["", "", "", ""]);
   const [loading, setLoading] = useState<"verify" | "resend" | null>(null);
@@ -257,12 +337,12 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
           otp: otp.join(""),
         }));
       }
-      const { user, session } = await completeLogin("91" + phone, verifiedAccessToken.current);
+      const { user, session, isNewUser } = await completeLogin("91" + phone, verifiedAccessToken.current);
       if (mounted.current) {
         auth.login({ ...user, phone: user.phone || ("91" + phone) }, session);
         verifiedAccessToken.current = null;
         setOtp(["", "", "", ""]);
-        router.replace("/(tabs)/profile");
+        onVerified(isNewUser);
       }
     } catch (failure) {
       if (mounted.current) showFailure(failure);
@@ -370,6 +450,109 @@ function OtpStep({ phone, challenge, onChangePhone }: { phone: string; challenge
   );
 }
 
+function NameStep({ onComplete }: { onComplete: () => void }) {
+  const [name, setName] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const auth = useAuth();
+
+  const sanitize = (val: string) => val.trim().replace(/\s+/g, " ");
+  const cleaned = sanitize(name);
+  const isValid = cleaned.length >= 2 && cleaned.length <= 60;
+
+  const onSubmit = async () => {
+    if (submitting) return;
+    setError("");
+
+    if (cleaned.length < 2) {
+      setError("Please enter at least 2 characters.");
+      return;
+    }
+    if (cleaned.length > 60) {
+      setError("Name cannot exceed 60 characters.");
+      return;
+    }
+    // Unicode letter validation with spaces, dots, and hyphens (supports all Indian & international scripts)
+    if (!/^[\p{L}\s.'-]+$/u.test(cleaned)) {
+      setError("Please enter a valid name (letters only).");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      await api("/users/me", { name: cleaned }, "PATCH");
+      auth.updateUser({ name: cleaned });
+      onComplete();
+    } catch (err: any) {
+      console.error("Save name error:", err);
+      setError(err?.message || "Could not save your name. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={styles.authCard}>
+      <Text style={styles.heading}>Welcome to Bulao!</Text>
+      <Text style={styles.sub}>What should we call you?</Text>
+
+      <View style={[styles.nameInputWrap, focused && styles.inputWrapFocused, !!error && styles.inputWrapError]}>
+        <TextInput
+          style={styles.nameInput}
+          placeholder="Enter your full name"
+          placeholderTextColor={COLORS.muted}
+          value={name}
+          onChangeText={(t) => { setName(t); setError(""); }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onSubmitEditing={onSubmit}
+          returnKeyType="done"
+          autoFocus={true}
+          autoCapitalize="words"
+          autoCorrect={false}
+          maxLength={60}
+          editable={!submitting}
+          selectionColor={COLORS.green}
+          cursorColor={COLORS.green}
+        />
+      </View>
+
+      <View style={styles.errorWrap}>
+        {error ? (
+          <View style={styles.errorRow}>
+            <Text style={styles.errorIcon}>⚠</Text>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={onSubmit}
+        disabled={submitting || !isValid}
+        style={[styles.btn, (!isValid || submitting) && styles.btnDisabled, submitting && styles.btnLoading]}
+      >
+        {submitting ? (
+          <>
+            <Text style={styles.btnText}>Saving Name</Text>
+            <ActivityIndicator color="#fff" size="small" style={{ marginLeft: 6 }} />
+          </>
+        ) : (
+          <Text style={styles.btnText}>Continue</Text>
+        )}
+        {!submitting && <Text style={styles.btnArrow}>→</Text>}
+      </TouchableOpacity>
+
+      <View style={styles.security}>
+        <Text style={styles.lockIcon}>✨</Text>
+        <Text style={styles.securityText}>This is how other members will see you</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.cream },
   bg: { flex: 1 },
@@ -465,4 +648,28 @@ const styles = StyleSheet.create({
   },
   sub: { textAlign: "center", color: COLORS.muted, fontSize: 13, marginBottom: 14, fontWeight: "500" },
   resend: { color: COLORS.green, fontWeight: "700" },
+  nameInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "rgba(255,255,255,0.94)",
+    borderWidth: 1.5,
+    borderColor: "rgba(230,228,220,0.9)",
+    borderRadius: 20,
+    height: 60,
+    paddingHorizontal: 20,
+    shadowColor: COLORS.green,
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  nameInput: {
+    flex: 1,
+    fontSize: 17,
+    color: COLORS.ink,
+    fontWeight: "600",
+    letterSpacing: 0.2,
+  },
 });

@@ -63,10 +63,104 @@ function AppContent() {
         <Stack
           screenOptions={{
             headerShown: false,
-            animation: "default",
+            animation: "slide_from_right",
+            animationDuration: 260,
             gestureEnabled: true,
+            fullScreenGestureEnabled: true,
           }}
-        />
+        >
+          {/* Root Bootstrapper */}
+          <Stack.Screen name="index" options={{ animation: "none" }} />
+
+          {/* Core Hub & Tab Screens: Silky Cross-Fade (Eliminates harsh cuts & window jumps) */}
+          <Stack.Screen name="(tabs)" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="provider-home" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="find-service" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="service-home" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="activity" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="provider-profile" options={{ animation: "fade", animationDuration: 200 }} />
+
+          {/* Action & Creation Flows: Native Bottom Sheet Slide-Up */}
+          <Stack.Screen
+            name="post-work"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+              animationDuration: 280,
+            }}
+          />
+          <Stack.Screen
+            name="auth"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+              animationDuration: 280,
+            }}
+          />
+          <Stack.Screen
+            name="location"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+              animationDuration: 240,
+            }}
+          />
+          <Stack.Screen
+            name="location-search"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+              animationDuration: 240,
+            }}
+          />
+
+          {/* Detail Screens: Smooth Right Slide with Full-Screen Swipe-to-Back */}
+          <Stack.Screen
+            name="jobs/[id]"
+            options={{
+              animation: "slide_from_right",
+              animationDuration: 260,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
+          <Stack.Screen
+            name="profile/[id]"
+            options={{
+              animation: "slide_from_right",
+              animationDuration: 260,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
+          <Stack.Screen
+            name="notifications"
+            options={{
+              animation: "slide_from_right",
+              animationDuration: 260,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
+          <Stack.Screen
+            name="settings"
+            options={{
+              animation: "slide_from_right",
+              animationDuration: 260,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
+          <Stack.Screen
+            name="safety"
+            options={{
+              animation: "slide_from_right",
+              animationDuration: 260,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+            }}
+          />
+        </Stack>
       </SafeAreaView>
       <LocationSheet />
     </View>

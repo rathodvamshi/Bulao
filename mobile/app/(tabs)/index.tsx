@@ -4,6 +4,8 @@ import { router } from "expo-router";
 import { Screen, Copy, colors, Card, s } from "../../src/components/ui";
 import { t } from "../../src/i18n/en";
 import { useLocation } from "../../src/store/location";
+import { useAuth } from "../../src/auth";
+
 const choices = [
   {
     title: "findWork",
@@ -24,11 +26,13 @@ const choices = [
     hint: "serviceHint",
     icon: "construct-outline",
     color: "#DCEBE5",
-    path: "/explore?kind=service",
+    path: "/find-service",
   },
 ] as const;
+
 export default function Home() {
   const location = useLocation((x) => x.location);
+  const auth = useAuth();
   return (
     <Screen>
       <View

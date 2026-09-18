@@ -18,6 +18,15 @@ it("sends widget proof and saves the returned Bulao session", async () => {
   expect(JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string)).toEqual({ identifier: "919999999991", accessToken: "provider-proof" });
   expect(storage.saveSession).toHaveBeenCalledWith(result.session);
   expect(result.session.token).toBe("session-token");
+  expect(result.isNewUser).toBe(false);
+});
+it("identifies new user when user name is empty", async () => {
+  vi.mocked(fetch).mockResolvedValue(Response.json({ success: true, data: {
+    token: "session-token-2", expiresAt: 9999999999, user: { id: "new-user", name: "", area: "" }, isNewUser: true,
+  } }));
+  const result = await completeLogin("919999999992", "provider-proof");
+  expect(result.isNewUser).toBe(true);
+  expect(result.user.name).toBe("");
 });
 it("explains a stale API deployment instead of asking an OTP user to sign in", async () => {
   vi.mocked(fetch).mockResolvedValue(Response.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Please sign in to continue." } }, { status: 401 }));

@@ -114,6 +114,7 @@ export async function createSession(identifier: string, accessToken: string): Pr
   token: string;
   expiresAt: number;
   user: UserData;
+  isNewUser: boolean;
 }> {
   try {
     console.log('authApi: Creating session for', identifier.slice(-4));
@@ -153,15 +154,21 @@ export async function createSession(identifier: string, accessToken: string): Pr
 
     console.log('authApi: Session created successfully');
 
+    const rawName = data.data.user?.name ?? '';
+    const isNewUser = Boolean(
+      data.data.isNewUser ?? (!rawName || rawName.trim() === '' || rawName.trim().toLowerCase() === 'user')
+    );
+
     return {
       token: data.data.token,
       expiresAt: data.data.expiresAt,
       user: {
         id: data.data.user.id,
-        name: data.data.user.name || 'User',
+        name: rawName,
         area: data.data.user.area || '',
         phone: data.data.user.phone || identifier,
       },
+      isNewUser,
     };
   } catch (error) {
     console.error('authApi: Session creation error:', error);

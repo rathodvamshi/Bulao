@@ -25,6 +25,7 @@ import { api } from "../src/api/client";
 import { getExactRoleIcon } from "../src/utils/nameVerification";
 import { ProviderBottomNav } from "../src/components/provider/ProviderBottomNav";
 import { dash } from "../src/components/provider/palette";
+import { ActivityJobSkeleton } from "../src/components/SkeletonLoader";
 import { useJobsNotification } from "../src/store/jobsNotification";
 import { JobApplicationsModal } from "../src/components/JobApplicationsModal";
 
@@ -403,8 +404,10 @@ export default function ActivityScreen() {
     refetch,
     isRefetching,
   } = useQuery<Job[]>({
-    queryKey: ["my-jobs"],
+    queryKey: ["provider-recent-jobs"],
     queryFn: () => api<Job[]>("/jobs/provider/recent"),
+    staleTime: 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const counts = useMemo(() => {
@@ -630,9 +633,10 @@ export default function ActivityScreen() {
         }
       >
         {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={dash.primary} />
-            <Text style={styles.loadingText}>Loading jobs...</Text>
+          <View style={styles.jobsList}>
+            <ActivityJobSkeleton />
+            <ActivityJobSkeleton />
+            <ActivityJobSkeleton />
           </View>
         ) : error ? (
           <View style={styles.errorCard}>

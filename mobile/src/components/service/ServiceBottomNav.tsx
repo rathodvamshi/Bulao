@@ -17,13 +17,13 @@ const ITEMS: {
   center?: boolean;
 }[] = [
   { id: "bulao", label: "Bulao", icon: "home-outline", activeIcon: "home", path: "/(tabs)" },
-  { id: "home", label: "Home", icon: "home-outline", activeIcon: "home", path: "/provider-home" },
+  { id: "home", label: "Home", icon: "home-outline", activeIcon: "home", path: "/find-service" },
   { id: "post", label: "Post", icon: "add", activeIcon: "add", path: "/post-work", center: true },
   { id: "jobs", label: "Job", icon: "briefcase-outline", activeIcon: "briefcase", path: "/activity" },
   { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/provider-profile" },
 ];
 
-export function ProviderBottomNav({
+export function ServiceBottomNav({
   active = "home",
 }: {
   active?: NavId;
@@ -81,7 +81,7 @@ export function ProviderBottomNav({
                   <View key={item.id} style={styles.slot}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Post a new job"
+                      accessibilityLabel="Post a new service request"
                       onPress={() => {
                         if (active === "post") return;
                         router.push(item.path);
@@ -118,7 +118,7 @@ export function ProviderBottomNav({
                       return;
                     }
                     if (item.id === "home") {
-                      router.replace("/provider-home");
+                      router.replace("/find-service");
                       return;
                     }
                     if (item.id === "jobs") {

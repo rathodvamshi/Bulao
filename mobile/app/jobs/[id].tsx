@@ -32,6 +32,8 @@ import {
 } from "../../src/utils/nameVerification";
 import { JobApplicationsModal } from "../../src/components/JobApplicationsModal";
 import { CancellationModal } from "../../src/components/CancellationModal";
+import { JobDetailSkeleton } from "../../src/components/SkeletonLoader";
+import { PageTransition } from "../../src/components/PageTransition";
 
 const { width } = Dimensions.get("window");
 
@@ -155,6 +157,8 @@ export default function JobDetailScreen() {
     queryFn: () => api<Job>(`/jobs/${id}`),
     enabled: !!id,
     retry: 2,
+    staleTime: 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const job = jobQuery.data;
@@ -285,12 +289,11 @@ export default function JobDetailScreen() {
     );
   }, [job?.roleId, job?.roleName, job?.title, job?.categoryId]);
 
-  if (jobQuery.isPending) {
+  if (jobQuery.isPending && !job) {
     return (
-      <SafeAreaView style={styles.stateCenter}>
-        <ActivityIndicator size="large" color={pro.emeraldPrimary} />
-        <Text style={styles.loadingLabel}>Loading Job Details...</Text>
-      </SafeAreaView>
+      <View style={{ flex: 1, backgroundColor: pro.canvas }}>
+        <JobDetailSkeleton />
+      </View>
     );
   }
 
@@ -424,7 +427,8 @@ export default function JobDetailScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
-      {/* ── 1. EXECUTIVE GLASS-FINISH HEADER BAR ── */}
+      <PageTransition style={{ flex: 1 }}>
+        {/* ── 1. EXECUTIVE GLASS-FINISH HEADER BAR ── */}
       <View style={styles.topNav}>
         <Pressable
           style={styles.navRoundBtn}
@@ -1140,6 +1144,7 @@ export default function JobDetailScreen() {
           </View>
         </View>
       </Modal>
+      </PageTransition>
     </SafeAreaView>
   );
 }
