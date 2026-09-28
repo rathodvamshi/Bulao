@@ -79,8 +79,20 @@ function AppContent() {
           <Stack.Screen name="service-home" options={{ animation: "fade", animationDuration: 200 }} />
           <Stack.Screen name="activity" options={{ animation: "fade", animationDuration: 200 }} />
           <Stack.Screen name="provider-profile" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="service-profile" options={{ animation: "fade", animationDuration: 200 }} />
+          <Stack.Screen name="service-details" options={{ animation: "slide_from_left", animationDuration: 280 }} />
+          <Stack.Screen name="service-search" options={{ animation: "fade", animationDuration: 200 }} />
 
           {/* Action & Creation Flows: Native Bottom Sheet Slide-Up */}
+          <Stack.Screen
+            name="create-service"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+              animationDuration: 280,
+              gestureDirection: "vertical",
+            }}
+          />
           <Stack.Screen
             name="post-work"
             options={{

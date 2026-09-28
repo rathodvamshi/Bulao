@@ -146,15 +146,19 @@ export default function Auth() {
     setLoading(true);
 
     try {
-      
       // Use MSG91 Widget to send OTP
       const identifier = "91" + phone;
+      console.log("Sending OTP via MSG91 Widget for:", identifier);
       const response = await OTPWidget.sendOTP({ identifier });
-      
-      
+      console.log("MSG91 sendOTP response:", response);
+
+      if (!response) {
+        throw new Error("No response received from OTP service. Please check your network.");
+      }
+
       // SDK returns request ID in message field, not requestId
       const requestId = response.reqId || response.requestId || response.message;
-      
+
       if (requestId && response.type === "success") {
         // Create challenge for backend tracking
         const backendChallenge: OtpChallenge = {
@@ -166,7 +170,8 @@ export default function Auth() {
         setChallenge(backendChallenge);
         transitionToOtp();
       } else {
-        throw new Error(response.message || "Failed to send OTP");
+        const errorMsg = response.message || (response.code ? `Error code: ${response.code}` : "Failed to send OTP");
+        throw new Error(errorMsg);
       }
     } catch (failure) {
       console.error("Send OTP error:", failure);

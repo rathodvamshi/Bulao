@@ -4,7 +4,8 @@ import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { jobSchema, formatDirectPhone } from "@bulao/domain";
 import type { AppEnv } from "../../config/env";
-import { jobs, roles } from "../../db/schema";
+import { jobs, roles, categories } from "../../db/schema";
+
 import { ApiError, ok } from "../../middleware/errors";
 import { now, requireAuth, rateLimit, identify } from "../auth/session";
 import { nearby } from "../locations/search";
@@ -89,28 +90,25 @@ jobRoutes.post("/", requireAuth, async (c) => {
     .where(eq(roles.id, input.roleId))
     .get();
 
-  if (!role) {
-    role = await db
-      .select()
-      .from(roles)
-      .where(eq(roles.categoryId, input.categoryId))
-      .get();
-    if (role) {
-      input.roleId = role.id;
-    }
-  }
-
-  if (role && role.categoryId !== input.categoryId) {
+  if (role) {
     input.categoryId = role.categoryId;
-  }
+  } else {
+    const category = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.id, input.categoryId))
+      .get();
 
-  if (!role) {
-    const defaultRole = await db.select().from(roles).get();
-    if (defaultRole) {
-      input.roleId = defaultRole.id;
-      input.categoryId = defaultRole.categoryId;
-    } else {
-      throw new ApiError("INVALID_ROLE");
+    if (!category) {
+      const catRole = await db
+        .select()
+        .from(roles)
+        .where(eq(roles.categoryId, input.categoryId))
+        .get();
+      if (catRole) {
+        input.roleId = catRole.id;
+        input.categoryId = catRole.categoryId;
+      }
     }
   }
   await rateLimit(c.env.DB, `publish:${c.get("userId")}`, 30, 86400);
@@ -213,7 +211,7 @@ jobRoutes.get("/provider/recent", requireAuth, async (c) => {
       j.id,
       j.role_id as roleId,
       j.category_id as categoryId,
-      COALESCE(r.name, j.title, 'Job') as title,
+      COALESCE(NULLIF(j.title, ''), r.name, 'Job') as title,
       COALESCE(r.icon, '💼') as roleIcon,
       COALESCE(cat.name, 'General') as categoryName,
       COALESCE(cat.icon, '📋') as categoryIcon,
@@ -227,7 +225,7 @@ jobRoutes.get("/provider/recent", requireAuth, async (c) => {
     FROM jobs j
     LEFT JOIN roles r ON r.id = j.role_id
     LEFT JOIN categories cat ON cat.id = j.category_id
-    WHERE j.owner_id = ?
+    WHERE j.owner_id = ? AND UPPER(j.status) IN ('PUBLISHED', 'PAUSED')
     ORDER BY j.created_at DESC
     LIMIT 20
   `).bind(userId).all();
@@ -466,19 +464,26 @@ jobRoutes.put("/:id", requireAuth, async (c) => {
     .where(eq(roles.id, input.roleId))
     .get();
 
-  if (!role) {
-    role = await db
-      .select()
-      .from(roles)
-      .where(eq(roles.categoryId, input.categoryId))
-      .get();
-    if (role) {
-      input.roleId = role.id;
-    }
-  }
-
-  if (role && role.categoryId !== input.categoryId) {
+  if (role) {
     input.categoryId = role.categoryId;
+  } else {
+    const category = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.id, input.categoryId))
+      .get();
+
+    if (!category) {
+      const catRole = await db
+        .select()
+        .from(roles)
+        .where(eq(roles.categoryId, input.categoryId))
+        .get();
+      if (catRole) {
+        input.roleId = catRole.id;
+        input.categoryId = catRole.categoryId;
+      }
+    }
   }
 
   await db

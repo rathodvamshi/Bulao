@@ -592,8 +592,253 @@ export function ProfileScreenSkeleton() {
   );
 }
 
+// ─── Service Identity Card Skeleton ─────────────────────────────────────────
+export function ServiceIdentityCardSkeleton() {
+  return (
+    <View
+      style={{
+        backgroundColor: colors.white,
+        borderRadius: 20,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "#E6ECE8",
+        shadowColor: "#0D2318",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+      }}
+    >
+      <SkeletonCircle size={64} />
+      <View style={{ flex: 1, gap: 8 }}>
+        <Skeleton width="60%" height={18} borderRadius={6} />
+        <Skeleton width="40%" height={14} borderRadius={4} />
+        <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
+          <Skeleton width={80} height={20} borderRadius={10} />
+          <Skeleton width={95} height={20} borderRadius={10} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Service Collection Skeleton ─────────────────────────────────────────────
+export function ServiceCollectionSkeleton() {
+  return (
+    <View style={{ gap: 16 }}>
+      {/* Header Row */}
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <View style={{ gap: 6 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Skeleton width={130} height={22} borderRadius={6} />
+            <Skeleton width={26} height={20} borderRadius={10} />
+          </View>
+          <Skeleton width={180} height={13} borderRadius={4} />
+        </View>
+        <Skeleton width={105} height={34} borderRadius={17} />
+      </View>
+
+      {/* Filter Pills */}
+      <View
+        style={{
+          flexDirection: "row",
+          backgroundColor: "#FAFBF9",
+          padding: 4,
+          borderRadius: 14,
+          gap: 6,
+          borderWidth: 1,
+          borderColor: "#EEF3EF",
+        }}
+      >
+        <Skeleton width="31%" height={32} borderRadius={10} />
+        <Skeleton width="31%" height={32} borderRadius={10} />
+        <Skeleton width="31%" height={32} borderRadius={10} />
+      </View>
+
+      {/* Service Cards (2 cards) */}
+      {[1, 2].map((i) => (
+        <View
+          key={i}
+          style={{
+            backgroundColor: colors.white,
+            borderRadius: 18,
+            padding: 14,
+            borderWidth: 1,
+            borderColor: "#E6ECE8",
+            gap: 12,
+            shadowColor: "#0D2318",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 6,
+            elevation: 1,
+          }}
+        >
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <Skeleton width={74} height={74} borderRadius={14} />
+            <View style={{ flex: 1, gap: 6, justifyContent: "center" }}>
+              <Skeleton width="80%" height={18} borderRadius={5} />
+              <Skeleton width="50%" height={13} borderRadius={4} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Skeleton width={48} height={14} borderRadius={4} />
+                <Skeleton width={80} height={12} borderRadius={4} />
+              </View>
+              <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
+                <Skeleton width={70} height={18} borderRadius={9} />
+                <Skeleton width={60} height={18} borderRadius={9} />
+              </View>
+            </View>
+          </View>
+
+          {/* Meta Row */}
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              paddingTop: 8,
+              borderTopWidth: 1,
+              borderTopColor: "#F3F4F6",
+            }}
+          >
+            <Skeleton width="45%" height={14} borderRadius={4} />
+            <Skeleton width="45%" height={14} borderRadius={4} />
+          </View>
+
+          {/* Action Buttons Row */}
+          <View style={{ flexDirection: "row", gap: 8, paddingTop: 4 }}>
+            <Skeleton width="31%" height={36} borderRadius={10} />
+            <Skeleton width="31%" height={36} borderRadius={10} />
+            <Skeleton width="31%" height={36} borderRadius={10} />
+          </View>
+        </View>
+      ))}
+
+      {/* Growth Card Banner Skeleton */}
+      <View
+        style={{
+          backgroundColor: "#034E3B",
+          borderRadius: 18,
+          padding: 16,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 14,
+          opacity: 0.85,
+        }}
+      >
+        <SkeletonCircle size={44} />
+        <View style={{ flex: 1, gap: 6 }}>
+          <Skeleton width="60%" height={16} borderRadius={4} />
+          <Skeleton width="90%" height={12} borderRadius={4} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Service Profile View Skeleton ─────────────────────────────────────────
+export function ServiceProfileViewSkeleton() {
+  return (
+    <View style={{ gap: 14 }}>
+      {/* Service Reputation Card Skeleton */}
+      <View
+        style={{
+          backgroundColor: colors.white,
+          borderRadius: 20,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: "#E6ECE8",
+          gap: 14,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <View style={{ gap: 4 }}>
+            <Skeleton width={140} height={18} borderRadius={5} />
+            <Skeleton width={130} height={12} borderRadius={4} />
+          </View>
+          <Skeleton width={90} height={24} borderRadius={12} />
+        </View>
+
+        {/* Rating Section */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            backgroundColor: "#FAFBF9",
+            padding: 14,
+            borderRadius: 16,
+            gap: 12,
+          }}
+        >
+          <View style={{ alignItems: "center", minWidth: 95, gap: 6 }}>
+            <Skeleton width={50} height={34} borderRadius={6} />
+            <Skeleton width={70} height={14} borderRadius={4} />
+            <Skeleton width={80} height={11} borderRadius={4} />
+          </View>
+          <View style={{ width: 1, height: 60, backgroundColor: "#E2E8E4" }} />
+          <View style={{ flex: 1, gap: 8 }}>
+            <Skeleton width="100%" height={14} borderRadius={4} />
+            <Skeleton width="100%" height={14} borderRadius={4} />
+            <Skeleton width="100%" height={14} borderRadius={4} />
+          </View>
+        </View>
+
+        {/* Availability Row Skeleton */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: "#FFFDF7",
+            padding: 12,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: "#FEF3C7",
+          }}
+        >
+          <View style={{ gap: 4, flex: 1 }}>
+            <Skeleton width={160} height={15} borderRadius={4} />
+            <Skeleton width={200} height={12} borderRadius={4} />
+          </View>
+          <Skeleton width={44} height={24} borderRadius={12} />
+        </View>
+      </View>
+
+      {/* Offered Services Card Skeleton */}
+      <View
+        style={{
+          backgroundColor: colors.white,
+          borderRadius: 20,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: "#E6ECE8",
+          gap: 12,
+        }}
+      >
+        <Skeleton width={150} height={18} borderRadius={5} />
+        <Skeleton width="100%" height={50} borderRadius={14} />
+        <Skeleton width="100%" height={50} borderRadius={14} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   skeleton: {
     overflow: "hidden",
   },
 });
+

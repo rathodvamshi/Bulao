@@ -319,6 +319,15 @@ describe("service marketplace", () => {
     expect(
       (await call("/service-requests", payload, customer.token)).status,
     ).toBe(403);
+
+    const providerRecent = await call("/services/provider/recent", undefined, pro.token);
+    expect(providerRecent.status).toBe(200);
+    expect(Array.isArray(providerRecent.data)).toBe(true);
+
+    const providerStats = await call("/services/provider/stats?period=month", undefined, pro.token);
+    expect(providerStats.status).toBe(200);
+    expect(providerStats.data).toHaveProperty("active");
+
     expect(
       (
         await call(

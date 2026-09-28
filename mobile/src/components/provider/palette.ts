@@ -1,5 +1,5 @@
 export const dash = {
-  bg: "#F8FAF7",
+  bg: "#E2EBE3",
   white: "#FFFFFF",
   primary: "#075B43",
   primarySoft: "#0A6B4E",

@@ -7,6 +7,7 @@ import {
   index,
   primaryKey,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   phone: text("phone").notNull().unique(),
@@ -112,9 +113,39 @@ export const serviceProfiles = sqliteTable(
     radiusKm: real("radius_km").notNull(),
     experience: integer("experience").notNull(),
     available: integer("available", { mode: "boolean" }).notNull(),
+    title: text("title").notNull().default(""),
+    description: text("description").notNull().default(""),
+    offeredServices: text("offered_services", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    phoneVisible: integer("phone_visible", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    socialLinks: text("social_links", { mode: "json" })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default({}),
+    serviceMode: text("service_mode", { enum: ["doorstep", "at_center", "both"] }),
+    pricingModel: text("pricing_model", {
+      enum: ["fixed", "hourly", "visit_quote"],
+    }),
+    basePricePaise: integer("base_price_paise"),
+    operatingHours: text("operating_hours"),
+    portfolioUrls: text("portfolio_urls", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at"),
+    updatedAt: integer("updated_at"),
+    wizardState: text("wizard_state", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
   },
   (t) => [
-    uniqueIndex("service_user_category").on(t.userId, t.categoryId),
+    index("service_user_category").on(t.userId, t.categoryId),
     index("service_discovery").on(t.categoryId, t.available, t.latitude),
   ],
 );
@@ -150,6 +181,8 @@ export const interactions = sqliteTable(
     uniqueIndex("application_unique").on(t.jobId, t.workerId),
     index("interaction_owner").on(t.ownerId, t.status),
     index("interaction_worker").on(t.workerId, t.status),
+    index("interaction_service_status").on(t.serviceId, t.status),
+    uniqueIndex("active_service_request").on(t.serviceId, t.workerId).where(sql`${t.kind}='service' AND ${t.status} IN ('PENDING','ACCEPTED','IN_PROGRESS')`),
   ],
 );
 export const notifications = sqliteTable(
@@ -211,6 +244,23 @@ export const reports = sqliteTable("reports", {
   targetId: text("target_id")
     .notNull()
     .references(() => users.id),
+  reason: text("reason").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+export const serviceRatings = sqliteTable("service_ratings", {
+  id: text("id").primaryKey(),
+  serviceId: text("service_id").notNull().references(() => serviceProfiles.id),
+  providerId: text("provider_id").notNull().references(() => users.id),
+  customerId: text("customer_id").notNull().references(() => users.id),
+  stars: integer("stars").notNull(),
+  feedback: text("feedback").notNull().default(""),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at"),
+}, t => [uniqueIndex("unique_customer_service_rating").on(t.customerId,t.serviceId), index("service_ratings_service_id").on(t.serviceId), index("service_ratings_provider_id").on(t.providerId)]);
+export const serviceReviewReports = sqliteTable("service_review_reports", {
+  id: text("id").primaryKey(),
+  reporterId: text("reporter_id").notNull().references(() => users.id),
+  reviewId: text("review_id").notNull(), // May reference either supported review table.
   reason: text("reason").notNull(),
   createdAt: integer("created_at").notNull(),
 });
@@ -298,4 +348,3 @@ export const userLocations = sqliteTable(
   },
   (t) => [index("user_locations_user_id").on(t.userId)],
 );
-

@@ -122,7 +122,7 @@ export function ProviderBottomNav({
                       return;
                     }
                     if (item.id === "jobs") {
-                      router.replace("/activity");
+                      router.replace({ pathname: "/activity", params: { type: "job" } });
                       return;
                     }
                     if (item.id === "profile") {

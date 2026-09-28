@@ -4,6 +4,26 @@ export type Category = {
   name: string;
   icon: string;
 };
+export type CategoryService = {
+  id: string;
+  name: string;
+  icon: string;
+  sortOrder: number;
+  isPopular?: boolean;
+};
+export type ServiceOption = {
+  id: string;
+  name: string;
+  icon?: string;
+  sortOrder?: number;
+  isPopular?: boolean;
+};
+export type ServiceOptionsResponse = {
+  serviceId: string;
+  defaultTitle: string;
+  options: ServiceOption[];
+};
+
 export type Catalog = {
   categories: Category[];
   roles: { id: string; categoryId: string; name: string }[];

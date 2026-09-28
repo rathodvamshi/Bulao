@@ -1,4 +1,4 @@
-CREATE TABLE `user_locations` (
+CREATE TABLE IF NOT EXISTS `user_locations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`label` text NOT NULL,
@@ -12,4 +12,4 @@ CREATE TABLE `user_locations` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 
-CREATE INDEX `user_locations_user_id` ON `user_locations` (`user_id`);
+CREATE INDEX IF NOT EXISTS `user_locations_user_id` ON `user_locations` (`user_id`);

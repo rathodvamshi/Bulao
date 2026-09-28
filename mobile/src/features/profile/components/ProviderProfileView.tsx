@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { colors } from "../../../components/ui";
+import { ServiceGrowthSheet } from "./ServiceGrowthSheet";
 import type { ProviderRoleData } from "../types";
 
 export function ProviderProfileView({
@@ -14,6 +15,7 @@ export function ProviderProfileView({
 }) {
   const [activeTab, setActiveTab] = useState<"rating" | "feedback">("rating");
   const [filterRating, setFilterRating] = useState<"all" | "5">("all");
+  const [growthOpen, setGrowthOpen] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [segmentWidth, setSegmentWidth] = useState(0);
 
@@ -92,6 +94,14 @@ export function ProviderProfileView({
           </View>
         </View>
       </View>
+
+      {/* ── Profile Growth Sheet ── */}
+      {isOwner && growthOpen && (
+        <ServiceGrowthSheet
+          services={[]}
+          onClose={() => setGrowthOpen(false)}
+        />
+      )}
 
       {/* ── 2. Side-by-Side Segmented Buttons (Rating vs Feedback with Moving Pill) ── */}
       <View

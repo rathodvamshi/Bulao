@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS saved_places (
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_saved_places_user ON saved_places(user_id, last_used_at);
+CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id, last_used_at);
 
 -- Note: This migration supports the "Post Work" flow v2
 -- which allows providers to save frequently used locations

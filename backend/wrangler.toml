@@ -19,6 +19,8 @@ APP_ENV = "staging"
 OTP_PROVIDER = "msg91"
 MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
 CLOUDINARY_CLOUD_NAME = "japfuiuz"
+CLOUDINARY_API_KEY = "297519314876632"
+CLOUDINARY_UPLOAD_PRESET = "bulao_signed"
 ALLOWED_ORIGIN = "http://localhost:8082"
 
 [[env.staging.d1_databases]]
@@ -53,6 +55,8 @@ APP_ENV = "production"
 OTP_PROVIDER = "msg91"
 MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
 CLOUDINARY_CLOUD_NAME = "japfuiuz"
+CLOUDINARY_API_KEY = "297519314876632"
+CLOUDINARY_UPLOAD_PRESET = "bulao_signed"
 ALLOWED_ORIGIN = "https://replace-with-your-production-web-origin.invalid"
 
 [[env.production.d1_databases]]

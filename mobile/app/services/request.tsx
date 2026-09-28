@@ -1,3 +1,4 @@
+import { serviceApi, invalidateServiceQueries } from "../../src/api/serviceApi";
 import { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,14 +20,11 @@ export default function Request() {
   const location = useLocation((x) => x.location);
   const client = useQueryClient();
   const request = useMutation({
-    mutationFn: () =>
-      api("/service-requests", {
-        serviceId: id,
-        details,
-        ...location,
-        scheduledAt: Math.floor(Date.now() / 1000) + days * 86400,
-      }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["activity"] }),
+    mutationFn: () => {
+      if (!location) throw new Error("Choose your location first.");
+      return serviceApi.request(id, location, details, Math.floor(Date.now() / 1000) + days * 86400);
+    },
+    onSuccess: () => invalidateServiceQueries(client),
   });
   return (
     <Screen title={t(request.isSuccess ? "requestSent" : "request")} back>
@@ -35,7 +33,7 @@ export default function Request() {
           <Copy>{t("requestHint")}</Copy>
           <Button
             label={t("track")}
-            onPress={() => router.replace("/activity")}
+            onPress={() => router.replace("/service-requests")}
           />
         </>
       ) : (

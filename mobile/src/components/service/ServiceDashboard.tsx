@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,11 +8,14 @@ import {
   StyleSheet,
   Modal,
   useWindowDimensions,
+  TextInput,
+  Animated,
+  Easing,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api/client";
 import { getNotificationInbox } from "../../api/notifications";
@@ -40,22 +43,6 @@ type ServiceStats = {
   };
 };
 
-type RecentService = {
-  id: string;
-  roleId?: string;
-  categoryId?: string;
-  title: string;
-  categoryName: string;
-  roleIcon?: string;
-  categoryIcon?: string;
-  area: string;
-  payPaise: number;
-  payUnit: string;
-  status: string;
-  createdAt?: string | number;
-  applicantCount: number;
-};
-
 function initials(name?: string | null) {
   return (name || "U")
     .split(" ")
@@ -72,51 +59,7 @@ function pagePad(width: number) {
   return 20;
 }
 
-function servicePriority(item: RecentService) {
-  const status = (item.status || "").toUpperCase();
-  if (status === "PAUSED") return 0;
-  if ((item.applicantCount || 0) > 0 && status === "PUBLISHED") return 1;
-  if (status === "PUBLISHED") return 2;
-  if (status === "FILLED") return 3;
-  return 4;
-}
 
-function statusMeta(item: RecentService) {
-  const status = (item.status || "").toUpperCase();
-  if (status === "PAUSED") {
-    return { label: "Needs Action", color: dash.error, bg: "#FDECEC" };
-  }
-  if (status === "PUBLISHED" && (item.applicantCount || 0) > 0) {
-    return { label: "Reviewing", color: dash.warning, bg: "#FFF6E8" };
-  }
-  if (status === "PUBLISHED") {
-    return { label: "Active", color: dash.secondary, bg: dash.softGreen };
-  }
-  if (status === "FILLED") {
-    return { label: "Hired", color: "#2F6FED", bg: "#EEF3FF" };
-  }
-  if (status === "COMPLETED") {
-    return { label: "Done", color: dash.muted, bg: "#F1F4F2" };
-  }
-  return { label: status || "Open", color: dash.muted, bg: "#F1F4F2" };
-}
-
-function serviceThumb(item: RecentService) {
-  const name = `${item.title} ${item.categoryName}`.toLowerCase();
-  if (name.includes("clean")) return { bg: "#E8F6EE", icon: "sparkles-outline" as const, color: "#1A7A4A" };
-  if (name.includes("cater") || name.includes("cook") || name.includes("food")) {
-    return { bg: "#FFF1E4", icon: "restaurant-outline" as const, color: "#C05621" };
-  }
-  if (name.includes("ac ") || name.includes("repair") || name.includes("electr")) {
-    return { bg: "#E8F1FF", icon: "construct-outline" as const, color: "#2B6CB0" };
-  }
-  if (name.includes("paint")) return { bg: "#FCE7F3", icon: "color-palette-outline" as const, color: "#BE185D" };
-  if (name.includes("plumb")) return { bg: "#E0F2FE", icon: "water-outline" as const, color: "#0369A1" };
-  if (name.includes("tutor") || name.includes("teach")) {
-    return { bg: "#F5F3FF", icon: "book-outline" as const, color: "#6D28D9" };
-  }
-  return { bg: dash.softGreen, icon: "construct-outline" as const, color: dash.primary };
-}
 
 export default function ServiceDashboard() {
   const insets = useSafeAreaInsets();
@@ -130,11 +73,9 @@ export default function ServiceDashboard() {
   const location = useLocation((s) => s.location);
   const [period, setPeriod] = useState<Period>("month");
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [menuService, setMenuService] = useState<RecentService | null>(null);
   const [headerTint, setHeaderTint] = useState(0);
 
   const token = auth.session?.token || null;
-  const client = useQueryClient();
 
   const me = useQuery({
     queryKey: ["me", token],
@@ -144,31 +85,14 @@ export default function ServiceDashboard() {
   });
 
   const statsQuery = useQuery<ServiceStats>({
-    queryKey: ["service-stats", period],
-    queryFn: () => api<ServiceStats>(`/jobs/provider/stats?period=${period}`),
+    queryKey: ["service-stats", token, period],
+    queryFn: () => api<ServiceStats>(`/services/provider/stats?period=${period}`),
     enabled: !!token,
-  });
-
-  const servicesQuery = useQuery<RecentService[]>({
-    queryKey: ["service-recent-requests"],
-    queryFn: () => api<RecentService[]>("/jobs/provider/recent"),
-    enabled: !!token,
-  });
-
-  const action = useMutation({
-    mutationFn: ({ id, next }: { id: string; next: "pause" | "publish" | "cancel" }) =>
-      api(`/jobs/${id}/action`, { action: next }),
-    onSuccess: () => {
-      setMenuService(null);
-      void client.invalidateQueries({ queryKey: ["service-recent-requests"] });
-      void client.invalidateQueries({ queryKey: ["service-stats"] });
-      void client.invalidateQueries({ queryKey: ["activity"] });
-    },
   });
 
   const notificationsQuery = useQuery({
     queryKey: ["service-notifications", token],
-    queryFn: () => getNotificationInbox("provider"),
+    queryFn: () => getNotificationInbox("seeker"),
     enabled: !!token,
     refetchInterval: 30000,
   });
@@ -176,123 +100,397 @@ export default function ServiceDashboard() {
   useFocusEffect(useCallback(() => { void refreshNotifications(); }, [refreshNotifications]));
   const photoUrl = me.data?.photoUrl;
   const unread = !notificationsQuery.isError && (notificationsQuery.data?.unreadCount ?? 0) > 0;
-  const jobsPosted = statsQuery.data?.jobsPosted ?? 0;
-  const isNewServiceUser = !servicesQuery.isLoading && (servicesQuery.data?.length ?? 0) === 0 && jobsPosted === 0;
-
-  const rankedServices = useMemo(() => {
-    const list = [...(servicesQuery.data || [])];
-    list.sort((a, b) => servicePriority(a) - servicePriority(b));
-    return list.slice(0, 3);
-  }, [servicesQuery.data]);
 
   const contentWidth = Math.min(width, 560);
   const sidePad = Math.max(pad, (width - contentWidth) / 2);
+
+  // Bulao Search Interaction State & Animations
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchQueryText, setSearchQueryText] = useState("");
+  const searchAnim = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef<TextInput>(null);
+  const [recentSearches, setRecentSearches] = useState(["Electrician", "Cook", "Plumber", "AC Repair"]);
+
+  const suggestedServices = [
+    { title: "Electrician", icon: "flash-outline", color: "#D97706", bg: "#FEF3C7", category: "Electrical" },
+    { title: "Plumber", icon: "water-outline", color: "#0369A1", bg: "#E0F2FE", category: "Plumbing" },
+    { title: "Cook / Chef", icon: "restaurant-outline", color: "#C05621", bg: "#FFF1E4", category: "Food & Household" },
+    { title: "Home Cleaner", icon: "sparkles-outline", color: "#1A7A4A", bg: "#E8F6EE", category: "Cleaning" },
+    { title: "AC Repair", icon: "snow-outline", color: "#2B6CB0", bg: "#E8F1FF", category: "Appliance Repair" },
+    { title: "Painter", icon: "color-palette-outline", color: "#BE185D", bg: "#FCE7F3", category: "Home Improvement" },
+  ];
+
+  const searchResults = useMemo(() => {
+    if (!searchQueryText.trim()) return [];
+    const q = searchQueryText.toLowerCase().trim();
+    return suggestedServices.filter(
+      (s) => s.title.toLowerCase().includes(q) || s.category.toLowerCase().includes(q)
+    );
+  }, [searchQueryText]);
+
+  const openSearch = (queryStr?: string) => {
+    if (typeof queryStr === "string" && queryStr.trim()) {
+      router.push({ pathname: "/service-search", params: { q: queryStr.trim() } });
+    } else {
+      router.push("/service-search");
+    }
+  };
+
+  const closeSearch = () => {
+    searchInputRef.current?.blur();
+    setSearchQueryText("");
+    Animated.timing(searchAnim, {
+      toValue: 0,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      setSearchActive(false);
+    });
+  };
+
+  const handleSearchSubmit = () => {
+    const q = searchQueryText.trim();
+    router.push({ pathname: "/service-search", params: q ? { q } : {} });
+  };
+
+  const handleSelectSearch = (term: string) => {
+    router.push({ pathname: "/service-search", params: { q: term } });
+  };
+
+  const targetUpwardDistance = heroH - insets.top - 20;
 
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" translucent />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={(e) => {
-          const y = e.nativeEvent.contentOffset.y;
-          setHeaderTint(Math.min(1, Math.max(0, y / 90)));
-          setHeroVisible(y < heroH - headerHeight);
+      {/* Main Home ScrollView (Fades out smoothly when searchAnim -> 1) */}
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: searchAnim.interpolate({
+            inputRange: [0, 0.5, 1],
+            outputRange: [1, 0.4, 0],
+          }),
         }}
-        contentContainerStyle={{
-          paddingBottom: 118 + Math.max(insets.bottom, 8),
-        }}
+        pointerEvents={searchActive ? "none" : "auto"}
       >
-        <ServiceStoryHero width={width} height={heroH} headerHeight={headerHeight} visible={heroVisible} />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            setHeaderTint(Math.min(1, Math.max(0, y / 90)));
+            setHeroVisible(y < heroH - headerHeight);
+          }}
+          contentContainerStyle={{
+            paddingBottom: 118 + Math.max(insets.bottom, 8),
+          }}
+        >
+          <ServiceStoryHero width={width} height={heroH} headerHeight={headerHeight} visible={heroVisible} />
 
-        <View style={{ paddingHorizontal: sidePad, marginTop: -64, elevation: 3, zIndex: 3, alignItems: "center" }}>
-          <RequestServiceCTA />
-        </View>
+          {/* Reserved Space for Single Clean Search Bar */}
+          <View style={{ height: 48, marginTop: -28 }} />
 
-        <View style={{ paddingHorizontal: sidePad, marginTop: 10 }}>
-          <OverviewSection
-            stats={statsQuery.data}
-            loading={statsQuery.isLoading}
-            error={statsQuery.isError}
-            period={period}
-            onOpenPeriod={() => setPeriodOpen(true)}
-          />
-        </View>
+          <View style={{ paddingHorizontal: sidePad, marginTop: 10 }}>
+            <OverviewSection
+              stats={statsQuery.data}
+              loading={statsQuery.isLoading}
+              error={statsQuery.isError}
+              period={period}
+              onOpenPeriod={() => setPeriodOpen(true)}
+            />
+          </View>
 
-        <View style={{ paddingHorizontal: sidePad, marginTop: 26 }}>
-          <RecentServices
-            loading={servicesQuery.isLoading}
-            error={servicesQuery.isError}
-            services={rankedServices}
-            isNewServiceUser={isNewServiceUser}
-            onOpenMenu={setMenuService}
-          />
-        </View>
-      </ScrollView>
+          <View style={{ paddingHorizontal: sidePad, marginTop: 24 }}>
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>Recent Requests</Text>
+              <Pressable onPress={() => router.push("/activity")} style={styles.seeAll} accessibilityRole="button">
+                <Text style={styles.seeAllText}>See all</Text>
+                <Ionicons name="arrow-forward" size={14} color={dash.primary} />
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </Animated.View>
 
+      {/* Full-Screen Dedicated Search Page Content Overlay */}
+      {searchActive ? (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              top: insets.top + 60,
+              backgroundColor: "#F8FAFC",
+              zIndex: 15,
+              opacity: searchAnim.interpolate({
+                inputRange: [0, 0.15, 1],
+                outputRange: [0, 0, 1],
+              }),
+              transform: [
+                {
+                  translateY: searchAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{
+              paddingHorizontal: sidePad,
+              paddingTop: 16,
+              paddingBottom: 120 + insets.bottom,
+            }}
+          >
+            {!searchQueryText.trim() ? (
+              <View style={{ gap: 24 }}>
+                {/* Recent Searches */}
+                {recentSearches.length > 0 && (
+                  <View>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <Text style={styles.searchSectionLabel}>RECENT SEARCHES</Text>
+                      <Pressable onPress={() => setRecentSearches([])} hitSlop={8}>
+                        <Text style={{ fontSize: 12, fontWeight: "600", color: dash.muted }}>Clear All</Text>
+                      </Pressable>
+                    </View>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {recentSearches.map((item, idx) => (
+                        <Pressable
+                          key={idx}
+                          onPress={() => handleSelectSearch(item)}
+                          style={styles.recentChip}
+                        >
+                          <Ionicons name="time-outline" size={13} color={dash.muted} />
+                          <Text style={styles.recentChipText}>{item}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Popular Services / Categories */}
+                <View>
+                  <Text style={styles.searchSectionLabel}>POPULAR SERVICES & CATEGORIES</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+                    {suggestedServices.map((item, idx) => (
+                      <Pressable
+                        key={idx}
+                        onPress={() => handleSelectSearch(item.title)}
+                        style={styles.popularChip}
+                      >
+                        <View style={[styles.popularChipIcon, { backgroundColor: item.bg }]}>
+                          <Ionicons name={item.icon as any} size={15} color={item.color} />
+                        </View>
+                        <Text style={styles.popularChipText}>{item.title}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              </View>
+            ) : (
+              /* Dynamic Live Search Results */
+              <View>
+                <Text style={styles.searchSectionLabel}>SEARCH RESULTS ({searchResults.length})</Text>
+                <View style={{ gap: 10, marginTop: 12 }}>
+                  {searchResults.length === 0 ? (
+                    <View style={styles.searchEmptyBox}>
+                      <Ionicons name="search-outline" size={42} color="#CBD5E1" />
+                      <Text style={styles.searchEmptyTitle}>No matching services found</Text>
+                      <Text style={styles.searchEmptySub}>Try searching for electrician, plumber, cook, or maid.</Text>
+                    </View>
+                  ) : (
+                    searchResults.map((item, idx) => (
+                      <Pressable
+                        key={idx}
+                        onPress={() => {
+                          closeSearch();
+                          router.push({ pathname: "/service-search", params: { q: searchQueryText } });
+                        }}
+                        style={styles.searchResultCard}
+                      >
+                        <View style={[styles.searchResultIconBox, { backgroundColor: item.bg }]}>
+                          <Ionicons name={item.icon as any} size={20} color={item.color} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.searchResultTitle}>{item.title}</Text>
+                          <Text style={styles.searchResultMeta}>{item.category}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color="#94A3B8" style={{ marginLeft: 6 }} />
+                      </Pressable>
+                    ))
+                  )}
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </Animated.View>
+      ) : null}
+
+      {/* Sticky Home Header Controls (Fades out when search becomes active) */}
       <View pointerEvents="box-none" style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        {headerTint > 0.08 ? (
-          <View
+        {headerTint > 0.08 || searchActive ? (
+          <Animated.View
             style={[
               StyleSheet.absoluteFill,
-              { backgroundColor: `rgba(248,250,247,${0.55 + headerTint * 0.38})` },
+              {
+                backgroundColor: "#F8FAF7",
+                opacity: searchAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [headerTint > 0.08 ? 0.55 + headerTint * 0.38 : 0, 0.98],
+                }),
+              },
             ]}
           />
         ) : null}
 
         <View style={[styles.headerRow, { paddingHorizontal: sidePad }]}>
-          {/* Logo + tagline — left side */}
-          <View>
-            <Text style={styles.logo}>
-              Bulao
-            </Text>
-            <Text style={styles.tagline}>
-              Local Help. Real People.
-            </Text>
-          </View>
-
-          {/* Location pill — fills the middle */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Choose service area"
-            onPress={() => useLocation.getState().setLocationSheetVisible(true)}
-            style={styles.locationPill}
+          <Animated.View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              opacity: searchAnim.interpolate({
+                inputRange: [0, 0.4, 1],
+                outputRange: [1, 0.1, 0],
+              }),
+            }}
+            pointerEvents={searchActive ? "none" : "auto"}
           >
-            <Ionicons name="location" size={13} color={dash.primary} />
-            <Text style={styles.headerLocationText} numberOfLines={1}>
-              {location?.area || "Choose area"}
-            </Text>
-            <Ionicons name="chevron-down" size={13} color={dash.primary} />
-          </Pressable>
+            <View>
+              <Text style={styles.logo}>Bulao</Text>
+              <Text style={styles.tagline}>Local Help. Real People.</Text>
+            </View>
 
-          {/* Notification + Profile — pinned to the right corner */}
-          <View style={styles.headerRight}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Choose service area"
+              onPress={() => useLocation.getState().setLocationSheetVisible(true)}
+              style={styles.locationPill}
+            >
+              <Ionicons name="location" size={13} color={dash.primary} />
+              <Text style={styles.headerLocationText} numberOfLines={1}>
+                {location?.area || "Choose area"}
+              </Text>
+              <Ionicons name="chevron-down" size={13} color={dash.primary} />
+            </Pressable>
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.headerRight,
+              {
+                opacity: searchAnim.interpolate({
+                  inputRange: [0, 0.3, 1],
+                  outputRange: [1, 0, 0],
+                }),
+              },
+            ]}
+            pointerEvents={searchActive ? "none" : "auto"}
+          >
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Notifications"
-              onPress={() => router.push({ pathname: "/notifications", params: { role: "provider" } })}
+              onPress={() => router.push({ pathname: "/notifications", params: { role: "seeker" } })}
               style={styles.iconBtn}
             >
               <Ionicons name="notifications-outline" size={20} color={dash.ink} />
               {unread ? <View style={styles.unreadDot} /> : null}
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Profile"
-              onPress={() => router.push("/provider-profile")}
-            >
-              {photoUrl ? (
-                <Image source={{ uri: photoUrl }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarText}>{initials(me.data?.name || auth.user?.name)}</Text>
-                </View>
-              )}
-            </Pressable>
-          </View>
+          </Animated.View>
         </View>
       </View>
+
+      {/* The Single Continuous Transforming Search Bar Element (Bulao Pro Search Bar) */}
+      <Animated.View
+        style={{
+          position: "absolute",
+          top: heroH - 30,
+          left: sidePad,
+          right: sidePad,
+          zIndex: 25,
+          transform: [
+            {
+              translateY: searchAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -(heroH - insets.top - 36)],
+              }),
+            },
+          ],
+        }}
+      >
+        <View style={styles.bulaoSearchBox}>
+          {/* In-Place Action Badge: Search Icon when idle, morphs to Back Arrow when active */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={searchActive ? "Back to Home" : "Search"}
+            onPress={searchActive ? closeSearch : () => openSearch()}
+            hitSlop={8}
+            style={styles.bulaoSearchBadge}
+          >
+            <Animated.View
+              style={{
+                position: "absolute",
+                opacity: searchAnim.interpolate({
+                  inputRange: [0, 0.4, 1],
+                  outputRange: [1, 0, 0],
+                }),
+                transform: [
+                  {
+                    scale: searchAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 0.6],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons name="search" size={17} color={dash.primary} />
+            </Animated.View>
+
+            <Animated.View
+              style={{
+                opacity: searchAnim.interpolate({
+                  inputRange: [0, 0.4, 1],
+                  outputRange: [0, 0, 1],
+                }),
+                transform: [
+                  {
+                    scale: searchAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.6, 1],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons name="arrow-back" size={20} color={dash.ink} />
+            </Animated.View>
+          </Pressable>
+
+          <TextInput
+            ref={searchInputRef}
+            value={searchQueryText}
+            onChangeText={setSearchQueryText}
+            onFocus={() => openSearch()}
+            placeholder="Search services, workers, categories..."
+            placeholderTextColor="#94A3B8"
+            returnKeyType="search"
+            onSubmitEditing={handleSearchSubmit}
+            style={styles.bulaoInputText}
+          />
+
+          {searchQueryText.length > 0 ? (
+            <Pressable onPress={() => setSearchQueryText("")} hitSlop={6} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            </Pressable>
+          ) : null}
+        </View>
+      </Animated.View>
 
       <ServiceBottomNav active="home" />
 
@@ -305,52 +503,61 @@ export default function ServiceDashboard() {
           setPeriodOpen(false);
         }}
       />
-
-      <ServiceMenu
-        service={menuService}
-        busy={action.isPending}
-        onClose={() => setMenuService(null)}
-        onView={() => {
-          if (!menuService) return;
-          setMenuService(null);
-          router.push(`/jobs/${menuService.id}`);
-        }}
-        onResponses={() => {
-          setMenuService(null);
-          router.push("/activity");
-        }}
-        onPause={() => menuService && action.mutate({ id: menuService.id, next: "pause" })}
-        onResume={() => menuService && action.mutate({ id: menuService.id, next: "publish" })}
-        onCloseService={() => menuService && action.mutate({ id: menuService.id, next: "cancel" })}
-      />
     </View>
   );
 }
 
 function RequestServiceCTA() {
+  const [query, setQuery] = useState("");
+
+  const handleSearchSubmit = () => {
+    const q = query.trim();
+    if (q) {
+      router.push({ pathname: "/service-search", params: { q } });
+    } else {
+      router.push({ pathname: "/service-search", params: { q } });
+    }
+  };
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Request a new service"
-      onPress={() => router.push("/post-work")}
-      style={({ pressed }) => [
-        styles.ctaOuter,
-        { transform: [{ scale: pressed ? 0.97 : 1 }] },
-      ]}
-    >
-      <View style={styles.cta}>
-        <View style={styles.ctaIcon}>
-          <Ionicons name="paper-plane-outline" size={24} color="#FFFFFF" />
-        </View>
-        <View style={styles.ctaTextWrap}>
+    <View style={styles.ctaOuter}>
+      <View style={styles.ctaCardInner}>
+        <View style={styles.ctaHeaderRow}>
+          <View style={styles.ctaBadgeIcon}>
+            <Ionicons name="paper-plane" size={12} color="#FFFFFF" />
+          </View>
           <Text style={styles.ctaTitle}>Request a Service</Text>
-          <Text style={styles.ctaSub}>It takes less than 2 minutes</Text>
+          <Text style={styles.ctaSub}>Fast & Verified Local Help</Text>
         </View>
-        <View style={styles.ctaArrow}>
-          <Ionicons name="arrow-forward" size={20} color="#03402D" />
+
+        <View style={styles.ctaSearchBox}>
+          <Ionicons name="search" size={17} color={dash.primary} style={{ marginRight: 8 }} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            onFocus={() => router.push("/service-search")}
+            placeholder="Search service e.g. Electrician, Cook..."
+            placeholderTextColor="#94A3B8"
+            returnKeyType="search"
+            onSubmitEditing={() => router.push({ pathname: "/service-search", params: query ? { q: query } : {} })}
+            style={styles.ctaSearchInput}
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery("")} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={16} color="#94A3B8" />
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Request service button"
+            onPress={handleSearchSubmit}
+            style={styles.ctaSubmitBtn}
+          >
+            <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+          </Pressable>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -507,154 +714,6 @@ function OverviewSection({
   );
 }
 
-function RecentServices({
-  loading,
-  error,
-  services,
-  isNewServiceUser,
-  onOpenMenu,
-}: {
-  loading: boolean;
-  error: boolean;
-  services: RecentService[];
-  isNewServiceUser: boolean;
-  onOpenMenu: (service: RecentService) => void;
-}) {
-  return (
-    <View>
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>Recent Requests</Text>
-        <Pressable onPress={() => router.push("/activity")} style={styles.seeAll} accessibilityRole="button">
-          <Text style={styles.seeAllText}>See all</Text>
-          <Ionicons name="arrow-forward" size={14} color={dash.primary} />
-        </Pressable>
-      </View>
-
-      {loading ? (
-        <View style={{ gap: 10 }}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={styles.jobCard}>
-              <View style={styles.jobCardInner}>
-                <Skeleton width={44} height={44} borderRadius={12} />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <Skeleton width="75%" height={14} borderRadius={4} />
-                  <Skeleton width="55%" height={11} borderRadius={4} />
-                </View>
-                <Skeleton width={32} height={32} borderRadius={8} />
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : error ? (
-        <View style={styles.errorCard}>
-          <Ionicons name="alert-circle-outline" size={22} color={dash.error} />
-          <Text style={styles.errorText}>Couldn’t load requests</Text>
-        </View>
-      ) : services.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <View style={styles.emptyIcon}>
-            <Ionicons name="construct-outline" size={26} color={dash.primary} />
-          </View>
-          <Text style={styles.emptyTitle}>
-            {isNewServiceUser ? "Your service starts here." : "No requests to show yet."}
-          </Text>
-          <Text style={styles.emptyCopy}>
-            Request your first service and{"\n"}find trusted helpers nearby.
-          </Text>
-          <Pressable onPress={() => router.push("/post-work")} style={styles.emptyCta}>
-            <Ionicons name="add" size={18} color={dash.white} />
-            <Text style={styles.emptyCtaText}>Request a Service</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={{ gap: 10 }}>
-          {services.map((item) => (
-            <ServiceRow key={item.id} item={item} onMenu={() => onOpenMenu(item)} />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function ServiceRow({ item, onMenu }: { item: RecentService; onMenu: () => void }) {
-  const meta = statusMeta(item);
-  const thumb = serviceThumb(item);
-  const area = (item.area || "Nearby").split(",")[0];
-  const applications = item.applicantCount ?? 0;
-
-  // Smart icon selection: Role icon > Category icon > Fallback
-  const displayIcon = item.roleIcon || item.categoryIcon || "🔧";
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={() => router.push(`/jobs/${item.id}`)}
-      style={({ pressed }) => [
-        styles.jobCard,
-        { 
-          opacity: pressed ? 0.7 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
-        }
-      ]}
-    >
-      <View style={styles.jobCardInner}>
-        {/* Icon + Content */}
-        <View style={styles.jobRow}>
-          {/* Role/Category Icon */}
-          <View style={[styles.jobIcon, { backgroundColor: thumb.bg }]}>
-            <Text style={styles.jobIconEmoji}>{displayIcon}</Text>
-          </View>
-          
-          <View style={styles.jobContent}>
-            {/* Title + Status */}
-            <View style={styles.jobHeader}>
-              <Text style={styles.jobTitleNew} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: meta.bg, borderColor: meta.color }]}>
-                <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
-              </View>
-            </View>
-
-            {/* Location + Applications */}
-            <View style={styles.jobFooter}>
-              <View style={styles.locationTag}>
-                <Ionicons name="location" size={11} color={dash.secondary} />
-                <Text style={styles.locationText} numberOfLines={1}>{area}</Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.applicationsTag}>
-                <Ionicons 
-                  name={applications > 0 ? "people" : "people-outline"} 
-                  size={11} 
-                  color={applications > 0 ? dash.primary : dash.muted} 
-                />
-                <Text style={[styles.applicationsText, applications > 0 && { color: dash.primary, fontWeight: "700" }]}>
-                  {applications}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Vertical Menu Button */}
-        <Pressable
-          accessibilityRole="button"
-          onPress={(e) => {
-            e.stopPropagation();
-            onMenu();
-          }}
-          style={styles.menuBtnNew}
-          hitSlop={8}
-        >
-          <Ionicons name="ellipsis-vertical" size={16} color={dash.muted} />
-        </Pressable>
-      </View>
-    </Pressable>
-  );
-}
-
 function PeriodSheet({
   visible,
   current,
@@ -692,71 +751,6 @@ function PeriodSheet({
         </Pressable>
       </Pressable>
     </Modal>
-  );
-}
-
-function ServiceMenu({
-  service,
-  busy,
-  onClose,
-  onView,
-  onResponses,
-  onPause,
-  onResume,
-  onCloseService,
-}: {
-  service: RecentService | null;
-  busy: boolean;
-  onClose: () => void;
-  onView: () => void;
-  onResponses: () => void;
-  onPause: () => void;
-  onResume: () => void;
-  onCloseService: () => void;
-}) {
-  const status = (service?.status || "").toUpperCase();
-  return (
-    <Modal visible={!!service} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <Text style={styles.sheetTitle} numberOfLines={1}>
-            {service?.title}
-          </Text>
-          <MenuRow icon="eye-outline" label="View Request" onPress={onView} />
-          <MenuRow icon="chatbubbles-outline" label="View Responses" onPress={onResponses} />
-          {status === "PUBLISHED" ? (
-            <MenuRow icon="pause-circle-outline" label="Pause Request" onPress={onPause} disabled={busy} />
-          ) : null}
-          {status === "PAUSED" ? (
-            <MenuRow icon="play-circle-outline" label="Resume Request" onPress={onResume} disabled={busy} />
-          ) : null}
-          {status === "PUBLISHED" || status === "PAUSED" || status === "FILLED" ? (
-            <MenuRow icon="close-circle-outline" label="Close Request" onPress={onCloseService} danger disabled={busy} />
-          ) : null}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function MenuRow({
-  icon,
-  label,
-  onPress,
-  danger,
-  disabled,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable onPress={onPress} disabled={disabled} style={styles.sheetRow}>
-      <Ionicons name={icon} size={18} color={danger ? dash.error : dash.ink} />
-      <Text style={[styles.sheetRowText, danger && { color: dash.error }, { flex: 1 }]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -866,58 +860,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   ctaOuter: {
+    width: "100%",
+    maxWidth: 440,
     alignSelf: "center",
-    borderRadius: 999,
-    padding: 3.5,
-    backgroundColor: "rgba(255, 255, 255, 0.45)",
+    borderRadius: 20,
+    padding: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.55)",
     borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.75)",
+    borderColor: "rgba(255, 255, 255, 0.85)",
     shadowColor: "#03402D",
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
-  cta: {
+  ctaCardInner: {
+    backgroundColor: "#03402D",
+    borderRadius: 17,
+    padding: 12,
+    gap: 10,
+  },
+  ctaHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#03402D",
-    borderRadius: 999,
-    paddingVertical: 7,
-    paddingLeft: 8,
-    paddingRight: 10,
+    gap: 8,
   },
-  ctaIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(255, 255, 255, 0.14)",
+  ctaBadgeIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  ctaTextWrap: {
-    marginHorizontal: 14,
   },
   ctaTitle: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: "800",
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   ctaSub: {
-    marginTop: 2,
-    color: "rgba(255, 255, 255, 0.85)",
-    fontSize: 12,
-    fontWeight: "400",
+    marginLeft: "auto",
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 11,
+    fontWeight: "500",
   },
-  ctaArrow: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  ctaSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+  },
+  ctaSearchInput: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: "600",
+    color: "#0F172A",
+    height: "100%",
+    paddingVertical: 0,
+  },
+  ctaSubmitBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    backgroundColor: dash.primary,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 4,
+    marginLeft: 6,
   },
   sectionHead: {
     flexDirection: "row",
@@ -1239,5 +1250,138 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: dash.ink,
+  },
+  searchSectionLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 0.6,
+  },
+  recentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  recentChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1E293B",
+  },
+  popularChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  popularChipIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  popularChipText: {
+    fontSize: 13.5,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  searchResultCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  searchResultIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  searchResultTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  searchResultMeta: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 2,
+  },
+  searchRatingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  searchRatingText: {
+    fontSize: 11.5,
+    fontWeight: "800",
+    color: "#D97706",
+  },
+  searchEmptyBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  searchEmptyTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 12,
+  },
+  searchEmptySub: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  bulaoSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 26,
+    height: 52,
+    paddingLeft: 10,
+    paddingRight: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  bulaoSearchBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#E6F4EE",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  bulaoInputText: {
+    flex: 1,
+    fontSize: 14.5,
+    fontWeight: "600",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+    height: "100%",
+    paddingVertical: 0,
   },
 });

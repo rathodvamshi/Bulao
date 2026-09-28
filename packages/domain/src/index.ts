@@ -29,16 +29,33 @@ export const savedPlaceSchema = locationSchema.extend({
   address: z.string().trim().max(300).default(""),
 });
 export const serviceSchema = locationSchema.extend({
+  wizardState: z.record(z.unknown()).optional(),
   categoryId: z.string().min(1),
   radiusKm: z.number().min(1).max(50),
   experience: z.number().int().min(0).max(70),
-  available: z.boolean(),
+  available: z.boolean().default(true),
+  title: z.string().trim().min(1).max(100),
+  businessName: z.string().trim().max(100).optional().default(""),
+  description: z.string().trim().max(2000).optional().default(""),
+  offeredServices: z.array(z.string().trim().min(1).max(150)).max(50).default([]),
+  serviceMode: z.enum(["doorstep", "at_center", "both"]),
+  pricingModel: z.enum(["fixed", "hourly", "visit_quote"]),
+  basePricePaise: z.number().int().min(0).optional(),
+  operatingHours: z.string().trim().max(100).optional(),
+  portfolioUrls: z.array(z.string().url().max(2000).regex(/^https?:\/\//i, "Upload a photo before publishing")).max(20).optional().default([]),
+  shopPhotos: z.array(z.string().url().max(2000).regex(/^https?:\/\//i, "Upload a photo before publishing")).max(20).optional().default([]),
+  phoneVisible: z.boolean().optional().default(false),
+  website: z.string().trim().max(200).optional().default(""),
+  instagram: z.string().trim().max(200).optional().default(""),
+  facebook: z.string().trim().max(200).optional().default(""),
 });
 export const searchSchema = z.object({
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
   radiusKm: z.coerce.number().min(1).max(50).default(5),
   categoryId: z.string().optional(),
+  q: z.string().optional(),
+  serviceMode: z.string().optional(),
   cursor: z.coerce.number().int().nonnegative().default(0),
 });
 export type Location = z.infer<typeof locationSchema>;

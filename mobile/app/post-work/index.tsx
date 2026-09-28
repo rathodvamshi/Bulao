@@ -1,8 +1,9 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   Pressable,
   StyleSheet,
   ScrollView,
@@ -45,21 +46,37 @@ type CatalogResponse = {
   version: number;
 };
 
-const categoryIcons: Record<string, string> = {
-  construction: "🏗️",
-  household: "🏠",
-  food: "🍽️",
-  transport: "🚚",
-  shops: "🏪",
-  events: "🎉",
-  security: "🛡️",
-  education: "🎓",
-  healthcare: "🩺",
-  beauty: "💇‍♀️",
-  promotion: "📢",
-  office: "💼",
-  other: "✨",
+const categoryVectorIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }> = {
+  construction: { icon: "build-outline", color: "#D97706", bg: "#FEF3C7" },
+  household: { icon: "home-outline", color: "#0284C7", bg: "#E0F2FE" },
+  food: { icon: "restaurant-outline", color: "#EA580C", bg: "#FFEDD5" },
+  transport: { icon: "car-outline", color: "#2563EB", bg: "#DBEAFE" },
+  shops: { icon: "storefront-outline", color: "#7C3AED", bg: "#EDE9FE" },
+  events: { icon: "balloon-outline", color: "#DB2777", bg: "#FCE7F3" },
+  security: { icon: "shield-checkmark-outline", color: "#059669", bg: "#D1FAE5" },
+  education: { icon: "school-outline", color: "#0D9488", bg: "#CCFBF1" },
+  healthcare: { icon: "medkit-outline", color: "#DC2626", bg: "#FEE2E2" },
+  beauty: { icon: "sparkles-outline", color: "#C026D3", bg: "#FAE8FF" },
+  promotion: { icon: "megaphone-outline", color: "#CA8A04", bg: "#FEF9C3" },
+  office: { icon: "briefcase-outline", color: "#475569", bg: "#F1F5F9" },
+  other: { icon: "grid-outline", color: "#03402D", bg: "#E6F4EE" },
 };
+
+function getCategoryVectorIcon(catId: string, catName: string) {
+  if (categoryVectorIcons[catId]) return categoryVectorIcons[catId];
+  const name = catName.toLowerCase();
+  if (name.includes("build") || name.includes("construct")) return { icon: "build-outline" as const, color: "#D97706", bg: "#FEF3C7" };
+  if (name.includes("house") || name.includes("home") || name.includes("clean")) return { icon: "home-outline" as const, color: "#0284C7", bg: "#E0F2FE" };
+  if (name.includes("food") || name.includes("cook") || name.includes("eat")) return { icon: "restaurant-outline" as const, color: "#EA580C", bg: "#FFEDD5" };
+  if (name.includes("car") || name.includes("driv") || name.includes("trans")) return { icon: "car-outline" as const, color: "#2563EB", bg: "#DBEAFE" };
+  if (name.includes("shop") || name.includes("store")) return { icon: "storefront-outline" as const, color: "#7C3AED", bg: "#EDE9FE" };
+  if (name.includes("event") || name.includes("party")) return { icon: "balloon-outline" as const, color: "#DB2777", bg: "#FCE7F3" };
+  if (name.includes("guard") || name.includes("secur")) return { icon: "shield-checkmark-outline" as const, color: "#059669", bg: "#D1FAE5" };
+  if (name.includes("teach") || name.includes("school") || name.includes("edu")) return { icon: "school-outline" as const, color: "#0D9488", bg: "#CCFBF1" };
+  if (name.includes("health") || name.includes("med")) return { icon: "medkit-outline" as const, color: "#DC2626", bg: "#FEE2E2" };
+  if (name.includes("office") || name.includes("work")) return { icon: "briefcase-outline" as const, color: "#475569", bg: "#F1F5F9" };
+  return { icon: "grid-outline" as const, color: "#03402D", bg: "#E6F4EE" };
+}
 
 // Rich mapping for role icons to ensure EVERY role has a clean, relevant icon
 const roleIconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -158,6 +175,10 @@ export default function PostWorkCategoryScreen() {
     roleName,
     editingJobId,
   } = usePostWorkStore();
+
+  const params = useLocalSearchParams<{ search?: string; q?: string }>();
+  const initialSearch = params.search || params.q || "";
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
 
   const [stage, setStage] = useState<1 | 2>(1);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -330,6 +351,18 @@ export default function PostWorkCategoryScreen() {
     ? roles
     : [...roles, { id: "other-role", categoryId: category, name: "Other" }];
 
+  const filteredCategories = searchQuery.trim()
+    ? allCategories.filter((c) =>
+        c.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      )
+    : allCategories;
+
+  const filteredRoles = searchQuery.trim()
+    ? allRoles.filter((r) =>
+        r.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      )
+    : allRoles;
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Top Header with ← Exit button */}
@@ -354,12 +387,12 @@ export default function PostWorkCategoryScreen() {
       >
         {isLoading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.green} />
+            <ActivityIndicator size="large" color="#03402D" />
             <Text style={styles.loadingText}>Loading categories...</Text>
           </View>
         ) : isError ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorIcon}>⚠️</Text>
+            <Ionicons name="warning-outline" size={32} color="#DC2626" />
             <Text style={styles.errorText}>
               {error instanceof Error ? error.message : "Could not load categories"}
             </Text>
@@ -371,18 +404,38 @@ export default function PostWorkCategoryScreen() {
               <Text style={styles.stageTag}>STAGE 1 OF 7</Text>
               <Text style={styles.question}>Select a Category</Text>
               <Text style={styles.subtitle}>
-                Pick the main type of work you need done so we can show you the right worker roles.
+                Pick the main category of work so we can match you with verified local workers.
               </Text>
+            </View>
+
+            {/* Live Search Input Bar */}
+            <View style={styles.searchBarBox}>
+              <View style={styles.searchBadgeIcon}>
+                <Ionicons name="search" size={16} color="#03402D" />
+              </View>
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search categories (e.g. Household, Construction...)"
+                placeholderTextColor="#94A3B8"
+                style={styles.searchInput}
+              />
+              {searchQuery.length > 0 ? (
+                <Pressable onPress={() => setSearchQuery("")} hitSlop={6}>
+                  <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                </Pressable>
+              ) : null}
             </View>
 
             {/* Responsive Flexible Category Grid */}
             <View style={styles.responsiveGrid}>
-              {allCategories.map((cat) => {
+              {filteredCategories.map((cat) => {
                 const isSelected = category === cat.id;
                 const displayName =
                   cat.id === "other" && catVerification.isValid
                     ? `Other (${customCategoryName.trim()})`
                     : cat.name;
+                const iconConfig = getCategoryVectorIcon(cat.id, cat.name);
 
                 return (
                   <Pressable
@@ -400,12 +453,14 @@ export default function PostWorkCategoryScreen() {
                     <View
                       style={[
                         styles.iconCircle,
-                        isSelected && styles.iconCircleActive,
+                        { backgroundColor: isSelected ? "#03402D" : iconConfig.bg },
                       ]}
                     >
-                      <Text style={styles.categoryIcon}>
-                        {categoryIcons[cat.id] || cat.icon || "🛠️"}
-                      </Text>
+                      <Ionicons
+                        name={iconConfig.icon}
+                        size={22}
+                        color={isSelected ? "#FFFFFF" : iconConfig.color}
+                      />
                     </View>
                     <Text
                       style={[
@@ -419,7 +474,7 @@ export default function PostWorkCategoryScreen() {
 
                     {isSelected && (
                       <View style={styles.checkmarkBadge}>
-                        <Text style={styles.checkmarkText}>✓</Text>
+                        <Ionicons name="checkmark" size={13} color="#FFFFFF" />
                       </View>
                     )}
                   </Pressable>
@@ -437,7 +492,7 @@ export default function PostWorkCategoryScreen() {
                   {catVerification.isValid ? (
                     <>Custom Category: <Text style={styles.customSummaryBold}>{customCategoryName.trim()}</Text></>
                   ) : (
-                    <Text style={{ color: "#E53E3E", fontWeight: "700" }}>⚠️ {catVerification.errorReason || "Invalid category name"}</Text>
+                    <Text style={{ color: "#DC2626", fontWeight: "700" }}>⚠️ {catVerification.errorReason || "Invalid category name"}</Text>
                   )}
                 </Text>
                 <Text style={styles.customSummaryEdit}>
@@ -470,9 +525,28 @@ export default function PostWorkCategoryScreen() {
               </Text>
             </View>
 
+            {/* Live Search Input Bar for Roles */}
+            <View style={styles.searchBarBox}>
+              <View style={styles.searchBadgeIcon}>
+                <Ionicons name="search" size={16} color="#03402D" />
+              </View>
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={`Search roles in ${categoryName || "category"}...`}
+                placeholderTextColor="#94A3B8"
+                style={styles.searchInput}
+              />
+              {searchQuery.length > 0 ? (
+                <Pressable onPress={() => setSearchQuery("")} hitSlop={6}>
+                  <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                </Pressable>
+              ) : null}
+            </View>
+
             {/* Responsive Flexible Role Grid with Rich Icons for Every Role */}
             <View style={styles.responsiveGrid}>
-              {allRoles.map((r) => {
+              {filteredRoles.map((r) => {
                 const isSelected = role === r.id;
                 const displayName =
                   r.id === "other-role" && roleVerification.isValid
@@ -501,8 +575,8 @@ export default function PostWorkCategoryScreen() {
                     >
                       <Ionicons
                         name={iconName}
-                        size={22}
-                        color={isSelected ? colors.green : colors.ink}
+                        size={20}
+                        color={isSelected ? "#FFFFFF" : "#03402D"}
                       />
                     </View>
 
@@ -518,7 +592,7 @@ export default function PostWorkCategoryScreen() {
 
                     {isSelected && (
                       <View style={styles.roleCheckmarkBadge}>
-                        <Text style={styles.checkmarkText}>✓</Text>
+                        <Ionicons name="checkmark" size={13} color="#FFFFFF" />
                       </View>
                     )}
                   </Pressable>
@@ -536,7 +610,7 @@ export default function PostWorkCategoryScreen() {
                   {roleVerification.isValid ? (
                     <>Custom Role: <Text style={styles.customSummaryBold}>{customRoleName.trim()}</Text></>
                   ) : (
-                    <Text style={{ color: "#E53E3E", fontWeight: "700" }}>⚠️ {roleVerification.errorReason || "Invalid role name"}</Text>
+                    <Text style={{ color: "#DC2626", fontWeight: "700" }}>⚠️ {roleVerification.errorReason || "Invalid role name"}</Text>
                   )}
                 </Text>
                 <Text style={styles.customSummaryEdit}>
@@ -693,46 +767,29 @@ const styles = StyleSheet.create({
   },
   categoryCard: {
     backgroundColor: colors.white,
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: "#DCE6E0",
+    borderColor: "#E2E8F0",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
     position: "relative",
     padding: 14,
     paddingVertical: 18,
-    minHeight: 120,
-    elevation: 2,
-    shadowColor: "#0D2318",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
+    minHeight: 118,
   },
   categoryCardActive: {
-    borderColor: "#176B58",
+    borderColor: "#03402D",
     borderWidth: 2,
-    backgroundColor: "#E8F5EE",
-    elevation: 3.5,
-    shadowColor: "#176B58",
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
+    backgroundColor: "#E6F4EE",
   },
   iconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "#F5F8F6",
-    borderWidth: 1,
-    borderColor: "#DCE6E0",
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
   },
-  iconCircleActive: {
-    backgroundColor: colors.white,
-    borderColor: "#C2DDD0",
-  },
-  categoryIcon: { fontSize: 26 },
   categoryLabel: {
     fontSize: 13,
     fontWeight: "700",
@@ -741,30 +798,25 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   categoryLabelActive: {
-    color: "#176B58",
+    color: "#03402D",
     fontWeight: "800",
   },
   checkmarkBadge: {
     position: "absolute",
     top: 8,
     right: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#176B58",
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#03402D",
     alignItems: "center",
     justifyContent: "center",
-  },
-  checkmarkText: {
-    fontSize: 13,
-    color: colors.white,
-    fontWeight: "800",
   },
   roleCard: {
     backgroundColor: colors.white,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: "#DCE6E0",
+    borderColor: "#E2E8F0",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
@@ -772,34 +824,22 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingVertical: 16,
     minHeight: 110,
-    elevation: 2,
-    shadowColor: "#0D2318",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
   },
   roleCardActive: {
-    borderColor: "#176B58",
+    borderColor: "#03402D",
     borderWidth: 2,
-    backgroundColor: "#E8F5EE",
-    elevation: 3.5,
-    shadowColor: "#176B58",
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
+    backgroundColor: "#E6F4EE",
   },
   roleIconCircle: {
     width: 42,
     height: 42,
-    borderRadius: 21,
-    backgroundColor: "#F5F8F6",
-    borderWidth: 1,
-    borderColor: "#DCE6E0",
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
   },
   roleIconCircleActive: {
-    backgroundColor: colors.white,
-    borderColor: "#C2DDD0",
+    backgroundColor: "#03402D",
   },
   roleLabel: {
     fontSize: 13,
@@ -809,16 +849,17 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   roleLabelActive: {
-    color: colors.green,
+    color: "#03402D",
+    fontWeight: "800",
   },
   roleCheckmarkBadge: {
     position: "absolute",
     top: 8,
     right: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.green,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#03402D",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -829,7 +870,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: colors.green,
+    borderColor: "#03402D",
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginTop: 8,
@@ -840,15 +881,44 @@ const styles = StyleSheet.create({
   },
   customSummaryBold: {
     fontWeight: "700",
-    color: colors.green,
+    color: "#03402D",
   },
   customSummaryEdit: {
     fontSize: 12,
     fontWeight: "700",
-    color: colors.green,
-    backgroundColor: colors.greenLight,
+    color: "#03402D",
+    backgroundColor: "#E6F4EE",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 10,
+  },
+  searchBarBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
+    paddingLeft: 10,
+    paddingRight: 14,
+    height: 48,
+    marginBottom: 16,
+  },
+  searchBadgeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#E6F4EE",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.ink,
+    height: "100%",
+    paddingVertical: 0,
   },
 });

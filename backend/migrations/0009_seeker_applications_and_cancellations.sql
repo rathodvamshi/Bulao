@@ -1,8 +1,4 @@
-ALTER TABLE interactions ADD COLUMN cancelled_by TEXT REFERENCES users(id);
-ALTER TABLE interactions ADD COLUMN cancellation_reason TEXT;
-ALTER TABLE interactions ADD COLUMN cancelled_at INTEGER;
-ALTER TABLE interactions ADD COLUMN accepted_at INTEGER;
-ALTER TABLE interactions ADD COLUMN rejected_at INTEGER;
+-- Seeker applications and cancellations triggers & notifications table
 
 DROP TRIGGER IF EXISTS interaction_transition;
 CREATE TRIGGER interaction_transition BEFORE UPDATE ON interactions BEGIN

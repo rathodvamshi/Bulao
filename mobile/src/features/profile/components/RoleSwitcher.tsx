@@ -36,9 +36,11 @@ const ROLES: {
 export function RoleSwitcher({
   activeRole,
   onSelectRole,
+  serviceCount = 0,
 }: {
   activeRole: ProfileRole;
   onSelectRole: (role: ProfileRole) => void;
+  serviceCount?: number;
 }) {
   return (
     <View style={styles.container}>
@@ -46,6 +48,8 @@ export function RoleSwitcher({
       <View style={styles.tabsRow}>
         {ROLES.map((item) => {
           const isActive = item.id === activeRole;
+          const showServiceBadge = item.id === "service" && serviceCount > 0;
+
           return (
             <Pressable
               key={item.id}
@@ -67,14 +71,33 @@ export function RoleSwitcher({
                 color={isActive ? "#FFFFFF" : colors.muted}
               />
               <View style={styles.labelCol}>
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    isActive && styles.activeTabLabel,
-                  ]}
-                >
-                  {item.label}
-                </Text>
+                <View style={styles.labelWithBadgeRow}>
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      isActive && styles.activeTabLabel,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  {showServiceBadge && (
+                    <View
+                      style={[
+                        styles.countPill,
+                        isActive && styles.countPillActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.countPillText,
+                          isActive && styles.countPillTextActive,
+                        ]}
+                      >
+                        {serviceCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text
                   style={[
                     styles.tabSublabel,
@@ -142,5 +165,27 @@ const styles = StyleSheet.create({
   },
   activeTabSublabel: {
     color: "rgba(255, 255, 255, 0.85)",
+  },
+  labelWithBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  countPill: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  countPillActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+  },
+  countPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#D97706",
+  },
+  countPillTextActive: {
+    color: "#FFFFFF",
   },
 });

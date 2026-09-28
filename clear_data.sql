@@ -1,7 +1,7 @@
 -- ============================================================
 -- Bulao Database Reset Script
 -- Deletes all user & application data completely to start fresh.
--- Keeps schema migrations and seeds default reference locations.
+-- Keeps schema migrations, categories, roles, and default reference locations intact.
 -- ============================================================
 
 -- Disable foreign key constraints during purge
@@ -16,7 +16,7 @@ DELETE FROM reviews;
 DELETE FROM blocks;
 DELETE FROM reports;
 
--- 3. Purge user interactions & service applications
+-- 3. Purge user interactions & job applications
 DELETE FROM interactions;
 
 -- 4. Purge jobs & service profiles
@@ -28,6 +28,7 @@ DELETE FROM notifications;
 
 -- 6. Purge user locations & saved places
 DELETE FROM saved_places;
+DELETE FROM user_locations;
 DELETE FROM user_saved_locations;
 DELETE FROM user_contact_phones;
 

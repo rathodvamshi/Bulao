@@ -1,6 +1,3 @@
--- Add icon column to roles table
-ALTER TABLE roles ADD COLUMN icon TEXT NOT NULL DEFAULT '👤';
-
 -- Update existing roles with their respective icons from seed data
 UPDATE roles SET icon = '👷' WHERE id = 'construction-helper';
 UPDATE roles SET icon = '🧱' WHERE id = 'mason';

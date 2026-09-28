@@ -76,15 +76,21 @@ export function ProviderStoryHero({ width, height, headerHeight, visible }: {
   return (
     <View style={[styles.hero, { height }]}>
       <View accessible accessibilityRole="image" accessibilityLabel={`Bulao story, scene ${index + 1} of ${scenes.length}. ${scenes[index]!.label}`} style={StyleSheet.absoluteFill}>
-        {scenes.map((scene, i) => (
-          <Animated.Image key={scene.label} source={scene.image} accessible={false}
-            onLoad={() => setLoaded(old => old[i] ? old : { ...old, [i]: true })}
-            resizeMode="contain"
-            style={{ position: "absolute", width: artWidth, height: artHeight, left: (width - artWidth) / 2,
-              top: headerHeight - artHeight * 0.25, opacity: opacity[i],
-              transform: [{ scale: zoom.interpolate({ inputRange: [0, 1], outputRange: [1, 1.018] }) }] }} />
-        ))}
+        {scenes.map((scene, i) => {
+          const isScene11 = i === 10;
+          const sceneWidth = isScene11 ? artWidth * 1.08 : artWidth;
+          const sceneOffset = isScene11 ? 0.183 : 0.22;
+          return (
+            <Animated.Image key={scene.label} source={scene.image} accessible={false}
+              onLoad={() => setLoaded(old => old[i] ? old : { ...old, [i]: true })}
+              resizeMode={isScene11 ? "cover" : "contain"}
+              style={{ position: "absolute", width: sceneWidth, height: artHeight, left: (width - sceneWidth) / 2,
+                top: headerHeight - artHeight * sceneOffset, opacity: opacity[i],
+                transform: [{ scale: zoom.interpolate({ inputRange: [0, 1], outputRange: [1, 1.018] }) }] }} />
+          );
+        })}
       </View>
+      <LinearGradient pointerEvents="none" colors={[dash.bg, "transparent"]} locations={[0, 0.28]} style={StyleSheet.absoluteFill} />
       <LinearGradient pointerEvents="none" colors={["transparent", dash.bg]} locations={[0.73, 1]} style={StyleSheet.absoluteFill} />
       <View style={styles.controls}>
         <Pressable accessibilityRole="button" accessibilityLabel="Previous story scene" onPress={() => step(-1)} style={styles.control}>
@@ -102,7 +108,7 @@ export function ProviderStoryHero({ width, height, headerHeight, visible }: {
 }
 
 const styles = StyleSheet.create({
-  hero: { width: "100%", overflow: "hidden", backgroundColor: "#D0E7D1" },
+  hero: { width: "100%", overflow: "hidden", backgroundColor: "#E2EBE3" },
   controls: { position: "absolute", bottom: 70, alignSelf: "center", flexDirection: "row", alignItems: "center" },
   control: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
 });

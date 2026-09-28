@@ -37,7 +37,8 @@ images.post("/authorize", async (c) => {
         .max(5 * 1024 * 1024),
     })
     .parse(await c.req.json());
-  await rateLimit(c.env.DB, `image:${c.get("userId")}`, 10, 86400);
+  // A service wizard allows six work photos and six shop photos, plus retries.
+  await rateLimit(c.env.DB, `image:${c.get("userId")}`, 30, 86400);
   const authorized = await storage(c.env).authorizeUpload(
     c.get("userId"),
     input.mimeType,
@@ -51,8 +52,8 @@ images.post("/authorize", async (c) => {
   return ok(c, authorized);
 });
 images.post("/confirm", async (c) => {
-  const { assetId } = z
-    .object({ assetId: z.string().max(200) })
+  const { assetId, purpose } = z
+    .object({ assetId: z.string().max(200), purpose: z.enum(["profile", "service"]).default("profile") })
     .parse(await c.req.json());
   const intent = await c.env.DB.prepare(
     "SELECT asset_id FROM image_intents WHERE asset_id=? AND user_id=? AND expires_at>?",
@@ -61,9 +62,11 @@ images.post("/confirm", async (c) => {
     .first();
   if (!intent) throw new ApiError("INVALID_IMAGE", 403);
   const asset = await storage(c.env).verifyAsset(c.get("userId"), assetId);
-  await c.env.DB.prepare("UPDATE users SET photo_url=? WHERE id=?")
-    .bind(asset.thumbnailUrl, c.get("userId"))
-    .run();
+  if (purpose === "profile") {
+    await c.env.DB.prepare("UPDATE users SET photo_url=? WHERE id=?")
+      .bind(asset.thumbnailUrl, c.get("userId"))
+      .run();
+  }
   await recordUsage(c.env.DB, "cloudinary", "verified_upload", true);
   return ok(c, asset);
 });

@@ -3,16 +3,27 @@ import { View, Text, Pressable, Switch, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { colors } from "../../../components/ui";
+import { ServiceProfileViewSkeleton } from "../../../components/SkeletonLoader";
+import { ServiceGrowthSheet } from "./ServiceGrowthSheet";
+import { MyServiceCollection } from "./MyServiceCollection";
 import type { ServiceRoleData } from "../types";
 
 export function ServiceProfileView({
   data,
   isOwner = true,
+  loading = false,
 }: {
-  data: ServiceRoleData;
+  data?: ServiceRoleData;
   isOwner?: boolean;
+  loading?: boolean;
 }) {
-  const [isAvailable, setIsAvailable] = useState(data.available);
+  const [isAvailable, setIsAvailable] = useState(data?.available ?? true);
+  const [growthOpen, setGrowthOpen] = useState(false);
+
+  if (loading || !data) {
+    return <ServiceProfileViewSkeleton />;
+  }
+
   const hasReviews = data.totalReviews > 0 && data.rating !== null;
 
   return (
@@ -22,11 +33,11 @@ export function ServiceProfileView({
         <View style={styles.cardHeaderRow}>
           <View>
             <Text style={styles.cardTitle}>Service Reputation</Text>
-            <Text style={styles.cardSubtitle}>Rated by service customers</Text>
+            <Text style={styles.cardSubtitle}>Rated by verified clients</Text>
           </View>
           <View style={styles.roleBadge}>
-            <Ionicons name="flash" size={12} color="#D97706" />
-            <Text style={styles.roleBadgeText}>Partner Mode</Text>
+            <Ionicons name="shield-checkmark" size={12} color="#047857" />
+            <Text style={styles.roleBadgeText}>Verified Partner</Text>
           </View>
         </View>
 
@@ -52,7 +63,7 @@ export function ServiceProfileView({
               ))}
             </View>
             <Text style={styles.reviewCountText}>
-              {hasReviews ? `${data.totalReviews} client reviews` : "No ratings yet"}
+              {hasReviews ? `${data.totalReviews} client reviews` : "(0 reviews)"}
             </Text>
           </View>
 
@@ -77,6 +88,18 @@ export function ServiceProfileView({
           </View>
         </View>
 
+        {/* Client Trust Signals Banner */}
+        <View style={styles.trustRow}>
+          <View style={styles.trustBadge}>
+            <Ionicons name="ribbon-outline" size={13} color="#047857" />
+            <Text style={styles.trustText}>Top Tier Reliability</Text>
+          </View>
+          <View style={styles.trustBadge}>
+            <Ionicons name="time-outline" size={13} color="#047857" />
+            <Text style={styles.trustText}>Same Day Availability</Text>
+          </View>
+        </View>
+
         {/* Availability Switch (If Owner) */}
         {isOwner && (
           <View style={styles.availabilityRow}>
@@ -98,44 +121,18 @@ export function ServiceProfileView({
         )}
       </View>
 
-      {/* ── 2. Active Services Offered ────────────────────────────────────── */}
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={styles.sectionHeading}>My Offered Services</Text>
-          <Text style={styles.serviceCountBadge}>{data.services.length}</Text>
-        </View>
+      {/* ── 2. Profile Growth & Improvement Sheet ───────────── */}
+      {isOwner && growthOpen && (
+        <ServiceGrowthSheet
+          services={data.services || []}
+          onClose={() => setGrowthOpen(false)}
+        />
+      )}
 
-        {data.services.length === 0 ? (
-          <View style={styles.emptyServicesBox}>
-            <Ionicons name="construct-outline" size={32} color={colors.mutedLight} />
-            <Text style={styles.emptyServicesTitle}>No services listed yet</Text>
-            <Text style={styles.emptyServicesHint}>
-              List your specialized services (e.g. plumbing, repairs, cleaning) to get direct bookings.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.servicesList}>
-            {data.services.map((srv) => (
-              <View key={srv.id} style={styles.serviceItem}>
-                <View style={styles.serviceIconCircle}>
-                  <Ionicons name="construct" size={18} color="#D97706" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.serviceCategory}>{srv.category}</Text>
-                  <Text style={styles.serviceMeta}>
-                    {srv.experienceYears} yrs experience · {srv.radiusKm} km radius
-                  </Text>
-                </View>
-                <View style={styles.serviceActiveTag}>
-                  <Text style={styles.serviceActiveText}>Active</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
+      {/* ── 3. Active Services Offered ────────────────────────────────────── */}
+      <MyServiceCollection services={data.services} />
 
-      {/* ── 3. Quick Actions for Services (If Owner) ──────────────────────── */}
+      {/* ── 4. Quick Actions for Services (If Owner) ──────────────────────── */}
       {isOwner && (
         <View style={styles.card}>
           <Text style={styles.sectionHeading}>Service Actions</Text>
@@ -403,4 +400,72 @@ const styles = StyleSheet.create({
     color: colors.mutedLight,
     marginTop: 2,
   },
+  trustRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  trustBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  trustText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#047857",
+  },
+  growthCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    gap: 8,
+    shadowColor: "#047857",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  growthHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  growthTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.ink,
+  },
+  growthScore: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  progressBarTrack: {
+    height: 8,
+    backgroundColor: "#E6ECE8",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: "#047857",
+    borderRadius: 4,
+  },
+  growthHint: {
+    fontSize: 12,
+    color: colors.muted,
+    lineHeight: 16,
+    marginTop: 2,
+  },
 });
+

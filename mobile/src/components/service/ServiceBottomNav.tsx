@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, Platform } from "react-native";
+import { useState } from "react";
+import { Pressable, StyleSheet, Text, View, Platform, Modal, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { BlurView } from "expo-blur";
@@ -6,10 +7,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { dash } from "./palette";
 
-type NavId = "bulao" | "home" | "jobs" | "job" | "post" | "activity" | "profile";
+type NavId = "bulao" | "home" | "jobs" | "job" | "requests" | "post" | "activity" | "profile";
 
 const ITEMS: {
-  id: "bulao" | "home" | "post" | "jobs" | "profile";
+  id: "bulao" | "home" | "jobs" | "job" | "post" | "requests" | "profile";
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   activeIcon: keyof typeof Ionicons.glyphMap;
@@ -18,9 +19,9 @@ const ITEMS: {
 }[] = [
   { id: "bulao", label: "Bulao", icon: "home-outline", activeIcon: "home", path: "/(tabs)" },
   { id: "home", label: "Home", icon: "home-outline", activeIcon: "home", path: "/find-service" },
-  { id: "post", label: "Post", icon: "add", activeIcon: "add", path: "/post-work", center: true },
-  { id: "jobs", label: "Job", icon: "briefcase-outline", activeIcon: "briefcase", path: "/activity" },
-  { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/provider-profile" },
+  { id: "post", label: "Create Service", icon: "add", activeIcon: "add", path: "/create-service", center: true },
+  { id: "requests", label: "Requests", icon: "document-text-outline", activeIcon: "document-text", path: "/service-requests" },
+  { id: "profile", label: "Profile", icon: "person-outline", activeIcon: "person", path: "/service-profile" },
 ];
 
 export function ServiceBottomNav({
@@ -29,7 +30,16 @@ export function ServiceBottomNav({
   active?: NavId;
 }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const slotWidth = Math.min(58, Math.max(0, (width - 48) / 5));
   const bottomSpace = insets.bottom > 0 ? insets.bottom : 8;
+  const [comingSoonVisible, setComingSoonVisible] = useState(false);
+  const [comingSoonTitle, setComingSoonTitle] = useState("Feature");
+
+  const showComingSoon = (name: string) => {
+    setComingSoonTitle(name);
+    setComingSoonVisible(true);
+  };
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { paddingBottom: bottomSpace }]}>
@@ -48,9 +58,9 @@ export function ServiceBottomNav({
         />
         <LinearGradient
           colors={[
-            "rgba(248, 250, 247, 0.4)",
-            "rgba(248, 250, 247, 0.85)",
-            "rgba(248, 250, 247, 0.98)",
+            "rgba(250, 244, 236, 0.4)",
+            "rgba(250, 244, 236, 0.85)",
+            "rgba(250, 244, 236, 0.98)",
           ]}
           locations={[0, 0.4, 1]}
           style={StyleSheet.absoluteFill}
@@ -75,16 +85,15 @@ export function ServiceBottomNav({
             {ITEMS.map((item) => {
               const isActive =
                 item.id === active ||
-                (item.id === "jobs" && (active === "job" || active === "activity"));
+                (item.id === "requests" && (active === "job" || active === "jobs" || active === "activity" || active === "requests"));
               if (item.center) {
                 return (
-                  <View key={item.id} style={styles.slot}>
+                  <View key={item.id} style={[styles.slot, { width: slotWidth }]}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Post a new service request"
+                      accessibilityLabel="Create Service"
                       onPress={() => {
-                        if (active === "post") return;
-                        router.push(item.path);
+                        router.push("/create-service");
                       }}
                       style={({ pressed }) => [
                         styles.plus,
@@ -95,7 +104,14 @@ export function ServiceBottomNav({
                         <Ionicons name="add" size={26} color={dash.white} />
                       </View>
                     </Pressable>
-                    <Text style={[styles.label, styles.plusLabel]}>{item.label}</Text>
+                    <Text
+                      style={[styles.label, styles.plusLabel]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                    >
+                      {item.label}
+                    </Text>
                     <View style={styles.indicatorContainer} />
                   </View>
                 );
@@ -107,13 +123,15 @@ export function ServiceBottomNav({
                   accessibilityRole="button"
                   accessibilityState={{ selected: isActive }}
                   onPress={() => {
-                    // Prevent reloading if already on the current page
+                    if (item.id === "jobs") {
+                      showComingSoon("Jobs");
+                      return;
+                    }
                     if (isActive) {
                       return;
                     }
 
                     if (item.id === "bulao") {
-                      // Redirect directly to the main Bulao home page in one tap
                       router.replace("/(tabs)");
                       return;
                     }
@@ -121,21 +139,20 @@ export function ServiceBottomNav({
                       router.replace("/find-service");
                       return;
                     }
-                    if (item.id === "jobs") {
-                      router.replace("/activity");
+                    if (item.id === "requests") {
+                      router.replace("/service-requests");
                       return;
                     }
                     if (item.id === "profile") {
-                      router.replace("/provider-profile");
+                      router.replace("/service-profile");
                       return;
                     }
                     router.push(item.path);
                   }}
-                  style={styles.slot}
+                  style={[styles.slot, { width: slotWidth }]}
                 >
                   <View style={styles.iconBox}>
                     {item.id === "bulao" ? (
-                      // Custom "B" badge for Bulao with back arrow in front of the B char
                       <View style={[styles.bulaoIcon, isActive && styles.bulaoIconActive]}>
                         <Ionicons
                           name="arrow-back"
@@ -146,7 +163,6 @@ export function ServiceBottomNav({
                         <Text style={[styles.bulaoText, isActive && styles.bulaoTextActive]}>B</Text>
                       </View>
                     ) : (
-                      // Regular icons for other items
                       <View style={styles.regularIconWrap}>
                         <Ionicons
                           name={isActive ? item.activeIcon : item.icon}
@@ -168,7 +184,42 @@ export function ServiceBottomNav({
           </View>
         </View>
       </View>
+
+      <ComingSoonModal
+        visible={comingSoonVisible}
+        title={comingSoonTitle}
+        onClose={() => setComingSoonVisible(false)}
+      />
     </View>
+  );
+}
+
+function ComingSoonModal({
+  visible,
+  title,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.modalCard} onPress={() => {}}>
+          <View style={styles.modalIconCircle}>
+            <Ionicons name="sparkles" size={28} color="#075B43" />
+          </View>
+          <Text style={styles.modalTitle}>{title} Coming Soon!</Text>
+          <Text style={styles.modalSub}>
+            We're building an incredible experience for managing service requests. Check back soon for updates!
+          </Text>
+          <Pressable style={styles.modalBtn} onPress={onClose}>
+            <Text style={styles.modalBtnText}>Got it</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -214,7 +265,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "center",
-    gap: 8,
+    gap: 4,
   },
   slot: {
     width: 58,
@@ -281,6 +332,9 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   plusLabel: {
+    width: 58,
+    height: 14,
+    fontSize: 9,
     color: dash.primary,
     fontWeight: "700",
   },
@@ -320,5 +374,61 @@ const styles = StyleSheet.create({
   },
   bulaoArrow: {
     marginRight: 2,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(16, 42, 42, 0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    shadowColor: "#0D2318",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#E9F8EF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#102A2A",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalSub: {
+    fontSize: 14,
+    color: "#63727A",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalBtn: {
+    width: "100%",
+    backgroundColor: dash.primary,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
   },
 });

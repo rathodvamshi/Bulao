@@ -9,9 +9,9 @@ profiles.get("/:id", async (c) => {
   const user = await identify(c.env.DB, c.req.header("Authorization"));
   if (user && user.id !== id) await assertUnblocked(c.env.DB, user.id, id);
   const profile = await c.env.DB.prepare(
-    `SELECT 
+    `SELECT
        id, name, area, photo_url AS photoUrl, phone, phone_verified AS phoneVerified, created_at AS createdAt,
-       COALESCE((SELECT ROUND(AVG(stars),1) FROM reviews WHERE target_id=users.id), 5.0) AS rating,
+       (SELECT ROUND(AVG(stars),1) FROM reviews WHERE target_id=users.id) AS rating,
        (SELECT COUNT(*) FROM reviews WHERE target_id=users.id) AS totalReviews,
        (SELECT COUNT(*) FROM reviews WHERE target_id=users.id AND stars=5) AS stars5,
        (SELECT COUNT(*) FROM reviews WHERE target_id=users.id AND stars=4) AS stars4,
@@ -35,12 +35,13 @@ profiles.get("/:id", async (c) => {
       canViewPhone = true;
     } else {
       const activeEngagement = await c.env.DB.prepare(
-        `SELECT id FROM interactions 
-         WHERE status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') 
-         AND ((owner_id=? AND worker_id=?) OR (owner_id=? AND worker_id=?)) 
+        `SELECT id FROM interactions
+         WHERE status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED')
+         AND ((owner_id=? AND worker_id=?) OR (owner_id=? AND worker_id=?))
+         AND (kind='job' OR (worker_id=? AND EXISTS(SELECT 1 FROM service_profiles s WHERE s.id=service_id AND s.archived_at IS NULL)) OR EXISTS(SELECT 1 FROM service_profiles s WHERE s.id=service_id AND s.phone_visible=1 AND s.archived_at IS NULL))
          LIMIT 1`,
       )
-        .bind(user.id, id, id, user.id)
+        .bind(user.id, id, id, user.id, id)
         .first();
       if (activeEngagement) canViewPhone = true;
     }
@@ -49,21 +50,21 @@ profiles.get("/:id", async (c) => {
   const completedCount = Number(profile.completed || 0);
   const lateCancellations = Number(profile.lateCancellations || 0);
   const totalCommitted = completedCount + lateCancellations;
-  const completionRate = totalCommitted > 0 ? Math.round((completedCount / totalCommitted) * 100) : 100;
+  const completionRate = totalCommitted > 0 ? Math.round((completedCount / totalCommitted) * 100) : null;
 
   const reviews = await c.env.DB.prepare(
-    `SELECT 
+    `SELECT
        r.id, r.stars, r.body, r.created_at AS createdAt, u.name AS author,
        COALESCE(roles.name, cats.name, 'Verified Work') AS jobTitle
-     FROM reviews r 
-     JOIN users u ON u.id=r.author_id 
+     FROM reviews r
+     JOIN users u ON u.id=r.author_id
      LEFT JOIN interactions i ON i.id=r.interaction_id
      LEFT JOIN jobs j ON j.id=i.job_id
      LEFT JOIN roles roles ON roles.id=j.role_id
      LEFT JOIN service_profiles sp ON sp.id=i.service_id
      LEFT JOIN categories cats ON cats.id=sp.category_id
-     WHERE r.target_id=? 
-     ORDER BY r.created_at DESC 
+     WHERE r.target_id=?
+     ORDER BY r.created_at DESC
      LIMIT 20`,
   )
     .bind(id)

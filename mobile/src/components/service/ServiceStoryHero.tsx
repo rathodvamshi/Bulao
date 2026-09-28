@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, AppState, Easing, Pressable, StyleSheet, View } from "react-native";
+import { AccessibilityInfo, Animated, AppState, Easing, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "expo-router";
@@ -18,6 +18,19 @@ const scenes = [
   { image: require("../../../assets/images/provider/kitchen-rescue-story/10-family-lunch-recommendation.png"), label: "Family lunch saved! Recommending Bulao to guests" },
 ] as const;
 
+export function preloadServiceStoryImages() {
+  scenes.forEach((scene) => {
+    try {
+      const source = Image.resolveAssetSource(scene.image);
+      if (source?.uri) {
+        void Image.prefetch(source.uri);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  });
+}
+
 export function ServiceStoryHero({ width, height, headerHeight, visible }: {
   width: number; height: number; headerHeight: number; visible: boolean;
 }) {
@@ -26,12 +39,35 @@ export function ServiceStoryHero({ width, height, headerHeight, visible }: {
   // Stay still until the accessibility preference has loaded.
   const [reduceMotion, setReduceMotion] = useState(true);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
-  const [loaded, setLoaded] = useState<Record<number, boolean>>({});
+  const [loaded, setLoaded] = useState<Record<number, boolean>>({ 0: true, 1: true });
   const [focused, setFocused] = useState(false);
   useFocusEffect(useCallback(() => {
     setFocused(true);
     return () => setFocused(false);
   }, []));
+
+  // Eagerly pre-warm & prefetch all 10 story images into native device memory cache
+  useEffect(() => {
+    let mounted = true;
+    scenes.forEach((scene, i) => {
+      try {
+        const source = Image.resolveAssetSource(scene.image);
+        if (source?.uri) {
+          void Image.prefetch(source.uri).then(() => {
+            if (mounted) {
+              setLoaded((old) => (old[i] ? old : { ...old, [i]: true }));
+            }
+          });
+        }
+      } catch (e) {
+        // Fallback
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const opacity = useRef(scenes.map((_, i) => new Animated.Value(i === 0 ? 1 : 0))).current;
   const zoom = useRef(new Animated.Value(0)).current;
   const playing = !paused && !reduceMotion && foreground && focused && visible;
@@ -73,13 +109,15 @@ export function ServiceStoryHero({ width, height, headerHeight, visible }: {
       <View accessible accessibilityRole="image" accessibilityLabel={`Bulao story, scene ${index + 1} of ${scenes.length}. ${scenes[index]!.label}`} style={StyleSheet.absoluteFill}>
         {scenes.map((scene, i) => (
           <Animated.Image key={scene.label} source={scene.image} accessible={false}
+            fadeDuration={0}
             onLoad={() => setLoaded(old => old[i] ? old : { ...old, [i]: true })}
             resizeMode="contain"
             style={{ position: "absolute", width: artWidth, height: artHeight, left: (width - artWidth) / 2,
-              top: headerHeight - artHeight * 0.25, opacity: opacity[i],
+              top: headerHeight - artHeight * 0.18, opacity: opacity[i],
               transform: [{ scale: zoom.interpolate({ inputRange: [0, 1], outputRange: [1, 1.018] }) }] }} />
         ))}
       </View>
+      <LinearGradient pointerEvents="none" colors={[dash.bg, "transparent"]} locations={[0, 0.28]} style={StyleSheet.absoluteFill} />
       <LinearGradient pointerEvents="none" colors={["transparent", dash.bg]} locations={[0.73, 1]} style={StyleSheet.absoluteFill} />
       <View style={styles.controls}>
         <Pressable accessibilityRole="button" accessibilityLabel="Previous story scene" onPress={() => step(-1)} style={styles.control}>
@@ -97,7 +135,7 @@ export function ServiceStoryHero({ width, height, headerHeight, visible }: {
 }
 
 const styles = StyleSheet.create({
-  hero: { width: "100%", overflow: "hidden", backgroundColor: "#D0E7D1" },
-  controls: { position: "absolute", bottom: 70, alignSelf: "center", flexDirection: "row", alignItems: "center" },
+  hero: { width: "100%", overflow: "hidden", backgroundColor: "#FAF4EC" },
+  controls: { position: "absolute", bottom: 40, right: 16, flexDirection: "row", alignItems: "center" },
   control: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
 });

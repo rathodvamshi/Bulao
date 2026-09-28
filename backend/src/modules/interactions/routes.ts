@@ -55,16 +55,16 @@ interactions.get("/", async (c) => {
       i.cancelled_at AS cancelledAt,
       i.cancelled_by AS cancelledBy,
       i.cancellation_reason AS cancellationReason,
-      COALESCE(NULLIF(j.title, ''), r.name, c.name, 'Work Opportunity') AS title,
+      CASE WHEN i.kind='service' THEN s.title ELSE COALESCE(NULLIF(j.title, ''), r.name, 'Work Opportunity') END AS title,
       COALESCE(r.name, 'Worker') AS roleName,
       COALESCE(c.name, 'General') AS categoryName,
-      COALESCE(j.pay_paise, 0) AS payPaise,
-      COALESCE(j.pay_unit, 'day') AS payUnit,
-      COALESCE(j.area, '') AS area,
+      CASE WHEN i.kind='service' THEN s.base_price_paise ELSE j.pay_paise END AS payPaise,
+      CASE WHEN i.kind='service' THEN s.pricing_model ELSE j.pay_unit END AS payUnit,
+      COALESCE(i.area,j.area) AS area,
       j.starts_at AS startsAt,
       u.id AS otherId,
       u.name AS otherName,
-      CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') THEN u.phone ELSE NULL END AS otherPhone,
+      CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') AND u.suspended=0 AND (i.kind='job' OR s.archived_at IS NULL) AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=i.owner_id AND b.target_id=i.worker_id) OR (b.user_id=i.worker_id AND b.target_id=i.owner_id)) THEN u.phone ELSE NULL END AS otherPhone,
       u.photo_url AS otherPhotoUrl,
       EXISTS(SELECT 1 FROM reviews WHERE interaction_id=i.id AND author_id=?) AS reviewed
     FROM interactions i
@@ -96,35 +96,46 @@ interactions.get("/", async (c) => {
 
 interactions.get("/:id", interactionDetail);
 interactions.post("/:id/action", async (c) => {
-  const { action, reason } = z
-    .object({
-      action: z.enum([
-        "accept",
-        "reject",
-        "withdraw",
-        "start",
-        "confirm",
-        "cancel",
-      ]),
-      reason: z.string().trim().min(3).max(500).optional(),
-    })
-    .parse(await c.req.json());
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawAction = String(body.action || body.next || body.status || "").trim().toLowerCase();
+  const reason = typeof body.reason === "string" ? body.reason.trim() : undefined;
 
-  if (action === "cancel" && (!reason || reason.trim().length < 3)) {
-    throw new ApiError(
-      "REASON_REQUIRED",
-      400,
-      "Please provide a reason for cancellation.",
-    );
+  const actionMap: Record<string, "accept" | "reject" | "withdraw" | "start" | "confirm" | "cancel" | "delete"> = {
+    accept: "accept",
+    reject: "reject",
+    withdraw: "withdraw",
+    start: "start",
+    confirm: "confirm",
+    cancel: "cancel",
+    close: "cancel",
+    delete: "delete",
+    remove: "delete",
+  };
+
+  const action = actionMap[rawAction];
+  if (!action) {
+    throw new ApiError("INVALID_ACTION", 400, "Please check your request and try again.");
   }
 
   const row = await c.env.DB.prepare("SELECT * FROM interactions WHERE id=?")
     .bind(c.req.param("id"))
     .first<Interaction>();
-  if (!row) throw new ApiError("NOT_FOUND", 404);
+  if (!row) throw new ApiError("NOT_FOUND", 404, "This request is no longer available.");
   const uid = c.get("userId");
   if (uid !== row.owner_id && uid !== row.worker_id)
-    throw new ApiError("UNAUTHORIZED", 403);
+    throw new ApiError("UNAUTHORIZED", 403, "You do not have permission for this action.");
+
+  if (action === "delete" && row.kind === "service") throw new ApiError("HISTORY_RETAINED", 409, "Cancel an active request; service history is retained.");
+  if (row.kind === "service" && row.status === "REJECTED") throw new ApiError("INVALID_TRANSITION", 409, "This request was rejected. Create a new request.");
+  if (row.kind === "service" && ["accept", "start"].includes(action)) {
+    await assertUnblocked(c.env.DB, row.owner_id, row.worker_id);
+    const active = await c.env.DB.prepare("SELECT s.id FROM service_profiles s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.available=1 AND s.archived_at IS NULL AND u.suspended=0").bind(row.service_id).first();
+    if (!active) throw new ApiError("SERVICE_UNAVAILABLE", 409, "The service is unavailable.");
+  }
+  if (action === "delete") {
+    await c.env.DB.prepare("DELETE FROM interactions WHERE id = ?").bind(row.id).run();
+    return ok(c, { id: row.id, deleted: true, status: "DELETED" });
+  }
   const side = uid === row.owner_id ? "owner" : "worker";
   if (action === "accept")
     await assertUnblocked(c.env.DB, row.owner_id, row.worker_id);
@@ -190,6 +201,9 @@ interactions.post("/:id/action", async (c) => {
       409,
       "This action was already handled. Refresh to see the latest status.",
     );
+
+  // Service notifications are committed atomically by database triggers.
+  if (row.kind === "service") return ok(c, result);
 
   // Send event notifications
   if (next === "ACCEPTED") {

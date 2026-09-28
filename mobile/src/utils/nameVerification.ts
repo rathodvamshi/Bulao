@@ -58,11 +58,29 @@ const REGIONAL_INDIAN_PROFANITY: string[] = [
   "fuddi", "bund", "lora", "kanja", "chutiye", "bhenchod", "bsdk", "mcf", "bcf"
 ];
 
+const DRUGS_ILLEGAL_SUBSTANCES: string[] = [
+  // English
+  "drug", "drugs", "weed", "marijuana", "cannabis", "cocaine", "heroin", "meth", 
+  "methamphetamine", "ecstasy", "mdma", "opium", "hashish", "lsd", "acid", "shrooms", 
+  "magic mushrooms", "vape", "nicotine", "substance", "narcotic", "narcotics", 
+  "pills", "sedative", "morphine", "codeine", "fentanyl", "steroids",
+
+  // Hindi / Hinglish (Devanagari & Romanized)
+  "गांजा", "चरस", "अफ़ीम", "भांग", "अफीम", "ड्रग्स", "नशा", "स्मैक", "ब्राउन शुगर",
+  "ganja", "gaanja", "charas", "afim", "afeem", "bhang", "bhaang", "smack", "nasha", 
+  "nashili", "dawaai", "powdar", "powder",
+
+  // Telugu / Teluglish (Telugu script & Romanized)
+  "గంజాయి", "నల్లమందు", "మందు", "మత్తుమందు", "డ్రగ్స్", "సారా", "కల్తీమందు",
+  "ganjayi", "ganjaayi", "nallamandu", "malthu", "matthu", "mattumandu", "sara", 
+  "sarayi", "mandoo"
+];
+
 const SCAM_ABUSE_KEYWORDS: string[] = [
   "hack", "crypto", "bitcoin", "free money", "telegram", "whatsapp", "loan scam", 
   "mod apk", "cheat", "gambling", "casino", "betting", "bribe", "illegal", 
-  "escort", "call girl", "massage parlor", "drug", "weed", "cocaine", "heroin", 
-  "fake job", "earn online", "deposit first", "investment scam", "multi level"
+  "escort", "call girl", "massage parlor", "fake job", "earn online", 
+  "deposit first", "investment scam", "multi level"
 ];
 
 const REPETITIVE_GIBBERISH_PATTERNS: string[] = [
@@ -83,6 +101,7 @@ const ALL_PROFANITY_SEEDS: string[] = Array.from(
     ...REGIONAL_INDIAN_PROFANITY,
     ...SCAM_ABUSE_KEYWORDS,
     ...REPETITIVE_GIBBERISH_PATTERNS,
+    ...DRUGS_ILLEGAL_SUBSTANCES,
   ])
 );
 
@@ -1014,3 +1033,210 @@ export function getTitleSuggestionsForRole(
     },
   ];
 }
+
+// ----------------------------------------------------
+// SERVICE CATEGORY PRESETS & SERVICE TITLE MODERATION
+// ----------------------------------------------------
+
+export const SERVICE_CATEGORY_TITLE_PRESETS: Record<string, string[]> = {
+  electrician: [
+    "Emergency Electrical Repair & Wiring",
+    "Fan, Switchboard & MCB Fitting",
+    "Complete House Wiring & Fault Fix",
+    "Inverter & UPS Setup / Maintenance",
+    "Light Fitting & Chandelier Installation",
+  ],
+  ac_repair: [
+    "AC Deep Cleaning & Service",
+    "AC Gas Refill & Leak Repair",
+    "Split / Window AC Installation",
+    "AC Compressor & Cooling Repair",
+    "Annual AC Maintenance (AMC)",
+  ],
+  cleaning: [
+    "Full House Deep Cleaning & Sanitization",
+    "Bathroom & Kitchen Deep Scrub",
+    "Sofa, Carpet & Mattress Cleaning",
+    "Water Tank Cleaning & Disinfection",
+    "Balcony & Window Glass Cleaning",
+  ],
+  plumbing: [
+    "Tap & Pipe Leak Repair",
+    "Drain Unclogging & Blockage Clearing",
+    "Geyser & Water Heater Fitting",
+    "Sanitaryware & Toilet Installation",
+    "Water Tank & Pump Repair",
+  ],
+  grooming: [
+    "Gentlemen Haircut & Beard Styling",
+    "Bridal & Party Makeup Service",
+    "Home Salon & Facial Care",
+    "Mehendi & Nail Art Service",
+    "Relaxing Head & Body Massage",
+  ],
+  painting: [
+    "Full Interior Wall Painting",
+    "Exterior House Weatherproof Paint",
+    "Waterproofing & Wall Leakage Patch",
+    "Door, Window & Wood Polishing",
+    "Textured & Designer Accent Wall",
+  ],
+  tutor: [
+    "Maths & Science Home Tuition",
+    "All Subjects Primary School Tutor",
+    "English Speaking & Grammar Class",
+    "Computer Basics & Coding Tutor",
+    "Board Exam Special Coaching",
+  ],
+  carpenter: [
+    "Door Lock, Hinge & Latch Fitting",
+    "Furniture Assembly & Repair",
+    "Modular Kitchen & Cabinet Work",
+    "Bed, Sofa & Wardrobe Woodwork",
+    "Custom Wooden Shelf Installation",
+  ],
+  cook: [
+    "Daily Home Cooking (Veg & Non-Veg)",
+    "Party & Event Catering Service",
+    "Special Diet & Healthy Meal Prep",
+    "North & South Indian Cooking",
+    "Breakfast & Tiffin Box Service",
+  ],
+  driver: [
+    "Personal Outstation Car Driver",
+    "Daily City Commute Driver",
+    "Night & Hourly Event Driver",
+    "Luxury Vehicle Skilled Driver",
+  ],
+  pest_control: [
+    "Cockroach & Ant Control Service",
+    "Termite Anti-Borer Treatment",
+    "Bed Bug Elimination Spray",
+    "Mosquito & Rodent Shield",
+  ],
+};
+
+export function verifyServiceTitle(
+  input: string,
+  categoryName?: string
+): VerificationResult {
+  if (!input || input.trim().length === 0) {
+    return {
+      isValid: false,
+      sanitizedName: "",
+      errorReason: "Please choose or enter a service title.",
+    };
+  }
+
+  let clean = input
+    .replace(/<[^>]*>?/g, "")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (clean.length < 3) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Service title must be at least 3 characters.",
+    };
+  }
+
+  if (clean.length > 70) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Service title cannot exceed 70 characters.",
+    };
+  }
+
+  // Security Check: Contact Info / URLs
+  const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{10,12}\b/;
+  const urlRegex = /(https?:\/\/|www\.|[a-zA-Z0-9-]+\.(com|in|org|net|co|io|app|dev))/i;
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+
+  if (phoneRegex.test(clean)) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Phone numbers are not allowed in service titles.",
+    };
+  }
+
+  if (urlRegex.test(clean) || emailRegex.test(clean)) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Links or email addresses are not allowed.",
+    };
+  }
+
+  // Check character repetition (e.g. "ddd", "eee")
+  if (/(.)\1{2,}/i.test(clean)) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Random letter repetition detected (e.g. 'ddd'). Please enter a real service name.",
+    };
+  }
+
+  const lower = clean.toLowerCase();
+  const normalized = normalizeLeetSpeak(clean);
+  const lowerWords = lower.split(/[\s\-_/.]+/);
+
+  // Check against Drugs & Illegal Substances
+  const isDrugRelated = DRUGS_ILLEGAL_SUBSTANCES.some((drugWord) => {
+    const dLower = drugWord.toLowerCase();
+    if (dLower.length <= 3) {
+      return (
+        lower === dLower ||
+        lowerWords.includes(dLower) ||
+        normalized === dLower
+      );
+    }
+    return (
+      lower.includes(dLower) ||
+      lowerWords.some((w) => w.includes(dLower)) ||
+      normalized.includes(dLower)
+    );
+  });
+
+  if (isDrugRelated) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Prohibited, illegal, or drug-related terms detected. Please provide a valid service name.",
+    };
+  }
+
+  // Multi-Language Profanity & Abuse check (English, Hindi, Telugu)
+  const isProfane = ALL_PROFANITY_SEEDS.some((seedWord) => {
+    const seedLower = seedWord.toLowerCase();
+    if (seedLower.length <= 3) {
+      return (
+        lower === seedLower ||
+        lowerWords.includes(seedLower) ||
+        normalized === seedLower
+      );
+    }
+    return (
+      lower.includes(seedLower) ||
+      lowerWords.some((w) => w.includes(seedLower)) ||
+      normalized.includes(seedLower)
+    );
+  });
+
+  if (isProfane) {
+    return {
+      isValid: false,
+      sanitizedName: clean,
+      errorReason: "Inappropriate or abusive language detected (evaluated across English, Hindi & Telugu). Please enter a clean service name.",
+    };
+  }
+
+  return {
+    isValid: true,
+    sanitizedName: clean,
+  };
+}
+

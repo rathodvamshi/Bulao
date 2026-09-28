@@ -618,7 +618,7 @@ function RecentJobs({
     <View>
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>Recent Jobs</Text>
-        <Pressable onPress={() => router.push("/activity")} style={styles.seeAll} accessibilityRole="button">
+        <Pressable onPress={() => router.push({ pathname: "/activity", params: { type: "job" } })} style={styles.seeAll} accessibilityRole="button">
           <Text style={styles.seeAllText}>See all</Text>
           <Ionicons name="arrow-forward" size={14} color={dash.primary} />
         </Pressable>

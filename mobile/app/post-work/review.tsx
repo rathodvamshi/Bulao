@@ -110,7 +110,9 @@ export default function PostWorkReviewScreen() {
         }
       }
 
-      // Valid database role to category catalog mapping
+      let roleId = (store.role || "").trim();
+      let categoryId = (store.category || "").trim();
+
       const roleToCategoryMap: Record<string, string> = {
         "construction-helper": "construction",
         mason: "construction",
@@ -150,32 +152,42 @@ export default function PostWorkReviewScreen() {
         "security-guard": "security",
         watchman: "security",
         bouncer: "security",
+        "tutor-maths": "education",
+        "tutor-science": "education",
+        "tutor-english": "education",
+        "tutor-all-subjects": "education",
+        "music-teacher": "education",
+        "dance-teacher": "education",
+        "yoga-instructor": "education",
+        "computer-teacher": "education",
+        "language-tutor": "education",
+        "sports-coach": "education",
+        "elderly-caretaker": "healthcare",
+        "home-nurse": "healthcare",
+        "patient-attendant": "healthcare",
+        physiotherapist: "healthcare",
+        "baby-care-nurse": "healthcare",
+        beautician: "beauty",
+        "mehendi-artist": "beauty",
+        "makeup-artist": "beauty",
+        "hair-stylist": "beauty",
+        "massage-therapist": "beauty",
+        promoter: "promotion",
+        "brand-ambassador": "promotion",
+        "leaflet-distributor": "promotion",
+        "survey-collector": "promotion",
+        "office-boy": "office",
+        receptionist: "office",
+        "data-entry": "office",
+        telecaller: "office",
       };
 
-      let roleId = store.role?.trim() || "plumber";
-      let categoryId = store.category?.trim() || "construction";
-
-      const mappedCat = roleToCategoryMap[roleId];
-      if (mappedCat) {
-        categoryId = mappedCat;
-      } else {
-        const defaultRolePerCat: Record<string, string> = {
-          construction: "plumber",
-          household: "housekeeper",
-          food: "chef",
-          transport: "driver",
-          shops: "sales-assistant",
-          events: "event-helper",
-          security: "security-guard",
-        };
-        const mappedRole = defaultRolePerCat[categoryId];
-        if (mappedRole) {
-          roleId = mappedRole;
-        } else {
-          categoryId = "construction";
-          roleId = "plumber";
-        }
+      if (!categoryId && roleId && roleToCategoryMap[roleId as keyof typeof roleToCategoryMap]) {
+        categoryId = roleToCategoryMap[roleId as keyof typeof roleToCategoryMap] || "construction";
       }
+
+      if (!categoryId) categoryId = "construction";
+      if (!roleId) roleId = "construction-helper";
 
       const title = (store.title || store.roleName || "Work Needed").trim().slice(0, 100);
       const workers = Math.max(1, Math.min(100, store.workers || 1));

@@ -49,8 +49,10 @@ function formatMemberSince(createdAt?: number) {
 
 export function CommonIdentityCard({
   profile,
+  compact = false,
 }: {
   profile: CommonProfileData;
+  compact?: boolean;
 }) {
   const client = useQueryClient();
   const location = useLocation((x) => x.location);
@@ -225,7 +227,7 @@ export function CommonIdentityCard({
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, compact && { borderWidth: 0, elevation: 0, shadowOpacity: 0, borderRadius: 16, padding: 14 }]}>
       {/* ── Top Row: Avatar + Info + Top-Right Edit Button ── */}
       <View style={styles.topRow}>
         {/* Avatar with Camera Button */}
@@ -233,12 +235,12 @@ export function CommonIdentityCard({
           {profile.photoUrl ? (
             <Image
               source={{ uri: profile.photoUrl }}
-              style={styles.avatar}
+              style={[styles.avatar, compact && { width: 52, height: 52, borderRadius: 26, backgroundColor: "#034E3B" }]}
               accessibilityLabel={profile.name}
             />
           ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.initialsText}>{initials}</Text>
+            <View style={[styles.avatarFallback, compact && { width: 52, height: 52, borderRadius: 26, backgroundColor: "#034E3B" }]}>
+              <Text style={[styles.initialsText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 20, color: "white" }]}>{initials}</Text>
             </View>
           )}
 
@@ -260,24 +262,24 @@ export function CommonIdentityCard({
         {/* User Details Column */}
         <View style={styles.detailsCol}>
           <View style={styles.nameRow}>
-            <Text style={styles.nameText} numberOfLines={1}>
+            <Text style={[styles.nameText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 16, flexShrink: 1 }]} numberOfLines={1}>
               {profile.name || "Add Your Name"}
             </Text>
-            <View style={styles.verifiedShield}>
-              <Ionicons name="shield-checkmark" size={12} color="#075B43" />
-            </View>
+            {(!compact || Boolean(profile.phoneVerified)) && <View style={[styles.verifiedShield, compact && { backgroundColor: "#034E3B" }]}>
+              <Ionicons name="shield-checkmark" size={12} color={compact ? "white" : "#034E3B"} />
+            </View>}
           </View>
 
           {/* Phone Row */}
-          <View style={styles.phoneRow}>
-            <Ionicons name="call" size={13} color="#075B43" />
-            <Text style={styles.phoneText}>
+          <View style={[styles.phoneRow, compact && { flexWrap: "wrap" }]}>
+            <Ionicons name="call" size={13} color="#034E3B" />
+            <Text style={[styles.phoneText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 11 }]}>
               {formatPhoneNumber(activePhone || currentPhone || profile.phone)}
             </Text>
-            {Boolean(profile.phoneVerified ?? true) && (
-              <View style={styles.verifiedChip}>
-                <Ionicons name="checkmark-circle" size={11} color="#075B43" />
-                <Text style={styles.verifiedChipText}>Verified</Text>
+            {Boolean(profile.phoneVerified ?? !compact) && (
+              <View style={[styles.verifiedChip, compact && { backgroundColor: "#034E3B" }]}>
+                <Ionicons name="checkmark-circle" size={11} color={compact ? "white" : "#034E3B"} />
+                <Text style={[styles.verifiedChipText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", color: "white" }]}>Verified</Text>
               </View>
             )}
           </View>
@@ -287,13 +289,13 @@ export function CommonIdentityCard({
             accessibilityRole="button"
             accessibilityLabel="Change location"
             onPress={() => useLocation.getState().setLocationSheetVisible(true)}
-            style={styles.locationPill}
+            style={[styles.locationPill, compact && { backgroundColor: "#034E3B" }]}
           >
-            <Ionicons name="location" size={12} color="#075B43" />
-            <Text style={styles.locationText} numberOfLines={1}>
+            <Ionicons name="location" size={12} color={compact ? "white" : "#034E3B"} />
+            <Text style={[styles.locationText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", color: "white" }]} numberOfLines={1}>
               {displayArea}
             </Text>
-            <Ionicons name="chevron-down" size={11} color="#075B43" />
+            <Ionicons name="chevron-down" size={11} color={compact ? "white" : "#034E3B"} />
           </Pressable>
         </View>
 
@@ -313,30 +315,39 @@ export function CommonIdentityCard({
             setDevOtp(undefined);
             setIsEditModalVisible(true);
           }}
-          style={styles.editCornerBtn}
+          style={[styles.editCornerBtn, compact && { backgroundColor: "#034E3B" }]}
         >
-          <Ionicons name="pencil" size={13} color="#075B43" />
-          <Text style={styles.editCornerBtnText}>Edit</Text>
+          <Ionicons name="pencil" size={13} color={compact ? "white" : "#034E3B"} />
+          <Text style={[styles.editCornerBtnText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", color: "white" }]}>Edit</Text>
         </Pressable>
       </View>
 
       {/* ── Clean Essential Trust Baseline (5.0 ★) ── */}
-      <View style={styles.cleanTrustRow}>
+      {!compact && <View style={styles.cleanTrustRow}>
         <View style={styles.trustPill}>
-          <Ionicons name="star" size={13} color="#F5B928" />
-          <Text style={styles.trustPillScore}>
-            {(profile.rating ?? 5.0).toFixed(1)}
-          </Text>
-          <Text style={styles.trustPillDivider}>·</Text>
+          {profile.rating !== null && profile.rating !== undefined && profile.rating > 0 ? (
+            <>
+              <Ionicons name="star" size={13} color="#F5B928" />
+              <Text style={styles.trustPillScore}>
+                {profile.rating.toFixed(1)}
+              </Text>
+              <Text style={styles.trustPillDivider}>·</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="sparkles" size={12} color="#034E3B" />
+              <Text style={styles.trustPillScore}>New</Text>
+              <Text style={styles.trustPillDivider}>·</Text>
+            </>
+          )}
           <Text style={styles.trustPillText}>
-            {profile.phoneVerified ? "KYC Confirmed" : "Verified Account"}
+            {profile.phoneVerified ? "KYC Verified" : "Verified Account"}
           </Text>
         </View>
         <Text style={styles.memberSinceText}>
           {formatMemberSince(profile.createdAt)}
         </Text>
-      </View>
-
+      </View>}
       {/* ── Edit Profile & Mobile Number Modal ── */}
       <Modal
         visible={isEditModalVisible}
@@ -383,7 +394,7 @@ export function CommonIdentityCard({
                 <View style={styles.phoneDisplayCard}>
                   <View style={styles.phoneDisplayLeft}>
                     <View style={styles.phoneIconCircle}>
-                      <Ionicons name="call" size={15} color="#075B43" />
+                      <Ionicons name="call" size={15} color="#034E3B" />
                     </View>
                     <View>
                       <Text style={styles.currentPhoneValue}>
@@ -416,7 +427,7 @@ export function CommonIdentityCard({
                     <Ionicons
                       name={isChangingPhone ? "close" : "swap-horizontal"}
                       size={13}
-                      color={isChangingPhone ? "#DC2626" : "#075B43"}
+                      color={isChangingPhone ? "#DC2626" : "#034E3B"}
                     />
                     <Text
                       style={[
@@ -433,7 +444,7 @@ export function CommonIdentityCard({
                 {isChangingPhone && (
                   <View style={styles.changePhoneBox}>
                     <View style={styles.changePhoneHeader}>
-                      <Ionicons name="shield-checkmark" size={15} color="#075B43" />
+                      <Ionicons name="shield-checkmark" size={15} color="#034E3B" />
                       <Text style={styles.changePhoneTitle}>New Mobile Verification</Text>
                     </View>
                     <Text style={styles.changePhoneSubtitle}>
@@ -498,7 +509,7 @@ export function CommonIdentityCard({
                         </Text>
                         {devOtp && (
                           <View style={styles.devOtpBadge}>
-                            <Ionicons name="key" size={13} color="#075B43" />
+                            <Ionicons name="key" size={13} color="#034E3B" />
                             <Text style={styles.devOtpHint}>
                               Test OTP: <Text style={{ fontWeight: "900" }}>{devOtp}</Text>
                             </Text>
@@ -633,13 +644,13 @@ const styles = StyleSheet.create({
   initialsText: {
     fontSize: 26,
     fontWeight: "900",
-    color: "#075B43",
+    color: "#034E3B",
   },
   cameraBtn: {
     position: "absolute",
     right: -2,
     bottom: -2,
-    backgroundColor: "#075B43",
+    backgroundColor: "#034E3B",
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -693,7 +704,7 @@ const styles = StyleSheet.create({
   verifiedChipText: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#075B43",
+    color: "#034E3B",
   },
   locationPill: {
     flexDirection: "row",
@@ -726,7 +737,7 @@ const styles = StyleSheet.create({
   editCornerBtnText: {
     fontSize: 12,
     fontWeight: "800",
-    color: "#075B43",
+    color: "#034E3B",
   },
   cleanTrustRow: {
     flexDirection: "row",
@@ -759,7 +770,7 @@ const styles = StyleSheet.create({
   trustPillText: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#075B43",
+    color: "#034E3B",
   },
   memberSinceText: {
     fontSize: 11,
@@ -838,7 +849,7 @@ const styles = StyleSheet.create({
   verifiedMiniText: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#075B43",
+    color: "#034E3B",
   },
   textInput: {
     height: 48,
@@ -883,7 +894,7 @@ const styles = StyleSheet.create({
   phoneStatusSub: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#075B43",
+    color: "#034E3B",
     marginTop: 1,
   },
   changePhoneCornerBtn: {
@@ -904,7 +915,7 @@ const styles = StyleSheet.create({
   changePhoneCornerBtnText: {
     fontSize: 12,
     fontWeight: "800",
-    color: "#075B43",
+    color: "#034E3B",
   },
   changePhoneBox: {
     backgroundColor: "#F0F7F3",
@@ -923,7 +934,7 @@ const styles = StyleSheet.create({
   changePhoneTitle: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#075B43",
+    color: "#034E3B",
   },
   changePhoneSubtitle: {
     fontSize: 11,
@@ -936,7 +947,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: "#075B43",
+    borderColor: "#034E3B",
     overflow: "hidden",
     marginTop: 4,
   },
@@ -950,7 +961,7 @@ const styles = StyleSheet.create({
   countryCodeText: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#075B43",
+    color: "#034E3B",
   },
   newPhoneField: {
     flex: 1,
@@ -984,7 +995,7 @@ const styles = StyleSheet.create({
   },
   otpNoticeText: {
     fontSize: 11,
-    color: "#075B43",
+    color: "#034E3B",
     fontWeight: "600",
     flex: 1,
   },
@@ -993,7 +1004,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: "#075B43",
+    backgroundColor: "#034E3B",
     paddingVertical: 12,
     borderRadius: 12,
     marginTop: 6,
@@ -1022,7 +1033,7 @@ const styles = StyleSheet.create({
   },
   devOtpHint: {
     fontSize: 11,
-    color: "#075B43",
+    color: "#034E3B",
     backgroundColor: "#E9F8EF",
     padding: 6,
     borderRadius: 6,
@@ -1031,7 +1042,7 @@ const styles = StyleSheet.create({
     height: 48,
     backgroundColor: "#FFFFFF",
     borderWidth: 1.5,
-    borderColor: "#075B43",
+    borderColor: "#034E3B",
     borderRadius: 12,
     fontSize: 22,
     fontWeight: "900",
@@ -1040,7 +1051,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   verifyOtpBtn: {
-    backgroundColor: "#075B43",
+    backgroundColor: "#034E3B",
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
@@ -1107,7 +1118,7 @@ const styles = StyleSheet.create({
     flex: 2,
     paddingVertical: 14,
     borderRadius: 14,
-    backgroundColor: "#075B43",
+    backgroundColor: "#034E3B",
     alignItems: "center",
     justifyContent: "center",
   },

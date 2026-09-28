@@ -20,6 +20,7 @@ import type {
   ProviderRoleData,
   SeekerRoleData,
   ServiceRoleData,
+  ServiceItem,
   ReviewItem,
 } from "../../src/features/profile/types";
 
@@ -50,12 +51,6 @@ export default function Profile() {
   // Default to provider role if opened from provider home or unspecified
   const [role, setRole] = useState<ProfileRole>(params.role || "provider");
 
-  useEffect(() => {
-    if (params.role) {
-      setRole(params.role);
-    }
-  }, [params.role]);
-
   // 1. Common Identity Query
   const meQuery = useQuery<CommonProfileData>({
     queryKey: ["me", token],
@@ -77,11 +72,30 @@ export default function Profile() {
     queryFn: () => api<ProfileDetailResponse>(`/profiles/${meQuery.data!.id}`),
   });
 
-  const isRefreshing = meQuery.isRefetching || statsQuery.isRefetching;
+  // 4. My Published Services Query
+  const myServicesQuery = useQuery<ServiceItem[]>({
+    queryKey: ["my-services", token],
+    enabled: !!token,
+    queryFn: () => api<ServiceItem[]>("/services/mine"),
+  });
+
+  useEffect(() => {
+    if (params.role) {
+      setRole(params.role);
+    } else if (myServicesQuery.data && myServicesQuery.data.length > 0) {
+      setRole("service");
+    }
+  }, [params.role, myServicesQuery.data]);
+
+  const isRefreshing =
+    meQuery.isRefetching ||
+    statsQuery.isRefetching ||
+    myServicesQuery.isRefetching;
   const onRefresh = () => {
     void client.invalidateQueries({ queryKey: ["me"] });
     void client.invalidateQueries({ queryKey: ["provider-stats"] });
     void client.invalidateQueries({ queryKey: ["profiles"] });
+    void client.invalidateQueries({ queryKey: ["my-services"] });
   };
 
   // ── Provider Role Data Assembly ─────────────────────────────────────────────
@@ -186,35 +200,43 @@ export default function Profile() {
   // ── Service Role Data Assembly ──────────────────────────────────────────────
   const serviceData: ServiceRoleData = useMemo(() => {
     const detail = profileDetailQuery.data;
+    const servicesList = myServicesQuery.data || [];
+
+    // Calculate aggregate metrics across all published services
+    const totalCompleted =
+      servicesList.reduce((acc, s) => acc + (s.completedBookings || 0), 0) ||
+      (detail?.completed ?? 0);
+    const maxRadius =
+      servicesList.reduce((max, s) => Math.max(max, s.radiusKm || 0), 0) || 15;
+    const hasAnyAvailable =
+      servicesList.length > 0 ? servicesList.some((s) => s.available) : true;
+
+    // Aggregate rating across services
+    const ratedServices = servicesList.filter((s) => (s.totalReviews || 0) > 0 && s.rating !== null);
+    const avgServiceRating =
+      ratedServices.length > 0
+        ? Number(
+            (
+              ratedServices.reduce((acc, s) => acc + (s.rating || 0), 0) /
+              ratedServices.length
+            ).toFixed(1)
+          )
+        : null;
+    const totalServiceReviews = servicesList.reduce(
+      (acc, s) => acc + (s.totalReviews || 0),
+      0
+    );
+
     return {
-      rating: detail?.rating ?? 4.9,
-      totalReviews: detail?.reviews?.length ? detail.reviews.length : 16,
-      completed: detail?.completed ?? 22,
-      radiusKm: 15,
-      available: true,
-      services: [
-        {
-          id: "srv-1",
-          category: "Tap & Pipe Leak Repair",
-          experienceYears: 4,
-          available: true,
-          radiusKm: 15,
-        },
-        {
-          id: "srv-2",
-          category: "AC Servicing & Filter Cleaning",
-          experienceYears: 3,
-          available: true,
-          radiusKm: 10,
-        },
-        {
-          id: "srv-3",
-          category: "Electrical Switch & Wiring Fix",
-          experienceYears: 5,
-          available: true,
-          radiusKm: 12,
-        },
-      ],
+      rating: avgServiceRating,
+      totalReviews:
+        totalServiceReviews > 0
+          ? totalServiceReviews
+          : (detail?.reviews?.length ?? 0),
+      completed: totalCompleted,
+      radiusKm: maxRadius,
+      available: hasAnyAvailable,
+      services: servicesList,
       reviews: (detail?.reviews || []).map((r, i) => ({
         id: `svr-${i}`,
         stars: r.stars,
@@ -222,7 +244,7 @@ export default function Profile() {
         author: r.author || "Customer",
       })),
     };
-  }, [profileDetailQuery.data]);
+  }, [profileDetailQuery.data, myServicesQuery.data]);
 
   // ── Not signed in ───────────────────────────────────────────────────────────
   if (!token) {
@@ -302,7 +324,37 @@ export default function Profile() {
         <CommonIdentityCard profile={profileData} />
 
         {/* ── 2. Role Perspective Switcher ── */}
-        <RoleSwitcher activeRole={role} onSelectRole={setRole} />
+        <RoleSwitcher
+          activeRole={role}
+          onSelectRole={setRole}
+          serviceCount={myServicesQuery.data?.length || 0}
+        />
+
+        {/* ── Quick Switch Notice if Services Exist but not in Service View ── */}
+        {myServicesQuery.data &&
+          myServicesQuery.data.length > 0 &&
+          role !== "service" && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setRole("service")}
+              style={styles.serviceSwitchNotice}
+            >
+              <View style={styles.serviceNoticeIconCircle}>
+                <Ionicons name="flash" size={16} color="#D97706" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.serviceNoticeTitle}>
+                  {myServicesQuery.data.length} Published{" "}
+                  {myServicesQuery.data.length === 1 ? "Service" : "Services"}{" "}
+                  Live
+                </Text>
+                <Text style={styles.serviceNoticeSub}>
+                  Tap to view ratings, pricing &amp; manage your service profile
+                </Text>
+              </View>
+              <Ionicons name="arrow-forward" size={16} color="#D97706" />
+            </Pressable>
+          )}
 
         {/* ── 3. Role-Specific Profile View ── */}
         {role === "provider" && (
@@ -422,5 +474,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.muted,
     marginTop: 2,
+  },
+  serviceSwitchNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#FFFBEB",
+    padding: 13,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "#FDE68A",
+    marginVertical: 2,
+  },
+  serviceNoticeIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  serviceNoticeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  serviceNoticeSub: {
+    fontSize: 11,
+    color: "#92400E",
+    marginTop: 1,
   },
 });
