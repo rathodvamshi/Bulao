@@ -25,6 +25,48 @@ function trendPct(current: number, previous: number): number | null {
   return Math.round(((current - previous) / previous) * 100);
 }
 
+async function resolveJobCategoryAndRole(
+  db: ReturnType<typeof drizzle>,
+  categoryId: string,
+  roleId: string,
+): Promise<{ categoryId: string; roleId: string }> {
+  // 1. Direct role match (excluding known client placeholder 'other-role')
+  if (roleId && roleId !== "other-role" && roleId !== "other-work-role") {
+    const role = await db.select().from(roles).where(eq(roles.id, roleId)).get();
+    if (role) {
+      return { categoryId: role.categoryId, roleId: role.id };
+    }
+  }
+
+  // 2. Fallback to valid role in requested category
+  if (categoryId) {
+    const category = await db.select().from(categories).where(eq(categories.id, categoryId)).get();
+    if (category) {
+      const fallbackRole = await db
+        .select()
+        .from(roles)
+        .where(eq(roles.categoryId, category.id))
+        .get();
+      if (fallbackRole) {
+        return { categoryId: category.id, roleId: fallbackRole.id };
+      }
+    }
+  }
+
+  // 3. Fallback to 'other-work-role' or first available role in DB
+  const otherRole = await db.select().from(roles).where(eq(roles.id, "other-work-role")).get();
+  if (otherRole) {
+    return { categoryId: otherRole.categoryId, roleId: otherRole.id };
+  }
+
+  const anyRole = await db.select().from(roles).limit(1).get();
+  if (anyRole) {
+    return { categoryId: anyRole.categoryId, roleId: anyRole.id };
+  }
+
+  return { categoryId: categoryId || "other-work", roleId: roleId || "other-work-role" };
+}
+
 // ── GET /jobs (Discovery) ──
 jobRoutes.get("/", async (c) => ok(c, await nearby(c, "job")));
 
@@ -84,33 +126,11 @@ jobRoutes.post("/", requireAuth, async (c) => {
     (input.hours === "custom" && input.endTime <= input.startTime)
   )
     throw new ApiError("INVALID_SCHEDULE", 400, "Please check the end date and working hours.");
-  let role = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, input.roleId))
-    .get();
 
-  if (role) {
-    input.categoryId = role.categoryId;
-  } else {
-    const category = await db
-      .select()
-      .from(categories)
-      .where(eq(categories.id, input.categoryId))
-      .get();
+  const resolved = await resolveJobCategoryAndRole(db, input.categoryId, input.roleId);
+  input.categoryId = resolved.categoryId;
+  input.roleId = resolved.roleId;
 
-    if (!category) {
-      const catRole = await db
-        .select()
-        .from(roles)
-        .where(eq(roles.categoryId, input.categoryId))
-        .get();
-      if (catRole) {
-        input.roleId = catRole.id;
-        input.categoryId = catRole.categoryId;
-      }
-    }
-  }
   await rateLimit(c.env.DB, `publish:${c.get("userId")}`, 30, 86400);
   const id = crypto.randomUUID();
   await db
@@ -127,7 +147,7 @@ jobRoutes.post("/", requireAuth, async (c) => {
       ),
     )
     .get();
-  return ok(c, saved);
+  return ok(c, { id: saved?.id || id });
 });
 
 // ── GET /jobs/provider/stats ──
@@ -458,33 +478,9 @@ jobRoutes.put("/:id", requireAuth, async (c) => {
     throw new ApiError("INVALID_TRANSITION", 400, "Cancelled jobs cannot be edited.");
   }
 
-  let role = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, input.roleId))
-    .get();
-
-  if (role) {
-    input.categoryId = role.categoryId;
-  } else {
-    const category = await db
-      .select()
-      .from(categories)
-      .where(eq(categories.id, input.categoryId))
-      .get();
-
-    if (!category) {
-      const catRole = await db
-        .select()
-        .from(roles)
-        .where(eq(roles.categoryId, input.categoryId))
-        .get();
-      if (catRole) {
-        input.roleId = catRole.id;
-        input.categoryId = catRole.categoryId;
-      }
-    }
-  }
+  const resolved = await resolveJobCategoryAndRole(db, input.categoryId, input.roleId);
+  input.categoryId = resolved.categoryId;
+  input.roleId = resolved.roleId;
 
   await db
     .update(jobs)

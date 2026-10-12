@@ -5,6 +5,7 @@ import { Screen, Copy, colors, Card, s } from "../../src/components/ui";
 import { t } from "../../src/i18n/en";
 import { useLocation } from "../../src/store/location";
 import { useAuth } from "../../src/auth";
+import { BulaoWordmark } from "../../src/components/BulaoWordmark";
 
 const choices = [
   {
@@ -42,17 +43,11 @@ export default function Home() {
           justifyContent: "space-between",
         }}
       >
-        <Text
-          style={{
-            fontSize: 34,
-            fontWeight: "900",
-            letterSpacing: -2,
-            color: colors.green,
-          }}
-        >
-          {t("brand")}
-          <Text style={{ color: "#B3CF5C" }}> ●</Text>
-        </Text>
+        <BulaoWordmark
+          size={32}
+          color="#174C35"
+          align="flex-start"
+        />
         <Pressable
           accessibilityRole="button"
           onPress={() => useLocation.getState().setLocationSheetVisible(true)}

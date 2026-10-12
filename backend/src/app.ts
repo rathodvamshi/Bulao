@@ -107,6 +107,25 @@ app.onError((error, c) => {
       },
       409,
     );
+  const errorMsg = String((error as any)?.message || "");
+  if (
+    errorMsg.includes("FOREIGN KEY constraint failed") ||
+    errorMsg.includes("NOT NULL constraint failed")
+  ) {
+    console.warn(`[Database Constraint Error] ${c.req.method} ${c.req.path} [${c.get("requestId")}]:`, errorMsg);
+    return c.json(
+      {
+        success: false,
+        data: null,
+        requestId: c.get("requestId"),
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Please verify your selected category, role, and details.",
+        },
+      },
+      400,
+    );
+  }
   console.error(
     `[Unhandled Internal Error] ${c.req.method} ${c.req.path} [${c.get("requestId")}]:`,
     error

@@ -1,9 +1,10 @@
 import "../global.css";
-import { Stack } from "expo-router";
+import { Stack, useSegments } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { View, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { LoginFontContext } from "../src/features/auth/LoginText";
+
 import { AuthProvider } from "../src/auth";
 import { set401Handler } from "../src/api/apiClient";
 import { setAuthExpiredHandler } from "../src/api/client";
@@ -21,6 +22,8 @@ const client = new QueryClient({
 
 function AppContent() {
   const auth = useAuth();
+  const segments = useSegments();
+  const isAuthRoute = segments[0] === "auth";
   const authRef = useRef(auth);
   
   // Keep ref up to date
@@ -59,7 +62,7 @@ function AppContent() {
 
   return (
     <View style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
+      <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
             headerShown: false,
@@ -173,8 +176,8 @@ function AppContent() {
             }}
           />
         </Stack>
-      </SafeAreaView>
-      <LocationSheet />
+      </View>
+      {!isAuthRoute && <LocationSheet />}
     </View>
   );
 }
@@ -182,11 +185,15 @@ function AppContent() {
 export default function Layout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <QueryClientProvider client={client}>
-          <AppContent />
-        </QueryClientProvider>
-      </AuthProvider>
+      <LoginFontContext.Provider value={true}>
+        <AuthProvider>
+          <QueryClientProvider client={client}>
+            <AppContent />
+          </QueryClientProvider>
+        </AuthProvider>
+      </LoginFontContext.Provider>
     </GestureHandlerRootView>
   );
 }
+
+

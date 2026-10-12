@@ -94,19 +94,23 @@ export default function PostWorkReviewScreen() {
       }
 
       let endsAt: number | null = null;
-      if (store.duration === "few" && store.endDate) {
-        const eDate = new Date(store.endDate);
-        if (store.hours === "custom" && store.endTime) {
-          const [eh, em] = store.endTime.split(":");
-          if (eh && em) {
-            eDate.setHours(parseInt(eh, 10), parseInt(em, 10), 0, 0);
+      if (store.duration === "few") {
+        if (store.endDate) {
+          const eDate = new Date(store.endDate);
+          if (store.hours === "custom" && store.endTime) {
+            const [eh, em] = store.endTime.split(":");
+            if (eh && em) {
+              eDate.setHours(parseInt(eh, 10), parseInt(em, 10), 0, 0);
+            }
+          } else {
+            eDate.setHours(23, 59, 59, 0);
+          }
+          endsAt = Math.floor(eDate.getTime() / 1000);
+          if (endsAt <= startsAt) {
+            endsAt = startsAt + 86400;
           }
         } else {
-          eDate.setHours(23, 59, 59, 0);
-        }
-        endsAt = Math.floor(eDate.getTime() / 1000);
-        if (endsAt <= startsAt) {
-          endsAt = startsAt + 86400;
+          endsAt = startsAt + 86400 * 3;
         }
       }
 
@@ -180,6 +184,24 @@ export default function PostWorkReviewScreen() {
         receptionist: "office",
         "data-entry": "office",
         telecaller: "office",
+        "other-work-role": "other-work",
+      };
+
+      const categoryDefaultRoles: Record<string, string> = {
+        construction: "construction-helper",
+        household: "cook-home",
+        food: "kitchen-helper",
+        transport: "delivery-person",
+        shops: "cashier",
+        events: "event-helper",
+        security: "security-guard",
+        education: "tutor-all-subjects",
+        healthcare: "patient-attendant",
+        beauty: "beautician",
+        promotion: "brand-ambassador",
+        office: "office-boy",
+        "other-work": "other-work-role",
+        other: "other-work-role",
       };
 
       if (!categoryId && roleId && roleToCategoryMap[roleId as keyof typeof roleToCategoryMap]) {
@@ -187,7 +209,10 @@ export default function PostWorkReviewScreen() {
       }
 
       if (!categoryId) categoryId = "construction";
-      if (!roleId) roleId = "construction-helper";
+
+      if (!roleId || roleId === "other-role" || !roleToCategoryMap[roleId]) {
+        roleId = categoryDefaultRoles[categoryId] || "other-work-role";
+      }
 
       const title = (store.title || store.roleName || "Work Needed").trim().slice(0, 100);
       const workers = Math.max(1, Math.min(100, store.workers || 1));
@@ -241,8 +266,13 @@ export default function PostWorkReviewScreen() {
         return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
       };
 
-      const startTime = formatHHMM(store.startTime, "09:00");
-      const endTime = formatHHMM(store.endTime, "17:00");
+      let startTime = formatHHMM(store.startTime, "09:00");
+      let endTime = formatHHMM(store.endTime, "17:00");
+      if (hours === "custom" && endTime <= startTime) {
+        const [sh] = startTime.split(":").map(Number);
+        const nextH = Math.min(23, (sh || 9) + 4);
+        endTime = `${String(nextH).padStart(2, "0")}:00`;
+      }
 
       const submissionKey = `${categoryId}-${roleId}-${Date.now()}`;
 

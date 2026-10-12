@@ -44,6 +44,16 @@ describe("MSG91 boundary (no paid calls)", () => {
       Response.json({ type: "success", message: "OTP verified success" }),
     );
     expect(await provider.verify("+919999999991", "1234")).toBe(true);
+
+    const provider2 = new Msg91OtpProvider("test", "template", async () =>
+      Response.json({ type: "success", message: "number_verified_successfully" }),
+    );
+    expect(await provider2.verify("+919999999991", "1234")).toBe(true);
+
+    const provider3 = new Msg91OtpProvider("test", "template", async () =>
+      Response.json({ type: "success", message: "OTP verified successfully" }),
+    );
+    expect(await provider3.verify("+919999999991", "1234")).toBe(true);
     const failed = new Msg91OtpProvider(
       "test",
       "template",

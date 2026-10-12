@@ -3,6 +3,46 @@ import { View, Text, StyleSheet, Dimensions, Animated, Image } from 'react-nativ
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+const splashFontSize = Math.min(Math.max(50, SCREEN_WIDTH * 0.13), 76);
+const splashPinSize = Math.round(splashFontSize * 0.58);
+const splashHoleSize = Math.max(6, Math.round(splashPinSize * 0.36));
+const splashTipHalfWidth = Math.max(4, Math.round(splashPinSize * 0.2));
+const splashTipHeight = Math.max(5, Math.round(splashPinSize * 0.25));
+const splashPinMarginLeft = Math.max(3, Math.round(splashFontSize * 0.08));
+const splashPinMarginTop = Math.max(4, Math.round(splashFontSize * 0.1));
+
+// Speech rays (/// radiating diagonally upward-right)
+const splashStrokeW = Math.max(1.4, Math.round(splashFontSize * 0.042 * 10) / 10);
+const splashCx = splashPinSize / 2;
+const splashCy = splashPinSize / 2;
+const splashRayGap = Math.max(2.5, Math.round(splashFontSize * 0.065));
+const splashRStart = splashPinSize / 2 + splashRayGap;
+const splashLenSide = Math.max(5.5, Math.round(splashPinSize * 0.28));
+const splashLenMid = Math.max(8, Math.round(splashPinSize * 0.40));
+
+const splashDegToRad = Math.PI / 180;
+const splashA1Deg = 26;
+const splashA2Deg = 45;
+const splashA3Deg = 64;
+
+const splashA1 = splashA1Deg * splashDegToRad;
+const splashA2 = splashA2Deg * splashDegToRad;
+const splashA3 = splashA3Deg * splashDegToRad;
+
+const splashRMid1 = splashRStart + splashLenSide / 2;
+const splashX1 = splashCx + splashRMid1 * Math.cos(splashA1);
+const splashY1 = splashCy - splashRMid1 * Math.sin(splashA1);
+
+const splashRMid2 = splashRStart + splashLenMid / 2;
+const splashX2 = splashCx + splashRMid2 * Math.cos(splashA2);
+const splashY2 = splashCy - splashRMid2 * Math.sin(splashA2);
+
+const splashRMid3 = splashRStart + splashLenSide / 2;
+const splashX3 = splashCx + splashRMid3 * Math.cos(splashA3);
+const splashY3 = splashCy - splashRMid3 * Math.sin(splashA3);
+
+
+
 interface SplashScreenProps {
   onComplete: () => void;
 }
@@ -185,17 +225,98 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
           >
             a
           </Animated.Text>
-          <Animated.Text 
+          <Animated.View
             style={[
-              styles.letter, 
-              { 
+              styles.pinWrap,
+              {
+                width: splashPinSize,
+                marginLeft: splashPinMarginLeft,
+                marginTop: splashPinMarginTop,
                 opacity: oOpacity,
                 transform: [{ translateY: oTranslateY }],
-              }
+              },
             ]}
           >
-            o
-          </Animated.Text>
+            {/* Three Separate Expressive Speech Rays (/// radiating outward) */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+              <View
+                style={[
+                  styles.speechRay,
+                  {
+                    width: splashLenSide,
+                    height: splashStrokeW,
+                    borderRadius: splashStrokeW / 2,
+                    backgroundColor: '#20BF86',
+                    left: splashX1 - splashLenSide / 2,
+                    top: splashY1 - splashStrokeW / 2,
+                    transform: [{ rotate: `-${splashA1Deg}deg` }],
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.speechRay,
+                  {
+                    width: splashLenMid,
+                    height: splashStrokeW,
+                    borderRadius: splashStrokeW / 2,
+                    backgroundColor: '#20BF86',
+                    left: splashX2 - splashLenMid / 2,
+                    top: splashY2 - splashStrokeW / 2,
+                    transform: [{ rotate: `-${splashA2Deg}deg` }],
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.speechRay,
+                  {
+                    width: splashLenSide,
+                    height: splashStrokeW,
+                    borderRadius: splashStrokeW / 2,
+                    backgroundColor: '#20BF86',
+                    left: splashX3 - splashLenSide / 2,
+                    top: splashY3 - splashStrokeW / 2,
+                    transform: [{ rotate: `-${splashA3Deg}deg` }],
+                  },
+                ]}
+              />
+            </View>
+
+            <View
+              style={[
+                styles.pinCircle,
+                {
+                  width: splashPinSize,
+                  height: splashPinSize,
+                  borderRadius: splashPinSize / 2,
+                  backgroundColor: '#0B5145',
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.pinHole,
+                  {
+                    width: splashHoleSize,
+                    height: splashHoleSize,
+                    borderRadius: splashHoleSize / 2,
+                  },
+                ]}
+              />
+            </View>
+            <View
+              style={[
+                styles.pinPointer,
+                {
+                  borderLeftWidth: splashTipHalfWidth,
+                  borderRightWidth: splashTipHalfWidth,
+                  borderTopWidth: splashTipHeight,
+                  borderTopColor: '#0B5145',
+                },
+              ]}
+            />
+          </Animated.View>
         </View>
       </View>
 
@@ -211,7 +332,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
 
       {/* Tagline */}
       <Animated.View style={[styles.hintContainer, { opacity: hintOpacity }]}>
-        <Text style={styles.hintText}>CONNECTING PEOPLE</Text>
+        <Text style={styles.hintText}>LOCAL WORK &amp; SERVICES, ON DEMAND</Text>
       </Animated.View>
     </Animated.View>
   );
@@ -294,5 +415,25 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: 'rgba(11, 81, 69, 0.32)',
     fontWeight: '600',
+  },
+  pinWrap: {
+    alignItems: 'center',
+  },
+  speechRay: {
+    position: 'absolute',
+  },
+  pinCircle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinHole: {
+    backgroundColor: '#FAF8F2',
+  },
+  pinPointer: {
+    width: 0,
+    height: 0,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    marginTop: -2,
   },
 });

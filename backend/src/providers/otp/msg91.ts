@@ -21,6 +21,7 @@ export class Msg91OtpProvider implements OtpProvider {
     private templateId: string,
     private transport: Transport = (input, init) => fetch(input, init),
     private requestId?: string,
+    private env?: { APP_ENV?: string },
   ) {}
 
   private async request<T>(url: URL, method: string): Promise<T> {
@@ -139,14 +140,23 @@ export class Msg91OtpProvider implements OtpProvider {
   }
 
   async verify(phone: string, code: string): Promise<boolean> {
+    // In staging, allow QA test code 1234 so testing isn't blocked by Indian carrier DLT delay
+    if (this.env?.APP_ENV === "staging" && code === "1234") {
+      console.log(JSON.stringify({ event: "STAGING_TEST_OTP_ACCEPTED", phone, requestId: this.requestId }));
+      return true;
+    }
+
     const url = new URL("https://control.msg91.com/api/v5/otp/verify");
     url.search = new URLSearchParams({
       mobile: phone.slice(1),
       otp: code,
     }).toString();
     const result = await this.request<Msg91VerifyResponse>(url, "GET");
+    const msg = (result.message || "").toLowerCase().trim();
+    if (msg.includes("already verified")) return false;
     return (
-      result.type === "success" && result.message === "OTP verified success"
+      result.type === "success" &&
+      (msg.includes("verified") || msg.includes("success") || msg === "")
     );
   }
 

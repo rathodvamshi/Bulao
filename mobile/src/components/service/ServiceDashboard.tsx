@@ -11,9 +11,12 @@ import {
   TextInput,
   Animated,
   Easing,
+  Platform,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,6 +28,7 @@ import { Skeleton } from "../SkeletonLoader";
 import { ServiceBottomNav } from "./ServiceBottomNav";
 import { dash, radii } from "./palette";
 import { ServiceStoryHero } from "./ServiceStoryHero";
+import { BulaoWordmark } from "../BulaoWordmark";
 
 type Period = "week" | "month" | "all";
 
@@ -361,22 +365,63 @@ export default function ServiceDashboard() {
             }}
             pointerEvents={searchActive ? "none" : "auto"}
           >
-            <View>
-              <Text style={styles.logo}>Bulao</Text>
-              <Text style={styles.tagline}>Local Help. Real People.</Text>
-            </View>
+            <BulaoWordmark
+              size={26}
+              color="#03402D"
+              align="flex-start"
+            />
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Choose service area"
+              accessibilityLabel={`Choose service area: ${location?.area || "Choose area"}`}
               onPress={() => useLocation.getState().setLocationSheetVisible(true)}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+              android_ripple={{ color: "rgba(7, 91, 67, 0.12)", borderless: false }}
               style={styles.locationPill}
             >
-              <Ionicons name="location" size={13} color={dash.primary} />
-              <Text style={styles.headerLocationText} numberOfLines={1}>
-                {location?.area || "Choose area"}
-              </Text>
-              <Ionicons name="chevron-down" size={13} color={dash.primary} />
+              {/* Liquid Glass: Sheer Backdrop Blur */}
+              <BlurView
+                intensity={Platform.OS === "android" ? 25 : 45}
+                tint="light"
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+
+              {/* Liquid Glass: Completely Transparent Glass Sheen */}
+              <LinearGradient
+                colors={[
+                  "rgba(255, 255, 255, 0.22)",
+                  "rgba(255, 255, 255, 0.04)",
+                  "rgba(255, 255, 255, 0.08)",
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+
+              {/* Liquid Glass: Specular Top Rim Glint */}
+              <LinearGradient
+                colors={["rgba(255, 255, 255, 0.65)", "rgba(255, 255, 255, 0)"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.liquidGlint}
+                pointerEvents="none"
+              />
+
+              <Ionicons name="location-sharp" size={14} color={dash.primary} style={styles.locationPin} />
+              <View style={styles.locationTextContainer}>
+                <Text
+                  style={styles.headerLocationText}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {location?.area || "Choose area"}
+                </Text>
+              </View>
+              <View style={styles.chevronWrapper}>
+                <Ionicons name="chevron-down" size={11} color={dash.primary} style={styles.locationChevron} />
+              </View>
             </Pressable>
           </Animated.View>
 
@@ -795,22 +840,58 @@ const styles = StyleSheet.create({
   },
   locationPill: {
     flex: 1,
-    maxWidth: 180,
+    maxWidth: 195,
+    minWidth: 0,
+    height: 40,
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    justifyContent: "space-between",
+    paddingLeft: 12,
+    paddingRight: 10,
     borderRadius: radii.pill,
-    backgroundColor: "rgba(255,255,255,0.38)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.55)",
+    borderTopColor: "rgba(255, 255, 255, 0.8)",
+    borderBottomColor: "rgba(255, 255, 255, 0.3)",
+    overflow: "hidden",
+  },
+  liquidGlint: {
+    position: "absolute",
+    top: 0,
+    left: 10,
+    right: 10,
+    height: 1.5,
+    borderRadius: 1,
+  },
+  locationPin: {
+    flexShrink: 0,
+  },
+  locationTextContainer: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    marginHorizontal: 6,
   },
   headerLocationText: {
-    flexShrink: 1,
     fontSize: 13,
     fontWeight: "800",
-    color: "#1F2937",
+    color: "#0F2E23",
+    letterSpacing: -0.2,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  chevronWrapper: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(7, 91, 67, 0.06)",
+    flexShrink: 0,
+  },
+  locationChevron: {
+    flexShrink: 0,
   },
   headerRight: {
     flexDirection: "row",
@@ -824,7 +905,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.42)",
+    backgroundColor: "rgba(255, 255, 255, 0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.75)",
   },
   unreadDot: {
     position: "absolute",
@@ -838,21 +921,21 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.85)",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.9)",
   },
   avatarFallback: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: dash.primary,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.85)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.9)",
   },
   avatarText: {
     color: dash.white,

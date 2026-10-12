@@ -1,1 +1,50 @@
-{"expo":{"name":"Bulao","slug":"bulao","scheme":"bulao","version":"0.1.0","orientation":"portrait","userInterfaceStyle":"light","plugins":["expo-router","expo-secure-store",["expo-location",{"locationWhenInUsePermission":"Bulao uses your location to find nearby work and services."}]],"android":{"package":"in.bulao.app"},"ios":{"bundleIdentifier":"in.bulao.app","supportsTablet":true},"web":{"bundler":"metro"}}}
+{
+  "expo": {
+    "name": "Bulao",
+    "slug": "bulao",
+    "scheme": "bulao",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Bulao uses your location to find nearby work and services."
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/PlusJakartaSans-Regular.ttf",
+            "./assets/fonts/PlusJakartaSans-Medium.ttf",
+            "./assets/fonts/PlusJakartaSans-SemiBold.ttf",
+            "./assets/fonts/PlusJakartaSans-Bold.ttf",
+            "./assets/fonts/NotoSansDevanagari-Regular.ttf",
+            "./assets/fonts/NotoSansDevanagari-Medium.ttf",
+            "./assets/fonts/NotoSansDevanagari-SemiBold.ttf",
+            "./assets/fonts/NotoSansDevanagari-Bold.ttf",
+            "./assets/fonts/NotoSansTelugu-Regular.ttf",
+            "./assets/fonts/NotoSansTelugu-Medium.ttf",
+            "./assets/fonts/NotoSansTelugu-SemiBold.ttf",
+            "./assets/fonts/NotoSansTelugu-Bold.ttf"
+          ]
+        }
+      ]
+    ],
+    "android": {
+      "package": "in.bulao.app",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "ios": {
+      "bundleIdentifier": "in.bulao.app",
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

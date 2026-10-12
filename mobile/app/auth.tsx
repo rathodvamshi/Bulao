@@ -1,35 +1,59 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, Animated, ActivityIndicator,
-  ImageBackground, Pressable, BackHandler,
+  View, TextInput, TouchableOpacity, Alert,
+  Platform, ActivityIndicator, Linking, BackHandler,
+  Animated, Easing, Keyboard,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { LoginFontContext, LoginText as Text } from "../src/features/auth/LoginText";
+import { AppTextInput } from "../src/components/AppTextInput";
+import { LoginScreenLayout, useLoginInputFocus } from "../src/features/auth/LoginScreenLayout";
+import { PhoneStep } from "../src/features/auth/LoginPhoneForm";
+import { BulaoWordmark } from "../src/components/BulaoWordmark";
+import { loginStyles as styles } from "../src/features/auth/loginStyles";
+import { loginTheme, loginError, OTP_LENGTH } from "../src/features/auth/loginTheme";
+import { dismissLoginKeyboard, traceLogin } from "../src/features/auth/loginDiagnostics";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { OTPWidget, widgetProof } from "../src/features/auth/widget";
 import { useAuth, completeLogin } from "../src/auth";
+import type { UserData, SessionData } from "../src/auth";
+import { saveSession } from "../src/auth/authStorage";
 import { api } from "../src/api/client";
 
 // MSG91 Widget Configuration from environment
 const MSG91_WIDGET_ID = process.env.EXPO_PUBLIC_MSG91_WIDGET_ID || "3669686e4b46393237373639";
 const MSG91_TOKEN_AUTH = process.env.EXPO_PUBLIC_MSG91_TOKEN_AUTH || "568607TBQ8oKK8IF6aa02237P1";
 
-type OtpChallenge = { requestId: string; expiresIn: number; resendAfter: number; otpLength: number };
-
-const COLORS = {
-  green: "#176B58",
-  greenDark: "#0F5041",
-  greenSoft: "rgba(23,107,88,0.08)",
-  cream: "#FAF8F2",
-  white: "#FFFFFF",
-  ink: "#1A2421",
-  muted: "#6B7A6C",
-  border: "#E6E4DC",
-  error: "#C8553D",
-  errorBg: "rgba(200,85,61,0.08)",
+type OtpChallenge = {
+  requestId: string;
+  expiresIn: number;
+  resendAfter: number;
+  otpLength: number;
+  provider?: "widget" | "backend";
 };
 
+const COLORS = {
+  green: loginTheme.primary, cream: loginTheme.surface, white: loginTheme.surface,
+  ink: loginTheme.ink, muted: loginTheme.muted, border: loginTheme.border,
+  error: loginTheme.error, errorBg: loginTheme.errorBg,
+};
+const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL;
+const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_URL;
+function openLegal(title: string, url?: string) {
+  if (!url) { Alert.alert(title, "This document is not available yet. Please contact Bulao support."); return; }
+  void Linking.openURL(url).catch(() => Alert.alert(title, "Could not open this page. Please try again."));
+}
+
 export default function Auth() {
+  return (
+    <LoginFontContext.Provider value={true}>
+      <AuthContent fontsReady={true} />
+    </LoginFontContext.Provider>
+  );
+}
+
+
+function AuthContent({ fontsReady }: { fontsReady: boolean }) {
   const params = useLocalSearchParams<{ step?: string }>();
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,24 +62,31 @@ export default function Auth() {
     if (params.step === "name") return "name";
     return "phone";
   });
-  const [focused, setFocused] = useState(false);
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
   const sending = useRef(false);
-
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const verifying = useRef(false);
+  const mounted = useRef(true);
 
   const auth = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    mounted.current = true;
+    traceLogin("screen:mount");
+    return () => { mounted.current = false; traceLogin("screen:unmount"); };
+  }, []);
+
+  useEffect(() => { traceLogin(`step:${step}`); }, [step]);
 
   // Redirect if already authenticated with a completed name; or enforce name step if missing
   useEffect(() => {
     if (auth.status === "authenticated") {
       const hasName = auth.user?.name && auth.user.name.trim() !== "" && auth.user.name.trim().toLowerCase() !== "user";
       if (hasName) {
+        dismissLoginKeyboard("authenticated-route");
         router.replace("/(tabs)");
       } else if (step !== "name") {
+        dismissLoginKeyboard("name-step");
         setStep("name");
       }
     }
@@ -64,7 +95,9 @@ export default function Auth() {
   // Handle Android hardware back press cleanly
   useEffect(() => {
     const onBackPress = () => {
+      if (sending.current || verifying.current) return true;
       if (step === "otp") {
+        dismissLoginKeyboard("back-to-phone");
         setChallenge(null);
         setStep("phone");
         return true;
@@ -92,225 +125,146 @@ export default function Auth() {
 
   const validate = (n: string) => /^[6-9]\d{9}$/.test(n);
 
-  const shake = useCallback(() => {
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 6, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
-    ]).start();
-  }, [shakeAnim]);
-
   const transitionToOtp = () => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: -30, duration: 200, useNativeDriver: true }),
-    ]).start(() => {
-      setStep("otp");
-      slideAnim.setValue(30);
-      Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
-        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, friction: 8, tension: 50 }),
-      ]).start();
-    });
-  };
-
-  const transitionToName = () => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: -30, duration: 200, useNativeDriver: true }),
-    ]).start(() => {
-      setStep("name");
-      slideAnim.setValue(30);
-      Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
-        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, friction: 8, tension: 50 }),
-      ]).start();
-    });
-  };
-
-  const handleOtpVerified = (isNew: boolean) => {
-    if (isNew) {
-      transitionToName();
-    } else {
-      router.replace("/(tabs)");
-    }
+    dismissLoginKeyboard("otp-step");
+    setStep("otp");
   };
 
   const onContinue = async () => {
     if (sending.current) return;
     setError("");
-    if (!validate(phone)) { setError("Please enter a valid Indian mobile number."); shake(); return; }
+    if (!validate(phone)) { setError("Please enter a valid Indian mobile number."); return; }
     sending.current = true;
     setLoading(true);
 
-    try {
-      // Use MSG91 Widget to send OTP
-      const identifier = "91" + phone;
-      console.log("Sending OTP via MSG91 Widget for:", identifier);
-      const response = await OTPWidget.sendOTP({ identifier });
-      console.log("MSG91 sendOTP response:", response);
+    const fullPhone = "+91" + phone;
+    console.log("[Bulao Auth] Starting OTP dispatch for:", fullPhone);
 
+    try {
+      // Primary route: Send OTP via MSG91 Widget (runs without requiring custom SMS DLT template)
+      console.log("[Bulao Auth] Sending OTP via MSG91 Widget SDK...");
+      const identifier = "91" + phone;
+      const response = await OTPWidget.sendOTP({ identifier });
+      if (!mounted.current) return;
       if (!response) {
         throw new Error("No response received from OTP service. Please check your network.");
       }
 
-      // SDK returns request ID in message field, not requestId
       const requestId = response.reqId || response.requestId || response.message;
-
       if (requestId && response.type === "success") {
-        // Create challenge for backend tracking
-        const backendChallenge: OtpChallenge = {
+        console.log("[Bulao Auth] MSG91 Widget OTP sent successfully! Request ID:", requestId);
+        const widgetChallenge: OtpChallenge = {
           requestId: requestId,
-          expiresIn: 300, // 5 minutes
+          expiresIn: 300,
           resendAfter: 60,
-          otpLength: 4,
+          otpLength: OTP_LENGTH,
+          provider: "widget",
+        };
+        setChallenge(widgetChallenge);
+        transitionToOtp();
+        return;
+      } else {
+        const errorMsg = response.message || (response.code ? `Error code: ${response.code}` : "Failed to send OTP via widget");
+        console.warn("[Bulao Auth] Widget returned error, attempting backend fallback:", errorMsg);
+        // Fallback to backend send-otp
+        const res = await api<{
+          requestId: string;
+          expiresIn: number;
+          resendAfter: number;
+          otpLength: number;
+        }>("/auth/send-otp", { phone: fullPhone });
+        if (!mounted.current) return;
+        const backendChallenge: OtpChallenge = {
+          requestId: res.requestId,
+          expiresIn: res.expiresIn || 300,
+          resendAfter: res.resendAfter || 60,
+          otpLength: res.otpLength || OTP_LENGTH,
+          provider: "backend",
         };
         setChallenge(backendChallenge);
         transitionToOtp();
-      } else {
-        const errorMsg = response.message || (response.code ? `Error code: ${response.code}` : "Failed to send OTP");
-        throw new Error(errorMsg);
       }
     } catch (failure) {
-      console.error("Send OTP error:", failure);
-      setError(failure instanceof Error ? failure.message : "Could not send OTP. Please try again.");
-      shake();
+      if (!mounted.current) return;
+      console.error("[Bulao Auth] All OTP dispatch routes failed:", failure);
+      setError(loginError(failure));
     } finally {
       sending.current = false;
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
-  const isValid = phone.length === 10 && validate(phone);
+  const isValid = validate(phone);
 
-  return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <ImageBackground source={require("../assets/images/auth-bg.png")} style={styles.bg} resizeMode="cover">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.kav}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
-        >
-          <View style={styles.content}>
-            <Animated.View style={{ width: "100%", alignItems: "center", transform: [{ translateX: shakeAnim }, { translateY: slideAnim }], opacity: fadeAnim }}>
-              {step === "phone" ? (
-                <PhoneStep
-                  phone={phone}
-                  setPhone={(t: string) => { setPhone(t.replace(/\D/g, "")); setError(""); }}
-                  error={error}
-                  loading={loading}
-                  focused={focused}
-                  setFocused={setFocused}
-                  isValid={isValid}
-                  onContinue={onContinue}
-                />
-              ) : step === "otp" ? (
-                <OtpStep
-                  phone={phone}
-                  challenge={challenge!}
-                  onChangePhone={() => { setChallenge(null); setStep("phone"); }}
-                  onVerified={handleOtpVerified}
-                />
-              ) : (
-                <NameStep
-                  onComplete={() => router.replace("/(tabs)")}
-                />
-              )}
-            </Animated.View>
-          </View>
-        </KeyboardAvoidingView>
-      </ImageBackground>
-    </SafeAreaView>
-  );
-}
-
-function PhoneStep({ phone, setPhone, error, loading, focused, setFocused, isValid, onContinue }: any) {
-  return (
-    <View style={styles.authCard}>
-      <View style={[styles.inputWrap, focused && styles.inputWrapFocused, error && styles.inputWrapError]}>
-        <Pressable style={styles.country}>
-          <Text style={styles.flag}>🇮🇳</Text>
-          <Text style={styles.code}>+91</Text>
-          <Text style={styles.chevron}>▾</Text>
-        </Pressable>
-        <View style={styles.divider} />
-        <TextInput
-          style={styles.input}
-          placeholder="Enter mobile number"
-          placeholderTextColor={COLORS.muted}
-          keyboardType="phone-pad"
-          editable={!loading}
-          maxLength={10}
-          value={phone}
-          onChangeText={setPhone}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          selectionColor={COLORS.green}
-          cursorColor={COLORS.green}
-        />
-      </View>
-
-      <View style={styles.errorWrap}>
-        {error ? (
-          <View style={styles.errorRow}>
-            <Text style={styles.errorIcon}>⚠</Text>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-      </View>
-
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={onContinue}
-        disabled={loading || !isValid}
-        style={[styles.btn, !isValid && styles.btnDisabled, loading && styles.btnLoading]}
+  const termsFooter = (
+    <Text style={styles.footerNotice}>
+      By continuing, you agree to our{" "}
+      <Text
+        style={styles.legalLinkText}
+        onPress={() => openLegal("Terms of Service", TERMS_URL || "https://bulao.co/terms")}
       >
-        {loading ? (
-          <>
-            <Text style={styles.btnText}>Sending OTP</Text>
-            <ActivityIndicator color="#fff" size="small" style={{ marginLeft: 6 }} />
-          </>
-        ) : (
-          <Text style={styles.btnText}>Continue</Text>
-        )}
-        {!loading && <Text style={styles.btnArrow}>→</Text>}
-      </TouchableOpacity>
+        Terms
+      </Text>
+      {" & "}
+      <Text
+        style={styles.legalLinkText}
+        onPress={() => openLegal("Privacy Policy", PRIVACY_URL || "https://bulao.co/privacy")}
+      >
+        Privacy Policy
+      </Text>
+    </Text>
+  );
 
-      <View style={styles.security}>
-        <Text style={styles.lockIcon}>🔒</Text>
-        <Text style={styles.securityText}>We'll send you an OTP to verify your number</Text>
-      </View>
-    </View>
+  return (
+    <LoginScreenLayout
+      step={step}
+      showHero={step === "phone" || step === "otp"}
+      footer={step === "phone" ? termsFooter : null}
+    >
+      {step === "phone" ? (
+        <PhoneStep phone={phone}
+          setPhone={(value) => { setPhone(value.replace(/\D/g, "").slice(0, 10)); setError(""); }}
+          error={error} loading={loading} isValid={isValid} onContinue={onContinue} />
+      ) : step === "otp" && challenge ? (
+        <OtpStep fontsReady={fontsReady} phone={phone} challenge={challenge}
+          onBusyChange={(busy) => { verifying.current = busy; }}
+          onChangePhone={() => { dismissLoginKeyboard("change-phone"); setChallenge(null); setStep("phone"); }} />
+      ) : <NameStep fontsReady={fontsReady} />}
+    </LoginScreenLayout>
   );
 }
 
 function OtpStep({
+  fontsReady,
   phone,
   challenge,
   onChangePhone,
-  onVerified,
+  onBusyChange,
 }: {
+  fontsReady: boolean;
   phone: string;
   challenge: OtpChallenge;
   onChangePhone: () => void;
-  onVerified: (isNew: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const [current, setCurrent] = useState(challenge);
-  const [otp, setOtp] = useState(["", "", "", ""]);
+  const [otp, setOtp] = useState<string[]>(() => Array(challenge.otpLength).fill(""));
   const [loading, setLoading] = useState<"verify" | "resend" | null>(null);
   const [error, setError] = useState("");
   const [clock, setClock] = useState(Date.now());
   const [resendAt, setResendAt] = useState(() => Date.now() + challenge.resendAfter * 1000);
   const [expiresAt, setExpiresAt] = useState(() => Date.now() + challenge.expiresIn * 1000);
   const inputs = useRef<Array<TextInput | null>>([]);
+  const verifyButtonHeight = useRef(56);
+  const revealInput = useLoginInputFocus();
   const busy = useRef(false);
   const mounted = useRef(true);
   const verifiedAccessToken = useRef<string | null>(null);
-  
+  const focusAfterResend = useRef(false);
+  const [focused, setFocused] = useState(false);
+  const otpHeaderAnim = useRef(new Animated.Value(1)).current;
+
   const auth = useAuth();
-  const router = useRouter();
 
   useEffect(() => {
     mounted.current = true;
@@ -318,108 +272,270 @@ function OtpStep({
     return () => { mounted.current = false; clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setFocused(false);
+      inputs.current.forEach((input) => input?.blur());
+    });
+    return () => hideSub.remove();
+  }, []);
+
+  useEffect(() => {
+    Animated.timing(otpHeaderAnim, {
+      toValue: focused ? 0 : 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [focused]);
+
+  const headerHeight = otpHeaderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 68],
+  });
+  const headerOpacity = otpHeaderAnim.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 0.2, 1],
+  });
+  const headerTranslateY = otpHeaderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-12, 0],
+  });
+
   const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
   const expired = clock >= expiresAt;
+  const hasProof = verifiedAccessToken.current !== null;
+
+  useEffect(() => {
+    if (loading === null && focusAfterResend.current) {
+      focusAfterResend.current = false;
+      inputs.current[0]?.focus();
+    }
+  }, [loading]);
 
   const showFailure = (failure: unknown) => {
-    setError(failure instanceof Error ? failure.message : "Please try again.");
+    setError(loginError(failure));
 
   };
 
-  // Verify OTP using MSG91 Widget and create session
-  const onVerify = async () => {
-    if (busy.current || otp.some((digit) => !digit) || expired) return;
+  // Verify OTP using Backend or MSG91 Widget and create session
+  const onVerify = async (manualCode?: string) => {
+    if (busy.current) return;
+    const otpCode = manualCode || otp.join("");
+    // A verified code's timer must not block retrying the session exchange.
+    if (!verifiedAccessToken.current && (otpCode.length < current.otpLength || Date.now() >= expiresAt)) return;
     busy.current = true;
+    onBusyChange(true);
     setLoading("verify");
     setError("");
 
+    console.log("[Bulao Auth] Verifying OTP. Provider:", current.provider);
+
     try {
-      
-      // Retain proof in memory if the session exchange needs a network retry.
-      if (!verifiedAccessToken.current) {
-        verifiedAccessToken.current = widgetProof(await OTPWidget.verifyOTP({
-          reqId: current.requestId,
-          otp: otp.join(""),
-        }));
+      // In staging QA, support test code 1234
+      if (otpCode === "1234" && (__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging"))) {
+        try {
+          const result = await api<{
+            token: string;
+            expiresAt: number;
+            user: UserData;
+            isNewUser: boolean;
+          }>("/auth/verify-otp", {
+            phone: "+91" + phone,
+            requestId: current.requestId,
+            otp: "1234",
+          });
+          if (!mounted.current) return;
+          const session: SessionData = {
+            token: result.token,
+            expiresAt: result.expiresAt,
+            userId: result.user.id,
+          };
+          await saveSession(session);
+          auth.login({ ...result.user, phone: result.user.phone || ("+91" + phone) }, session);
+          setOtp(Array(current.otpLength).fill(""));
+          return;
+        } catch (testErr) {
+          console.warn("[Bulao Auth] Test code bypass did not match, continuing standard verification:", testErr);
+        }
       }
-      const { user, session, isNewUser } = await completeLogin("91" + phone, verifiedAccessToken.current);
-      if (mounted.current) {
-        auth.login({ ...user, phone: user.phone || ("91" + phone) }, session);
-        verifiedAccessToken.current = null;
-        setOtp(["", "", "", ""]);
-        onVerified(isNewUser);
+
+      if (current.provider === "backend") {
+        // Backend verification route
+        const result = await api<{
+          token: string;
+          expiresAt: number;
+          user: UserData;
+          isNewUser: boolean;
+        }>("/auth/verify-otp", {
+          phone: "+91" + phone,
+          requestId: current.requestId,
+          otp: otpCode,
+        });
+
+        if (!mounted.current) return;
+        console.log("[Bulao Auth] Backend OTP verified successfully, user ID:", result.user.id);
+
+        const session: SessionData = {
+          token: result.token,
+          expiresAt: result.expiresAt,
+          userId: result.user.id,
+        };
+        await saveSession(session);
+        if (mounted.current) {
+          auth.login({ ...result.user, phone: result.user.phone || ("+91" + phone) }, session);
+          setOtp(Array(current.otpLength).fill(""));
+        }
+      } else {
+        // Retain proof in memory if the session exchange needs a network retry.
+        if (!verifiedAccessToken.current) {
+          verifiedAccessToken.current = widgetProof(await OTPWidget.verifyOTP({
+            reqId: current.requestId,
+            otp: otpCode,
+          }));
+        }
+        if (!mounted.current) return;
+        const { user, session } = await completeLogin("91" + phone, verifiedAccessToken.current);
+        if (mounted.current) {
+          auth.login({ ...user, phone: user.phone || ("91" + phone) }, session);
+          verifiedAccessToken.current = null;
+          setOtp(Array(current.otpLength).fill(""));
+          // AuthContent owns the name-step/route transition from auth state.
+        }
       }
     } catch (failure) {
       if (mounted.current) showFailure(failure);
     } finally {
       busy.current = false;
+      onBusyChange(false);
       if (mounted.current) setLoading(null);
     }
   };
 
-  // Resend OTP using MSG91 Widget
+  // Resend OTP using Backend or MSG91 Widget
   const onResend = async () => {
-    if (busy.current || resendSeconds > 0) return;
+    if (busy.current || Date.now() < resendAt) return;
     busy.current = true;
+    onBusyChange(true);
     setLoading("resend");
     setError("");
 
     try {
-      console.log("MSG91: Resending OTP");
+      console.log("[Bulao Auth] Resending OTP via provider:", current.provider);
 
-      const retryResponse = await OTPWidget.retryOTP({
-        reqId: current.requestId,
-        retryChannel: 11, // SMS
-      });
+      if (current.provider === "backend") {
+        const res = await api<{
+          requestId: string;
+          expiresIn: number;
+          resendAfter: number;
+          otpLength: number;
+        }>("/auth/resend-otp", {
+          phone: "+91" + phone,
+          requestId: current.requestId,
+        });
 
+        if (!mounted.current) return;
+        console.log("[Bulao Auth] Backend OTP resent successfully:", res.requestId);
+        verifiedAccessToken.current = null;
+        setCurrent({
+          ...current,
+          requestId: res.requestId || current.requestId,
+          expiresIn: res.expiresIn || current.expiresIn,
+          resendAfter: res.resendAfter || current.resendAfter,
+        });
+        setOtp(Array(current.otpLength).fill(""));
+        setExpiresAt(Date.now() + (res.expiresIn || current.expiresIn) * 1000);
+        setResendAt(Date.now() + (res.resendAfter || current.resendAfter) * 1000);
+        focusAfterResend.current = true;
+      } else {
+        const retryResponse = await OTPWidget.retryOTP({
+          reqId: current.requestId,
+          retryChannel: 11, // SMS
+        });
 
-      if (retryResponse?.type !== "success") {
-        throw new Error(`MSG91: ${retryResponse?.message || "Could not resend OTP. Please try again."}`);
+        if (retryResponse?.type !== "success") {
+          throw new Error(`MSG91: ${retryResponse?.message || "Could not resend OTP. Please try again."}`);
+        }
+        // Retry can keep the original reqId; its message may only be a status label.
+        const retryRequestId = retryResponse.reqId || retryResponse.requestId || current.requestId;
+        if (!mounted.current) return;
+        verifiedAccessToken.current = null;
+        setCurrent({ ...current, requestId: retryRequestId });
+        setOtp(Array(current.otpLength).fill(""));
+        setExpiresAt(Date.now() + current.expiresIn * 1000);
+        setResendAt(Date.now() + current.resendAfter * 1000);
+        // Focus after the loading state has made the native inputs editable.
+        focusAfterResend.current = true;
       }
-      // Retry can keep the original reqId; its message may only be a status label.
-      const retryRequestId = retryResponse.reqId || retryResponse.requestId || current.requestId;
-      if (!mounted.current) return;
-      verifiedAccessToken.current = null;
-      setCurrent({ ...current, requestId: retryRequestId });
-      setOtp(["", "", "", ""]);
-      setExpiresAt(Date.now() + current.expiresIn * 1000);
-      setResendAt(Date.now() + current.resendAfter * 1000);
-      inputs.current[0]?.focus();
     } catch (failure) {
       if (mounted.current) showFailure(failure);
     } finally {
       busy.current = false;
+      onBusyChange(false);
       if (mounted.current) setLoading(null);
     }
   };
 
   const onChange = (idx: number, value: string) => {
+    if (busy.current || verifiedAccessToken.current) return;
     const digits = value.replace(/\D/g, "");
+    const start = digits.length >= current.otpLength ? 0 : idx;
     setError("");
+    let filledCode: string | null = null;
     setOtp((previous) => {
       const next = [...previous];
       if (!digits) next[idx] = "";
-      else for (let offset = 0; offset < Math.min(digits.length, 4 - idx); offset++) next[idx + offset] = digits[offset]!;
+      else for (let offset = 0; offset < Math.min(digits.length, current.otpLength - start); offset++) next[start + offset] = digits[offset]!;
+      if (next.every(Boolean)) {
+        filledCode = next.join("");
+      }
       return next;
     });
-    if (digits) inputs.current[Math.min(3, idx + digits.length)]?.focus();
+    if (filledCode) {
+      const fullCode = filledCode;
+      setTimeout(() => void onVerify(fullCode), 80);
+    } else if (digits) {
+      inputs.current[Math.min(current.otpLength - 1, start + digits.length)]?.focus();
+    }
   };
 
-  const canVerify = otp.every(Boolean) && !expired && !loading;
+  const canVerify = (hasProof || (otp.every(Boolean) && !expired)) && !loading;
 
   return (
     <View style={styles.otpCard}>
-      <Text style={styles.heading}>Enter the 4-digit OTP</Text>
-      <View style={styles.otpRow}>
+      <Animated.View
+        style={{
+          maxHeight: headerHeight,
+          opacity: headerOpacity,
+          transform: [{ translateY: headerTranslateY }],
+          overflow: "hidden",
+        }}
+      >
+        <Text style={styles.compactHeading}>Enter {current.otpLength}-digit OTP</Text>
+        <Text style={styles.compactSub}>Sent to +91 ****** {phone.slice(-4)}</Text>
+      </Animated.View>
+      <View style={styles.otpRowCompact}>
         {otp.map((digit, index) => (
-          <TextInput
+          <AppTextInput
             key={index}
             ref={(ref) => { inputs.current[index] = ref; }}
-            style={styles.otpBox}
+            style={[styles.otpBoxCompact, { fontWeight: "bold" }]}
             keyboardType="number-pad"
-            maxLength={4}
+            maxLength={current.otpLength}
             value={digit}
-            editable={!loading && !expired}
+            editable={!loading && !expired && !hasProof}
+            selectTextOnFocus
+            selection={{ start: 0, end: digit.length }}
+            onFocus={() => {
+              setFocused(true);
+              revealInput(inputs.current[index] ?? null, { above: 12, below: verifyButtonHeight.current + 16 });
+            }}
+            onSelectionChange={({ nativeEvent }) => {
+              // Typing replaces the selected digit instead of appending to it.
+              if (digit && (nativeEvent.selection.start !== 0 || nativeEvent.selection.end !== digit.length)) {
+                inputs.current[index]?.setSelection(0, digit.length);
+              }
+            }}
             onChangeText={(value) => onChange(index, value)}
             onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === "Backspace" && !digit && index > 0) inputs.current[index - 1]?.focus(); }}
             autoComplete={index === 0 ? "sms-otp" : "off"}
@@ -431,31 +547,43 @@ function OtpStep({
           />
         ))}
       </View>
-      <Text style={styles.sub}>OTP requested for +91 ****** {phone.slice(-4)}</Text>
-      {expired && <Text style={styles.errorText}>Code expired. Request a new OTP.</Text>}
+      <View style={styles.otpActionRow}>
+        <TouchableOpacity disabled={!!loading || resendSeconds > 0} onPress={() => void onResend()}>
+          <Text style={styles.resendCompact}>
+            {loading === "resend" ? "Sending…" : resendSeconds > 0 ? `Resend in ${resendSeconds}s` : expired ? "Send new OTP" : "Resend OTP"}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity disabled={!!loading} onPress={onChangePhone}>
+          <Text style={styles.changePhoneText}>Change number</Text>
+        </TouchableOpacity>
+      </View>
+      {(__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging")) && (
+        <Text style={[styles.compactSub, { color: COLORS.green, fontSize: 12, fontWeight: "600", marginVertical: 2 }]}>
+          Test Code: 1234
+        </Text>
+      )}
+      {expired && !hasProof && <Text style={styles.errorText}>Code expired. Request a new OTP.</Text>}
+      {hasProof && <Text style={styles.compactSub}>Number verified. Retry to finish signing in.</Text>}
       {!!error && <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>}
       <TouchableOpacity
-        style={[styles.btn, !canVerify && styles.btnDisabled]}
+        style={[styles.btnCompact, !canVerify && styles.btnDisabled]}
+        onLayout={(event) => { verifyButtonHeight.current = event.nativeEvent.layout.height; }}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canVerify, busy: loading === "verify" }}
         activeOpacity={0.85}
         onPress={() => void onVerify()}
         disabled={!canVerify}
       >
-        <Text style={styles.btnText}>{loading === "verify" ? "Verifying OTP" : "Verify OTP"}</Text>
+        <Text style={styles.btnText}>{loading === "verify" ? "Signing in…" : hasProof ? "Retry sign-in" : "Verify OTP"}</Text>
         {loading === "verify" ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnArrow}>→</Text>}
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.security} disabled={!!loading || resendSeconds > 0} onPress={() => void onResend()}>
-        <Text style={styles.resend}>
-          {loading === "resend" ? "Sending OTP…" : resendSeconds > 0 ? `Resend in ${resendSeconds}s` : expired ? "Send a new OTP" : "Resend OTP"}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.security} disabled={!!loading} onPress={onChangePhone}>
-        <Text style={styles.securityText}>Change mobile number</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-function NameStep({ onComplete }: { onComplete: () => void }) {
+function NameStep({ fontsReady }: { fontsReady: boolean }) {
+  const inputRef = useRef<TextInput>(null);
+  const revealInput = useLoginInputFocus();
   const [name, setName] = useState("");
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -489,7 +617,6 @@ function NameStep({ onComplete }: { onComplete: () => void }) {
     try {
       await api("/users/me", { name: cleaned }, "PATCH");
       auth.updateUser({ name: cleaned });
-      onComplete();
     } catch (err: any) {
       console.error("Save name error:", err);
       setError(err?.message || "Could not save your name. Please try again.");
@@ -500,21 +627,25 @@ function NameStep({ onComplete }: { onComplete: () => void }) {
 
   return (
     <View style={styles.authCard}>
-      <Text style={styles.heading}>Welcome to Bulao!</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+        <Text style={[styles.heading, { marginBottom: 0 }]}>Welcome to </Text>
+        <BulaoWordmark size={24} color={styles.heading.color} />
+        <Text style={[styles.heading, { marginBottom: 0 }]}>!</Text>
+      </View>
       <Text style={styles.sub}>What should we call you?</Text>
 
       <View style={[styles.nameInputWrap, focused && styles.inputWrapFocused, !!error && styles.inputWrapError]}>
-        <TextInput
+        <AppTextInput
           style={styles.nameInput}
           placeholder="Enter your full name"
+          ref={inputRef}
           placeholderTextColor={COLORS.muted}
           value={name}
           onChangeText={(t) => { setName(t); setError(""); }}
-          onFocus={() => setFocused(true)}
+          onFocus={() => { setFocused(true); revealInput(inputRef.current); }}
           onBlur={() => setFocused(false)}
           onSubmitEditing={onSubmit}
           returnKeyType="done"
-          autoFocus={true}
           autoCapitalize="words"
           autoCorrect={false}
           maxLength={60}
@@ -557,124 +688,3 @@ function NameStep({ onComplete }: { onComplete: () => void }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.cream },
-  bg: { flex: 1 },
-  kav: { flex: 1 },
-  content: {
-    flex: 1,
-    justifyContent: "flex-start",
-    alignItems: "center",
-    paddingHorizontal: 22,
-    paddingTop: 275,
-  },
-  authCard: { width: "100%", maxWidth: 360, marginTop: -20 },
-  otpCard: { width: "100%", maxWidth: 360, marginTop: -20 },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    maxWidth: 340,
-    backgroundColor: "rgba(255,255,255,0.94)",
-    borderWidth: 1.5,
-    borderColor: "rgba(230,228,220,0.9)",
-    borderRadius: 20,
-    height: 68,
-    paddingHorizontal: 16,
-    shadowColor: COLORS.green,
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  inputWrapFocused: {
-    borderColor: COLORS.green,
-    backgroundColor: "#fff",
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-  },
-  inputWrapError: {
-    borderColor: COLORS.error,
-    backgroundColor: COLORS.errorBg,
-  },
-  country: { flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 4 },
-  flag: { fontSize: 20 },
-  code: { fontWeight: "700", color: COLORS.green, fontSize: 16 },
-  chevron: { fontSize: 11, color: COLORS.muted, marginTop: 1 },
-  divider: { width: 1, height: 26, backgroundColor: COLORS.border, marginHorizontal: 12 },
-  input: { flex: 1, fontSize: 17, color: COLORS.ink, fontWeight: "500", letterSpacing: 0.2 },
-  errorWrap: { minHeight: 16, justifyContent: "center", marginTop: 0 },
-  errorRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  errorIcon: { fontSize: 13, color: COLORS.error },
-  errorText: { color: COLORS.error, fontSize: 13, fontWeight: "500" },
-  btn: {
-    width: "100%",
-    maxWidth: 340,
-    marginTop: 2,
-    height: 50,
-    borderRadius: 18,
-    backgroundColor: COLORS.green,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    shadowColor: COLORS.green,
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-  btnDisabled: { opacity: 0.45 },
-  btnLoading: { opacity: 0.85 },
-  btnText: { color: "#fff", fontSize: 15, fontWeight: "700", letterSpacing: 0.3 },
-  btnArrow: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  security: {
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  lockIcon: { fontSize: 11 },
-  securityText: { color: COLORS.muted, fontSize: 12, fontWeight: "500" },
-  heading: { fontSize: 17, fontWeight: "700", color: COLORS.green, textAlign: "center", marginBottom: 12, marginTop: -4 },
-  otpRow: { flexDirection: "row", justifyContent: "center", gap: 10, marginBottom: 8 },
-  otpBox: {
-    width: 52,
-    height: 56,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: "rgba(230,228,220,0.9)",
-    backgroundColor: "rgba(255,255,255,0.94)",
-    fontSize: 22,
-    fontWeight: "700",
-    color: COLORS.green,
-  },
-  sub: { textAlign: "center", color: COLORS.muted, fontSize: 13, marginBottom: 14, fontWeight: "500" },
-  resend: { color: COLORS.green, fontWeight: "700" },
-  nameInputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    maxWidth: 340,
-    backgroundColor: "rgba(255,255,255,0.94)",
-    borderWidth: 1.5,
-    borderColor: "rgba(230,228,220,0.9)",
-    borderRadius: 20,
-    height: 60,
-    paddingHorizontal: 20,
-    shadowColor: COLORS.green,
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  nameInput: {
-    flex: 1,
-    fontSize: 17,
-    color: COLORS.ink,
-    fontWeight: "600",
-    letterSpacing: 0.2,
-  },
-});
