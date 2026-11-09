@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "843281484363",
+    "project_id": "bulao-8fa1b",
+    "storage_bucket": "bulao-8fa1b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:843281484363:android:6595f688e2d34a95601bce",
+        "android_client_info": {
+          "package_name": "in.bulao.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB0mdrx_cCNzdVQEgyld-ADiCty4aQ1SJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

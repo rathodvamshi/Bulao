@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api/client";
@@ -30,6 +30,8 @@ type ProviderStatsResponse = {
   interested: number;
   hired: number;
   completed: number;
+  acceptedJobs?: number;
+  activeJobsPosted?: number;
 };
 
 type ProfileDetailResponse = {
@@ -38,13 +40,24 @@ type ProfileDetailResponse = {
   area: string;
   photoUrl: string | null;
   rating: number | null;
+  totalReviews?: number;
+  totalFeedback?: number;
+  stars5?: number;
+  stars4?: number;
+  stars3?: number;
+  stars2?: number;
+  stars1?: number;
   completed: number;
-  reviews: { stars: number; body: string; author: string }[];
+  acceptedJobs?: number;
+  jobsPosted?: number;
+  activeJobsPosted?: number;
+  reviews: { id?: string; stars: number; body: string; author: string; jobTitle?: string }[];
 };
 
 export default function Profile() {
   const auth = useAuth();
   const token = auth.session?.token || null;
+  const userId = auth.user?.id || auth.session?.userId || null;
   const client = useQueryClient();
   const params = useLocalSearchParams<{ role?: ProfileRole }>();
 
@@ -53,30 +66,82 @@ export default function Profile() {
 
   // 1. Common Identity Query
   const meQuery = useQuery<CommonProfileData>({
-    queryKey: ["me", token],
+    queryKey: ["me", userId || token],
     enabled: !!token,
     queryFn: () => api<CommonProfileData>("/users/me"),
   });
 
   // 2. Provider Stats Query
   const statsQuery = useQuery<ProviderStatsResponse>({
-    queryKey: ["provider-stats", "all"],
-    enabled: !!token,
+    queryKey: ["provider-stats", userId, "all"],
+    enabled: !!token && !!userId,
     queryFn: () => api<ProviderStatsResponse>("/jobs/provider/stats?period=all"),
   });
 
-  // 3. User Reputation & Reviews Query
+  // 3. User Reputation & Reviews Query (Role-Specific)
   const profileDetailQuery = useQuery<ProfileDetailResponse>({
-    queryKey: ["profiles", meQuery.data?.id],
-    enabled: !!token && !!meQuery.data?.id,
-    queryFn: () => api<ProfileDetailResponse>(`/profiles/${meQuery.data!.id}`),
+    queryKey: ["profiles", userId || meQuery.data?.id, role],
+    enabled: !!token && !!(userId || meQuery.data?.id),
+    queryFn: () =>
+      api<ProfileDetailResponse>(
+        `/profiles/${userId || meQuery.data!.id}?role=${encodeURIComponent(role)}`,
+      ),
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      const targetId = userId || meQuery.data?.id;
+      if (targetId) {
+        void client.invalidateQueries({ queryKey: ["profiles", targetId, role] });
+      }
+    }, [userId, meQuery.data?.id, role, client]),
+  );
 
   // 4. My Published Services Query
   const myServicesQuery = useQuery<ServiceItem[]>({
     queryKey: ["my-services", token],
     enabled: !!token,
     queryFn: () => api<ServiceItem[]>("/services/mine"),
+  });
+
+  // 5. Service Provider Stats Query (for service mode metrics)
+  const serviceStatsQuery = useQuery<{
+    jobsPosted: number;
+    active: number;
+    interested: number;
+    hired: number;
+    completed: number;
+    pendingResponses?: number;
+  }>({
+    queryKey: ["service-provider-stats", token],
+    enabled: !!token && role === "service",
+    queryFn: () => api("/services/provider/stats?period=all"),
+  });
+
+  // 6. Service Activity Interactions Query
+  const serviceActivityQuery = useQuery<{ interactions?: any[] }>({
+    queryKey: ["service-activity-summary", token],
+    enabled: !!token && role === "service",
+    queryFn: async () => {
+      try {
+        const recent = await api<any[]>("/services/provider/recent");
+        if (Array.isArray(recent)) {
+          const currentId = meQuery.data?.id;
+          const reqItems = recent
+            .filter((r) => r.applicantCount === 1 || !["PUBLISHED", "PAUSED"].includes(r.status))
+            .map((r) => ({
+              ...r,
+              kind: "service",
+              ownerId: currentId,
+            }));
+          return { interactions: reqItems };
+        }
+      } catch {
+        // safe fallback
+      }
+      return { interactions: [] };
+    },
+    staleTime: 30 * 1000,
   });
 
   useEffect(() => {
@@ -90,12 +155,16 @@ export default function Profile() {
   const isRefreshing =
     meQuery.isRefetching ||
     statsQuery.isRefetching ||
-    myServicesQuery.isRefetching;
+    myServicesQuery.isRefetching ||
+    serviceStatsQuery.isRefetching ||
+    serviceActivityQuery.isRefetching;
   const onRefresh = () => {
     void client.invalidateQueries({ queryKey: ["me"] });
     void client.invalidateQueries({ queryKey: ["provider-stats"] });
     void client.invalidateQueries({ queryKey: ["profiles"] });
     void client.invalidateQueries({ queryKey: ["my-services"] });
+    void client.invalidateQueries({ queryKey: ["service-provider-stats"] });
+    void client.invalidateQueries({ queryKey: ["service-activity-summary"] });
   };
 
   // ── Provider Role Data Assembly ─────────────────────────────────────────────
@@ -103,148 +172,218 @@ export default function Profile() {
     const stats = statsQuery.data;
     const detail = profileDetailQuery.data;
     const revs: ReviewItem[] = (detail?.reviews || []).map((r, i) => ({
-      id: `rev-${i}`,
+      id: r.id || `rev-${i}`,
       stars: r.stars,
       body: r.body,
       author: r.author || "Local Worker",
-      jobTitle: "Verified Work Completion",
+      jobTitle: r.jobTitle || "Verified Work Completion",
     }));
 
+    const jobsPosted = detail?.jobsPosted ?? stats?.jobsPosted ?? 0;
+    const active = detail?.activeJobsPosted ?? stats?.active ?? 0;
+    const hired = detail?.acceptedJobs ?? stats?.acceptedJobs ?? stats?.hired ?? 0;
+    const completed = detail?.completed ?? stats?.completed ?? 0;
+
+    const starDistribution =
+      detail?.stars5 != null
+        ? {
+            stars5: detail.stars5,
+            stars4: detail.stars4 || 0,
+            stars3: detail.stars3 || 0,
+            stars2: detail.stars2 || 0,
+            stars1: detail.stars1 || 0,
+          }
+        : undefined;
+
     return {
-      jobsPosted: stats?.jobsPosted || 0,
-      active: stats?.active || 0,
+      jobsPosted,
+      active,
       interested: stats?.interested || 0,
-      hired: stats?.hired || 0,
-      completed: stats?.completed || detail?.completed || 0,
-      rating: detail?.rating ?? 4.9,
-      totalReviews: revs.length > 0 ? revs.length : 18,
-      feedbackTags: [
-        { id: "1", label: "Prompt Payer", icon: "💳", percentage: 99 },
-        { id: "2", label: "Clear Job Specs", icon: "📋", percentage: 96 },
-        { id: "3", label: "Safe Worksite", icon: "🛡️", percentage: 98 },
-        { id: "4", label: "Respectful Hirer", icon: "🤝", percentage: 97 },
-      ],
-      badges: [
-        {
-          id: "b1",
-          title: "Verified Hirer",
-          description: "Phone & profile identity verified by Bulao Trust",
-          icon: "🛡️",
-        },
-        {
-          id: "b2",
-          title: "Prompt Payer",
-          description: "Releases worker wages immediately upon job completion",
-          icon: "⚡",
-        },
-        {
-          id: "b3",
-          title: "Top Employer",
-          description: "Consistently rated 4.8+ stars by daily wage workers",
-          icon: "⭐",
-        },
-      ],
-      reviews:
-        revs.length > 0
-          ? revs
-          : [
-              {
-                id: "r1",
-                stars: 5,
-                body: "Very polite employer. Explained the task clearly and paid cash on the spot after completion.",
-                author: "Ramesh Kumar",
-                jobTitle: "Plumbing Helper",
-              },
-              {
-                id: "r2",
-                stars: 5,
-                body: "Great experience working at his construction site. Safe environment and prompt daily wages.",
-                author: "Suresh Gowda",
-                jobTitle: "Loading & Unloading",
-              },
-            ],
+      hired,
+      completed,
+      rating: detail?.rating ?? null,
+      totalReviews: detail?.totalReviews ?? revs.length,
+      starDistribution,
+      feedbackTags: [],
+      badges: [],
+      reviews: revs,
     };
   }, [statsQuery.data, profileDetailQuery.data]);
 
   // ── Seeker Role Data Assembly ───────────────────────────────────────────────
   const seekerData: SeekerRoleData = useMemo(() => {
     const detail = profileDetailQuery.data;
+    const starDistribution =
+      detail?.stars5 != null
+        ? {
+            stars5: detail.stars5,
+            stars4: detail.stars4 || 0,
+            stars3: detail.stars3 || 0,
+            stars2: detail.stars2 || 0,
+            stars1: detail.stars1 || 0,
+          }
+        : undefined;
+
     return {
-      rating: detail?.rating ?? 4.8,
-      totalReviews: detail?.reviews?.length ? detail.reviews.length : 12,
-      completed: detail?.completed ?? 14,
-      punctualityScore: 98,
-      available: true,
-      skills: [
-        "Plumbing",
-        "Home Repairs",
-        "Loading & Moving",
-        "Painting Helper",
-        "Masonry",
-      ],
-      feedbackTags: [
-        { id: "s1", label: "Punctual", icon: "⏰", percentage: 99 },
-        { id: "s2", label: "Hardworking", icon: "💪", percentage: 97 },
-        { id: "s3", label: "Polite & Honest", icon: "✨", percentage: 98 },
-        { id: "s4", label: "Skilled Work", icon: "🛠️", percentage: 95 },
-      ],
+      rating: detail?.rating ?? null,
+      totalReviews: detail?.totalReviews ?? detail?.reviews?.length ?? 0,
+      completed: detail?.completed ?? 0,
+      starDistribution,
       reviews: (detail?.reviews || []).map((r, i) => ({
-        id: `sr-${i}`,
+        id: r.id || `sr-${i}`,
         stars: r.stars,
         body: r.body,
         author: r.author || "Employer",
+        jobTitle: r.jobTitle || "Completed job",
       })),
     };
   }, [profileDetailQuery.data]);
 
   // ── Service Role Data Assembly ──────────────────────────────────────────────
   const serviceData: ServiceRoleData = useMemo(() => {
-    const detail = profileDetailQuery.data;
     const servicesList = myServicesQuery.data || [];
+    const interactions = serviceActivityQuery.data?.interactions || [];
+    const userId = meQuery.data?.id;
 
-    // Calculate aggregate metrics across all published services
-    const totalCompleted =
-      servicesList.reduce((acc, s) => acc + (s.completedBookings || 0), 0) ||
-      (detail?.completed ?? 0);
+    // Requests for my services
+    const myServiceRequests = interactions.filter(
+      (i) => i.kind === "service" && i.ownerId === userId,
+    );
+    const activeRequests = myServiceRequests.filter(
+      (i) => i.status === "ACCEPTED" || i.status === "IN_PROGRESS",
+    ).length;
+    const pendingRequests = myServiceRequests.filter(
+      (i) => i.status === "PENDING",
+    ).length;
+    const completedRequestsCount = myServiceRequests.filter(
+      (i) => i.status === "COMPLETED",
+    ).length;
+
+    // Aggregate completed bookings across services + interactions
+    const totalCompleted = Math.max(
+      servicesList.reduce(
+        (acc, service) => acc + (service.completedBookings || 0),
+        0,
+      ),
+      serviceStatsQuery.data?.completed || 0,
+      completedRequestsCount,
+    );
     const maxRadius =
-      servicesList.reduce((max, s) => Math.max(max, s.radiusKm || 0), 0) || 15;
-    const hasAnyAvailable =
-      servicesList.length > 0 ? servicesList.some((s) => s.available) : true;
-
+      servicesList.length > 0
+        ? servicesList.reduce((max, service) => Math.max(max, service.radiusKm || 0), 0)
+        : null;
     // Aggregate rating across services
     const ratedServices = servicesList.filter((s) => (s.totalReviews || 0) > 0 && s.rating !== null);
-    const avgServiceRating =
-      ratedServices.length > 0
-        ? Number(
-            (
-              ratedServices.reduce((acc, s) => acc + (s.rating || 0), 0) /
-              ratedServices.length
-            ).toFixed(1)
-          )
-        : null;
+    const ratedReviewCount = ratedServices.reduce(
+      (acc, service) => acc + service.totalReviews,
+      0,
+    );
+    const avgServiceRating = ratedReviewCount > 0
+      ? Number((ratedServices.reduce(
+          (acc, service) => acc + (service.rating || 0) * service.totalReviews,
+          0,
+        ) / ratedReviewCount).toFixed(1))
+      : null;
     const totalServiceReviews = servicesList.reduce(
       (acc, s) => acc + (s.totalReviews || 0),
       0
     );
 
+    const starDistribution = servicesList.reduce(
+      (acc, s) => {
+        if (s.ratingBreakdown) {
+          acc.stars5 += s.ratingBreakdown.stars5 || 0;
+          acc.stars4 += s.ratingBreakdown.stars4 || 0;
+          acc.stars3 += s.ratingBreakdown.stars3 || 0;
+          acc.stars2 += s.ratingBreakdown.stars2 || 0;
+          acc.stars1 += s.ratingBreakdown.stars1 || 0;
+        } else if (s.reviews?.length) {
+          for (const r of s.reviews) {
+            if (r.stars === 5) acc.stars5++;
+            else if (r.stars === 4) acc.stars4++;
+            else if (r.stars === 3) acc.stars3++;
+            else if (r.stars === 2) acc.stars2++;
+            else if (r.stars === 1) acc.stars1++;
+          }
+        }
+        return acc;
+      },
+      { stars5: 0, stars4: 0, stars3: 0, stars2: 0, stars1: 0 },
+    );
+
+    const profileData = role === "service" ? profileDetailQuery.data : null;
+    const finalDistribution = {
+      stars5: Math.max(starDistribution.stars5, profileData?.stars5 || 0),
+      stars4: Math.max(starDistribution.stars4, profileData?.stars4 || 0),
+      stars3: Math.max(starDistribution.stars3, profileData?.stars3 || 0),
+      stars2: Math.max(starDistribution.stars2, profileData?.stars2 || 0),
+      stars1: Math.max(starDistribution.stars1, profileData?.stars1 || 0),
+    };
+
+    const finalRating =
+      avgServiceRating ??
+      (profileData?.rating != null ? Number(profileData.rating) : null);
+    const finalTotalReviews = Math.max(
+      totalServiceReviews,
+      profileData?.totalReviews || 0,
+    );
+
+    // Deduplicate all feedback across per-service listings & profile reviews
+    const seenReviewIds = new Set<string>();
+    const allFeedback: NonNullable<ServiceRoleData["recentFeedback"]> = [];
+
+    for (const service of servicesList) {
+      for (const review of service.reviews || []) {
+        const id = review.id || `${service.id}-${review.createdAt}-${review.authorName}`;
+        if (!seenReviewIds.has(id)) {
+          seenReviewIds.add(id);
+          allFeedback.push({
+            ...review,
+            id,
+            serviceTitle: service.title || service.categoryName,
+          });
+        }
+      }
+    }
+
+    if (profileData?.reviews) {
+      for (const r of profileData.reviews) {
+        const id = r.id || `prof-${r.author}`;
+        if (!seenReviewIds.has(id)) {
+          seenReviewIds.add(id);
+          allFeedback.push({
+            id,
+            stars: r.stars,
+            body: r.body || "",
+            createdAt: Date.now(),
+            authorName: r.author || "Customer",
+            serviceTitle: r.jobTitle || "Verified Service",
+          });
+        }
+      }
+    }
+
+    allFeedback.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+
     return {
-      rating: avgServiceRating,
-      totalReviews:
-        totalServiceReviews > 0
-          ? totalServiceReviews
-          : (detail?.reviews?.length ?? 0),
+      rating: finalRating,
+      totalReviews: finalTotalReviews,
       completed: totalCompleted,
       radiusKm: maxRadius,
-      available: hasAnyAvailable,
       services: servicesList,
-      reviews: (detail?.reviews || []).map((r, i) => ({
-        id: `svr-${i}`,
-        stars: r.stars,
-        body: r.body,
-        author: r.author || "Customer",
-      })),
+      recentFeedback: allFeedback,
+      starDistribution: finalDistribution,
+      activeRequests,
+      pendingRequests,
     };
-  }, [profileDetailQuery.data, myServicesQuery.data]);
+  }, [
+    myServicesQuery.data,
+    serviceActivityQuery.data,
+    meQuery.data?.id,
+    serviceStatsQuery.data,
+    role,
+    profileDetailQuery.data,
+  ]);
 
   // ── Not signed in ───────────────────────────────────────────────────────────
   if (!token) {
@@ -379,10 +518,18 @@ export default function Profile() {
           </>
         )}
         {role === "seeker" && <SeekerProfileView data={seekerData} isOwner={true} />}
-        {role === "service" && <ServiceProfileView data={serviceData} isOwner={true} />}
+        {role === "service" && (
+          <ServiceProfileView
+            data={serviceData}
+            isOwner={true}
+            loading={myServicesQuery.isPending && !myServicesQuery.data}
+            error={myServicesQuery.isError && !myServicesQuery.data ? "Your service listings couldn't be loaded." : undefined}
+            onRetry={() => void myServicesQuery.refetch()}
+          />
+        )}
 
         {/* ── 4. Common Settings & Logout ── */}
-        <ProfileSettingsSection />
+        <ProfileSettingsSection role={role} />
       </ScrollView>
     </Screen>
   );

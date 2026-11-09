@@ -1,0 +1,6 @@
+[
+  { "id": "splash-background", "group": "startup", "file": "mobile/assets/images/splash-bg.png", "maxWidth": 1080 },
+  { "id": "login-hero", "group": "auth", "file": "mobile/assets/images/login-hero.jpg", "maxWidth": 900 },
+  { "id": "category-plumber", "group": "categories", "file": "mobile/assets/images/categories/plumber.png", "maxWidth": 320 },
+  { "id": "category-electrician", "group": "categories", "file": "mobile/assets/images/categories/electrician.jpg", "maxWidth": 320 }
+]

@@ -10,9 +10,13 @@
   "scripts": {
     "mobile": "cd mobile && node node_modules/expo/bin/cli start --lan --go --port 8082",
     "test": "pnpm --filter @bulao/backend test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "node scripts/check-image-policy.mjs && pnpm -r typecheck",
+    "images:check": "node scripts/check-image-policy.mjs",
+    "images:add": "node backend/scripts/publish-app-assets.mjs",
+    "images:publish": "node backend/scripts/publish-app-assets.mjs",
     "dev:api": "pnpm --filter @bulao/backend dev",
-    "dev:mobile": "pnpm --filter @bulao/mobile start"
+    "dev:mobile": "pnpm --filter @bulao/mobile start",
+    "build:apk": "cd mobile && eas build --platform android --profile preview"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "7.27.1",

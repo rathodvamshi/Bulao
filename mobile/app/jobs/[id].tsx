@@ -1,5 +1,7 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   View,
   Text,
   StyleSheet,
@@ -10,60 +12,56 @@ import {
   Alert,
   Share,
   Linking,
-  Dimensions,
   Animated,
   Easing,
+  Platform,
+  useWindowDimensions,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import { StatusBar } from "expo-status-bar";
+import { LinearGradient } from "expo-linear-gradient";
+import { UniversalMap, UniversalMapHandle } from "../../src/components/map/UniversalMap";
 import { api } from "../../src/api/client";
+import { locationApi } from "../../src/api/locationApi";
 import type { Job } from "../../src/api/types";
-import { useSession } from "../../src/store/session";
 import { formatDirectPhone } from "../../src/utils/phone";
+import { formatJobTitle } from "../../src/utils/jobTitle";
 import { useAuth } from "../../src/auth";
 import { usePostWorkStore } from "../../src/features/post-work/store";
 import {
-  getExactRoleIcon,
   getExperienceOptionsForRole,
 } from "../../src/utils/nameVerification";
 import { JobApplicationsModal } from "../../src/components/JobApplicationsModal";
 import { CancellationModal } from "../../src/components/CancellationModal";
-import { JobDetailSkeleton } from "../../src/components/SkeletonLoader";
+import { JobDetailSkeleton, Skeleton } from "../../src/components/SkeletonLoader";
 import { PageTransition } from "../../src/components/PageTransition";
+import { AppImage } from "../../src/components/AppImage";
 
-const { width } = Dimensions.get("window");
-
-// ── Peak-Level Luxury Design System Palette ──
-const pro = {
-  canvas: "#F4F7F5",
+// ── Design Tokens ──
+const theme = {
+  canvas: "#F8FAFC",
   surface: "#FFFFFF",
-  cardBg: "#FAFCFA",
-  emeraldDark: "#022B1F",
-  emeraldPrimary: "#075B43",
-  emeraldMid: "#0A6E52",
+  emeraldDark: "#03402D",
+  emeraldPrimary: "#047857",
   emeraldLight: "#10B981",
-  emeraldSoft: "#E9F8EF",
-  emeraldFrost: "#F0FDF4",
-  ink: "#0D1914",
-  charcoal: "#1F2E27",
+  emeraldSoft: "#ECFDF5",
+  ink: "#0F172A",
+  charcoal: "#1E293B",
   slate: "#475569",
   muted: "#64748B",
   faint: "#94A3B8",
-  borderLight: "#E2EBE5",
-  borderSubtle: "#EEF4F0",
+  borderLight: "#E2E8F0",
+  borderSubtle: "#F1F5F9",
   gold: "#D97706",
   goldSoft: "#FEF3C7",
   blueAccent: "#2563EB",
   blueSoft: "#EFF6FF",
-  purpleAccent: "#7C3AED",
-  purpleSoft: "#F3E8FF",
 };
 
-// ── Time & Date Helpers ──
+// ── Helpers ──
 function formatRelativeTime(timestamp?: string | number): string {
   if (!timestamp) return "Recently";
   const time =
@@ -88,34 +86,229 @@ function formatRelativeTime(timestamp?: string | number): string {
 
 function formatClockTime(timeStr?: string, fallback = "09:00 AM"): string {
   if (!timeStr) return fallback;
-  const parts = timeStr.split(":");
+  const parts = timeStr.trim().split(":");
   const p0 = parts[0];
   const p1 = parts[1];
-  if (!p0 || !p1) return fallback;
+  if (!p0 || !p1) return timeStr;
   const hour = parseInt(p0, 10);
-  const min = p1;
+  const min = p1.slice(0, 2);
   if (isNaN(hour)) return timeStr;
   const ampm = hour >= 12 ? "PM" : "AM";
   const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
   return `${displayHour}:${min} ${ampm}`;
 }
 
+function getDateDetails(d?: Date | string | number | null) {
+  let dateObj: Date;
+  if (!d) {
+    dateObj = new Date();
+  } else if (typeof d === "number") {
+    dateObj = new Date(d < 1e11 ? d * 1000 : d);
+  } else {
+    dateObj = new Date(d);
+  }
+  if (isNaN(dateObj.getTime())) {
+    return {
+      month: "DATE",
+      day: "1",
+      weekday: "Wed",
+      fullDate: "Scheduled Date",
+    };
+  }
+  return {
+    month: dateObj.toLocaleDateString("en-IN", { month: "short" }).toUpperCase(),
+    day: dateObj.toLocaleDateString("en-IN", { day: "numeric" }),
+    weekday: dateObj.toLocaleDateString("en-IN", { weekday: "short" }),
+    fullDate: dateObj.toLocaleDateString("en-IN", {
+      weekday: "long",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }),
+  };
+}
+
+function calculateShiftDuration(start?: string, end?: string): string {
+  if (!start || !end) return "Flexible Shift";
+  const [shStr, smStr] = start.split(":");
+  const [ehStr, emStr] = end.split(":");
+  const sh = parseInt(shStr || "9", 10);
+  const sm = parseInt(smStr || "0", 10);
+  const eh = parseInt(ehStr || "18", 10);
+  const em = parseInt(emStr || "0", 10);
+  let startMinutes = (isNaN(sh) ? 9 : sh) * 60 + (isNaN(sm) ? 0 : sm);
+  let endMinutes = (isNaN(eh) ? 18 : eh) * 60 + (isNaN(em) ? 0 : em);
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  const diff = endMinutes - startMinutes;
+  const hrs = Math.floor(diff / 60);
+  const mins = diff % 60;
+  if (hrs === 0 && mins === 0) return "Flexible";
+  if (mins === 0) return `${hrs} hrs / shift`;
+  return `${hrs}h ${mins}m / shift`;
+}
+
+function sanitizeTitleWithoutSubject(rawTitle?: string, fallback = "Job Request"): string {
+  if (!rawTitle) return fallback;
+  const cleaned = formatJobTitle(rawTitle.replace(/\s*\([^)]*\)\s*$/, ""));
+  return cleaned || fallback;
+}
+
+const JOB_DETAIL_LABELS: Record<string, string> = {
+  "gender preference": "Gender preference",
+  "preferred tutor gender": "Tutor preference",
+  "male tutors required": "Male tutors needed",
+  "female tutors required": "Female tutors needed",
+  level: "Level",
+  class: "Class",
+  "syllabus / board": "Board",
+  subjects: "Subjects",
+  "subject(s)": "Subjects",
+  "subject / focus": "Subject focus",
+  board: "Board",
+  stream: "Stream",
+  exam: "Exam",
+  examination: "Exam",
+  "course / qualification": "Course or qualification",
+  "course / technology": "Course or technology",
+  "branch / specialization": "Branch or specialization",
+  "semester / year": "Semester or year",
+  "target year": "Target year",
+  "current level": "Current level",
+  "skill level": "Skill level",
+  "learning goal": "Learning goal",
+  "learning objective": "Learning objective",
+  "skill / course": "Skill or course",
+  "language / skill": "Language or skill",
+  "proficiency level": "Proficiency level",
+  "experience level": "Experience level",
+  students: "Students",
+  "number of students": "Students",
+  "teaching format": "Teaching format",
+  "teaching mode": "Teaching mode",
+  "demo class": "Demo class",
+  "demo session": "Demo session",
+  "demo preference": "Demo preference",
+  specialty: "Specialty",
+  materials: "Materials",
+  delivery: "Delivery",
+  vehicle: "Vehicle",
+  languages: "Languages",
+  timings: "Timings",
+  schedule: "Schedule",
+  "additional requirements": "Additional requirements",
+  "male tutor quantity": "Male tutors needed",
+  "female tutor quantity": "Female tutors needed",
+};
+
+function getJobOverviewDetails(rawDetails?: string) {
+  const raw = (rawDetails || "").trim();
+  const attributes: { label: string; value: string }[] = [];
+  let remaining = raw;
+  const skipKeys = new Set(["category", "location", "work mode", "pay", "budget", "timing", "timings", "schedule", "preferred experience", "tutors required (any gender)"]);
+  const humanizeKey = (key: string) => key.replace(/\s+/g, " ").trim().replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const bracket = raw.match(/^\[([^\]]+)\]\s*/);
+  if (bracket) {
+    remaining = raw.slice(bracket[0].length).trim();
+    for (const part of bracket[1]!.split(/\s*•\s*/)) {
+      const separator = part.indexOf(":");
+      if (separator < 0) continue;
+      const key = part.slice(0, separator).trim().toLowerCase();
+      const value = part.slice(separator + 1).trim();
+      if (!skipKeys.has(key) && value) attributes.push({ label: JOB_DETAIL_LABELS[key] || humanizeKey(key), value });
+    }
+  }
+
+  const descriptionLines: string[] = [];
+  for (const originalLine of remaining.split(/\r?\n/)) {
+    const line = originalLine.trim();
+    if (!line || /^interested providers can connect through bulao\.?$/i.test(line)) continue;
+    if (/^category\s*:/i.test(line)) continue;
+    const detailLine = line.match(/^(?:[•·]\s*)?([^:\n]{2,48}):\s*(.+)$/);
+    if (detailLine) {
+      const key = detailLine[1]!.trim().toLowerCase();
+      const value = detailLine[2]!.trim();
+      if (skipKeys.has(key)) continue;
+      const label = JOB_DETAIL_LABELS[key];
+      if (label) {
+        attributes.push({ label, value });
+        continue;
+      }
+    }
+    descriptionLines.push(originalLine);
+  }
+
+  const uniqueAttributes = attributes.filter((item, index, all) =>
+    all.findIndex((candidate) => candidate.label === item.label && candidate.value === item.value) === index
+  );
+  return { attributes: uniqueAttributes, description: descriptionLines.join("\n").trim() };
+}
+
+function getRequirementIcon(label: string): keyof typeof Ionicons.glyphMap {
+  const l = label.toLowerCase();
+  if (l.includes("gender") || l.includes("male") || l.includes("female") || l.includes("tutor") || l.includes("worker") || l.includes("candidate")) {
+    return "person-outline";
+  }
+  if (l.includes("class") || l.includes("grade") || l.includes("subject") || l.includes("education") || l.includes("board") || l.includes("syllabus")) {
+    return "school-outline";
+  }
+  if (l.includes("experience") || l.includes("qualification") || l.includes("skill") || l.includes("certification")) {
+    return "ribbon-outline";
+  }
+  if (l.includes("language") || l.includes("medium") || l.includes("communication")) {
+    return "chatbubbles-outline";
+  }
+  if (l.includes("time") || l.includes("hour") || l.includes("shift") || l.includes("schedule") || l.includes("day") || l.includes("frequency")) {
+    return "time-outline";
+  }
+  if (l.includes("vehicle") || l.includes("license") || l.includes("transport") || l.includes("bike") || l.includes("car")) {
+    return "car-outline";
+  }
+  if (l.includes("tool") || l.includes("equipment") || l.includes("dress") || l.includes("uniform")) {
+    return "construct-outline";
+  }
+  return "checkmark-circle-outline";
+}
+
+function formatApproximateDistance(distanceKm?: number) {
+  if (distanceKm === undefined || !Number.isFinite(distanceKm)) return null;
+  if (distanceKm < 1) return "Under 1 km away";
+  const lower = Math.floor(distanceKm);
+  return `About ${lower}–${lower + 1} km away`;
+}
+
 export default function JobDetailScreen() {
   const rawParams = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(rawParams.id) ? rawParams.id[0] : rawParams.id;
   const insets = useSafeAreaInsets();
-  const { user: authUser, session: authSession } = useAuth();
-  const token = useSession((x) => x.token) || authSession?.token;
+  const { height: windowHeight } = useWindowDimensions();
+  const { user: authUser, session: authSession, status: authStatus } = useAuth();
+  const token = authSession?.token || null;
+  const currentUserId = authUser?.id || authSession?.userId || null;
   const client = useQueryClient();
   const postWorkStore = usePostWorkStore();
 
   const [applicationsModalVisible, setApplicationsModalVisible] = useState(false);
   const [applyModalVisible, setApplyModalVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [copiedAddress, setCopiedAddress] = useState(false);
+  const [cancellingJobModal, setCancellingJobModal] = useState(false);
+  const [mapHasEnteredView, setMapHasEnteredView] = useState(false);
+  const [mapFullScreenOpen, setMapFullScreenOpen] = useState(false);
+  const [mapIsReady, setMapIsReady] = useState(false);
+  const [mapLoadTimedOut, setMapLoadTimedOut] = useState(false);
+  const mapViewRef = useRef<UniversalMapHandle>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const mapFrameRef = useRef<View>(null);
+  const mapTopInScroll = useRef<number | null>(null);
+  const scrollViewportHeight = useRef(0);
+  const mapZoomAnimated = useRef(false);
 
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mapZoomAnimated.current = false;
+    setMapHasEnteredView(false);
+  }, [id]);
 
   const showToast = (msg: string) => {
     if (toastTimeoutRef.current) {
@@ -144,48 +337,103 @@ export default function JobDetailScreen() {
     }, 2800);
   };
 
-  // Current session user query as identity fallback
+  const jobQueryKey = ["job", id, currentUserId || "anon"];
+
   const me = useQuery({
-    queryKey: ["me", token],
+    queryKey: ["me", currentUserId || token],
     enabled: !!token,
     queryFn: () => api<{ id: string }>("/users/me"),
   });
 
-  // Fetch job details
   const jobQuery = useQuery({
-    queryKey: ["job", id],
+    queryKey: jobQueryKey,
     queryFn: () => api<Job>(`/jobs/${id}`),
     enabled: !!id,
     retry: 2,
-    staleTime: 60 * 1000,
-    placeholderData: (prev) => prev,
+    staleTime: 2000,
   });
 
   const job = jobQuery.data;
+  // Older jobs can have an address but no saved coordinates. Resolve only the
+  // public area name (never the street address), and cache it for a day.
+  const areaMapQuery = useQuery({
+    queryKey: ["job-area-map", job?.area?.trim().toLowerCase()],
+    enabled: !!job &&
+      !job.area?.toLowerCase().includes("online") &&
+      !/work mode\s*:\s*online/i.test(job.details || "") &&
+      !(typeof job.mapLatitude === "number" && Number.isFinite(job.mapLatitude) &&
+        typeof job.mapLongitude === "number" && Number.isFinite(job.mapLongitude)) &&
+      !!job.area?.trim(),
+    queryFn: async () => {
+      const matches = await locationApi.searchLocation(`${job!.area}, India`);
+      return matches[0] ?? null;
+    },
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 7 * 24 * 60 * 60 * 1000,
+    retry: 1,
+  });
+  const hasApproximateMapCenter =
+    typeof job?.mapLatitude === "number" && Number.isFinite(job.mapLatitude) &&
+    typeof job?.mapLongitude === "number" && Number.isFinite(job.mapLongitude);
+  const mapLatitude = hasApproximateMapCenter ? job?.mapLatitude! : areaMapQuery.data?.latitude;
+  const mapLongitude = hasApproximateMapCenter ? job?.mapLongitude! : areaMapQuery.data?.longitude;
+  const hasMapCenter = typeof mapLatitude === "number" && Number.isFinite(mapLatitude) &&
+    typeof mapLongitude === "number" && Number.isFinite(mapLongitude);
+  const webMapUrl = hasMapCenter
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${mapLongitude! - 0.12}%2C${mapLatitude! - 0.08}%2C${mapLongitude! + 0.12}%2C${mapLatitude! + 0.08}&layer=mapnik`
+    : null;
+  const mapResourceKey = `${job?.id ?? ""}:${mapLatitude ?? ""}:${mapLongitude ?? ""}`;
+  useEffect(() => {
+    if (!hasMapCenter) return;
+    setMapIsReady(false);
+    setMapLoadTimedOut(false);
+    const timeout = setTimeout(() => setMapLoadTimedOut(true), 8000);
+    return () => clearTimeout(timeout);
+  }, [mapResourceKey, hasMapCenter]);
+  const showMapLoadingSkeleton = areaMapQuery.isFetching ||
+    (hasMapCenter && !mapIsReady && !mapLoadTimedOut);
 
-  // Multi-source owner detection (independent of seeker/provider mode)
-  const currentUserId = authUser?.id || authSession?.userId || me.data?.id;
+  // Owner detection
+  const effectiveUserId = currentUserId || me.data?.id || null;
   const isOwner = Boolean(
-    currentUserId &&
+    effectiveUserId &&
     job?.ownerId &&
-    String(currentUserId).trim().toLowerCase() === String(job.ownerId).trim().toLowerCase()
+    String(effectiveUserId).trim().toLowerCase() === String(job.ownerId).trim().toLowerCase()
   );
 
-  // Candidate apply mutation with double-barrier security
+  // Apply mutation for workers
   const applyMutation = useMutation({
     mutationFn: () => {
       if (isOwner) {
-        throw new Error("Security Violation: You are the creator of this job posting and cannot apply to it.");
+        throw new Error("You are the owner of this job posting and cannot apply to it.");
       }
       return api(`/jobs/${id}/apply`, {});
+    },
+    onMutate: async () => {
+      await client.cancelQueries({ queryKey: ["job", id] });
+      const previousJob = client.getQueryData<Job>(jobQueryKey);
+      client.setQueryData(jobQueryKey, (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          myApplication: { id: "temp", status: "PENDING" },
+          applicantCount: (old.applicantCount || 0) + (old.myApplication ? 0 : 1),
+        };
+      });
+      return { previousJob };
     },
     onSuccess: () => {
       setApplyModalVisible(false);
       void client.invalidateQueries({ queryKey: ["activity"] });
       void client.invalidateQueries({ queryKey: ["job", id] });
+      void client.invalidateQueries({ queryKey: ["nearby"] });
+      void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
       showToast("Application submitted successfully!");
     },
-    onError: (err: any) => {
+    onError: (err: any, _variables, context) => {
+      if (context?.previousJob) {
+        client.setQueryData(jobQueryKey, context.previousJob);
+      }
       setApplyModalVisible(false);
       Alert.alert(
         "Application Restricted",
@@ -198,15 +446,13 @@ export default function JobDetailScreen() {
     if (isOwner) {
       Alert.alert(
         "Action Restricted",
-        "You created this job posting. Employers cannot apply to their own job postings, even when browsing in seeker mode.",
+        "You created this job posting. Employers cannot apply to their own job postings.",
         [{ text: "OK" }]
       );
       return;
     }
     setApplyModalVisible(true);
   };
-
-  const [cancellingJobModal, setCancellingJobModal] = useState(false);
 
   const handleCancelApplication = async (reason: string) => {
     if (!job?.myApplication?.id) return;
@@ -217,25 +463,55 @@ export default function JobDetailScreen() {
       });
       void client.invalidateQueries({ queryKey: ["job", id] });
       void client.invalidateQueries({ queryKey: ["activity"] });
+      void client.invalidateQueries({ queryKey: ["nearby"] });
+      void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
       showToast("Job application cancelled.");
     } catch (err: any) {
       Alert.alert("Cancellation Failed", err?.message || "Could not cancel application.");
     }
   };
 
-  // Edit Job Action: populates all fields into postWorkStore and launches post-work
   const handleEditJob = () => {
     if (!job) return;
     postWorkStore.initForEdit(job);
     router.push("/post-work");
   };
 
-  // Share Poster
+  const handleDeleteJob = () => {
+    if (!job) return;
+    Alert.alert(
+      "Delete Job?",
+      "This job and all applicant records will be permanently removed everywhere.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await api(`/jobs/${job.id}`, undefined, "DELETE");
+              void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
+              void client.invalidateQueries({ queryKey: ["my-jobs"] });
+              void client.invalidateQueries({ queryKey: ["provider-stats"] });
+              void client.invalidateQueries({ queryKey: ["activity"] });
+              void client.invalidateQueries({ queryKey: ["interactions"] });
+              void client.invalidateQueries({ queryKey: ["jobs"] });
+              showToast("Job permanently deleted.");
+              router.replace("/activity");
+            } catch (err: any) {
+              Alert.alert("Delete Failed", err?.message || "Could not delete job.");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleShare = async () => {
     if (!job) return;
-    const title = job.customTitle || job.title;
-    const pay = `₹${Math.round(job.payPaise / 100)} / ${job.payUnit}`;
-    const text = `📢 BULAO WORK OPPORTUNITY\n💼 Role: ${job.roleName || title}\n💰 Wage: ${pay} (Direct Payout)\n👥 Workers: ${job.workers || 1}\n📍 Location: ${job.area}\n📅 Date: ${new Date(job.startsAt * 1000).toLocaleDateString("en-IN")}\n\nView details on Bulao: bulao://jobs/${job.id}`;
+    const title = sanitizeTitleWithoutSubject(job.customTitle || job.title);
+    const pay = `₹${Math.round(job.payPaise / 100).toLocaleString("en-IN")} / ${job.payUnit}`;
+    const text = `📢 BULAO WORK OPPORTUNITY\n💼 Role: ${job.roleName || title}\n💰 Wage: ${pay} (Direct Payout)\n👥 Workers: ${job.workers || 1}\n📍 Location: ${job.area}\n📅 Date: ${new Date(job.startsAt * 1000).toLocaleDateString("en-IN")}\n\nView details: bulao://jobs/${job.id}`;
     try {
       await Share.share({
         title: `Work Opportunity: ${title}`,
@@ -246,40 +522,41 @@ export default function JobDetailScreen() {
     }
   };
 
-  const handleCopyAddress = () => {
-    setCopiedAddress(true);
-    showToast("Worksite address copied to clipboard!");
-    setTimeout(() => setCopiedAddress(false), 2400);
-  };
-
-  // Parse exact coordinates given by user
+  // Coordinates
   const rawLat = job?.latitude !== undefined && job?.latitude !== null ? parseFloat(String(job.latitude)) : NaN;
   const rawLng = job?.longitude !== undefined && job?.longitude !== null ? parseFloat(String(job.longitude)) : NaN;
   const hasExactCoords = !isNaN(rawLat) && !isNaN(rawLng) && rawLat >= -90 && rawLat <= 90 && rawLng >= -180 && rawLng <= 180 && (rawLat !== 0 || rawLng !== 0);
-  const jobLat = hasExactCoords ? rawLat : 17.3850;
-  const jobLng = hasExactCoords ? rawLng : 78.4867;
-
-  const handleOpenMaps = () => {
-    if (!job) return;
+  const handleOpenMaps = async () => {
+    if (!job || !canNavigateToWorksite) return;
     let url = "";
     if (hasExactCoords) {
-      url = `https://www.google.com/maps/search/?api=1&query=${jobLat},${jobLng}`;
-    } else {
+      url = `https://www.google.com/maps/dir/?api=1&destination=${rawLat},${rawLng}`;
+    } else if (job.address?.trim()) {
       const query = job.address ? `${job.address}, ${job.area}` : job.area;
-      url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+      url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
+    } else {
+      Alert.alert("Directions unavailable", "The provider has not added a precise address for this worksite.");
+      return;
     }
-    void Linking.openURL(url);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Unable to open maps", "Your device could not open a maps app. You can still use the address shown here.");
+    }
   };
 
-  const handleCall = (phoneNumber?: string | null) => {
+  const handleCall = async (phoneNumber?: string | null) => {
     if (phoneNumber) {
-      void Linking.openURL(`tel:${phoneNumber}`);
+      try {
+        await Linking.openURL(`tel:${phoneNumber}`);
+      } catch {
+        Alert.alert("Unable to call", "Your device could not open the phone app. You can still use the number shown in the job details.");
+      }
     } else {
       Alert.alert("Contact Unavailable", "Phone number is not available.");
     }
   };
 
-  // Contextual experience options matching the role & category
   const dynamicExperienceOptions = useMemo(() => {
     if (!job) return [];
     return getExperienceOptionsForRole(
@@ -289,893 +566,801 @@ export default function JobDetailScreen() {
     );
   }, [job?.roleId, job?.roleName, job?.title, job?.categoryId]);
 
-  if (jobQuery.isPending && !job) {
+  const waitingForIdentity = !!token && !authUser?.id && !authSession?.userId && me.isPending;
+  if (authStatus === "bootstrapping" || waitingForIdentity || (jobQuery.isPending && !job)) {
     return (
-      <View style={{ flex: 1, backgroundColor: pro.canvas }}>
-        <JobDetailSkeleton />
-      </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.emeraldDark }} edges={["top"]}>
+        <StatusBar style="light" />
+        <JobDetailSkeleton bottomInset={insets.bottom} />
+      </SafeAreaView>
     );
   }
 
   if (jobQuery.isError || !job) {
     return (
       <SafeAreaView style={styles.stateCenter}>
-        <Ionicons name="alert-circle-outline" size={52} color={pro.gold} />
-        <Text style={styles.errorHeading}>Position Unavailable</Text>
+        <Ionicons name="alert-circle-outline" size={56} color="#DC2626" />
+        <Text style={styles.errorHeading}>Job Unavailable</Text>
         <Text style={styles.errorSubtext}>
-          {jobQuery.error instanceof Error
+          {jobQuery.error instanceof Error && jobQuery.error.message
             ? jobQuery.error.message
-            : "This job opportunity has been closed or is temporarily unavailable."}
+            : "This job was deleted and is no longer available."}
         </Text>
-        <Pressable style={styles.errorBackBtn} onPress={() => router.back()}>
+        <Pressable
+          style={styles.errorBackBtn}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/find-work");
+          }}
+        >
           <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
-          <Text style={styles.errorBackBtnText}>Go Back</Text>
+          <Text style={styles.errorBackBtnText}>Go to Jobs</Text>
         </Pressable>
       </SafeAreaView>
     );
   }
 
-  const roleEmoji =
-    job.roleIcon || getExactRoleIcon(job.roleId || "", job.title || "", job.categoryId || "");
-  const displayTitle = job.customTitle || job.title || "Work Opportunity";
-  const categoryLabel = (job.categoryName || "General Work").toUpperCase();
-  const roleLabel = job.roleName || job.title || "Skilled Worker";
-
-  // Date & Duration Calculations
-  const startDate = new Date(job.startsAt * 1000);
-  const formattedStartDate = !isNaN(startDate.getTime())
-    ? startDate.toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : "Immediate";
-
-  let durationLabel = "1 Day";
-  let durationSubLabel = "Single day shift";
-  let durationIcon = "📅";
-  let totalDays = 1;
-  if (job.duration === "few") {
-    durationIcon = "📆";
-    if (job.endsAt) {
-      const endDate = new Date(job.endsAt * 1000);
-      const diffDays = Math.max(1, Math.round((job.endsAt - job.startsAt) / 86400));
-      totalDays = diffDays;
-      durationLabel = `${diffDays} Days`;
-      durationSubLabel = `Until ${endDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
-    } else {
-      durationLabel = "Few Days";
-      durationSubLabel = "Estimated 2-5 days";
-      totalDays = 3;
-    }
-  } else if (job.duration === "ongoing") {
-    durationIcon = "∞";
-    durationLabel = "Ongoing";
-    durationSubLabel = "Continuous work";
+  if (job.status === "DELETED") {
+    const isOwner = Boolean(
+      effectiveUserId &&
+      job.ownerId &&
+      String(effectiveUserId).trim().toLowerCase() === String(job.ownerId).trim().toLowerCase()
+    );
+    return (
+      <SafeAreaView style={styles.stateCenter}>
+        <Ionicons name="trash-outline" size={56} color="#DC2626" />
+        <Text style={styles.errorHeading}>Job Unavailable</Text>
+        <Text style={styles.errorSubtext}>
+          {isOwner
+            ? "You deleted this job listing. It is permanently removed from active listings and is unavailable."
+            : "This job was deleted by the employer and is no longer available."}
+        </Text>
+        <Pressable
+          style={styles.errorBackBtn}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace(isOwner ? "/activity" : "/find-work");
+          }}
+        >
+          <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
+          <Text style={styles.errorBackBtnText}>
+            {isOwner ? "Back to My Jobs" : "Find Other Jobs"}
+          </Text>
+        </Pressable>
+      </SafeAreaView>
+    );
   }
+
+  const displayTitle = sanitizeTitleWithoutSubject(
+    job.customTitle || job.title,
+    job.roleName || "Work Opportunity"
+  );
+  const categoryLabel = job.categoryName || "General work";
+  const roleLabel = job.roleName || "this job";
+
+  // Date and duration calculations
+  const startDateDetails = getDateDetails(job.startsAt);
+  const endDateDetails = job.endsAt ? getDateDetails(job.endsAt) : null;
+  const isMultiDay = Boolean(job.duration === "few" && job.endsAt);
+  const totalDays = isMultiDay && job.endsAt ? Math.max(1, Math.round((job.endsAt - job.startsAt) / 86400)) : 1;
 
   // Timing Formatting
   const startClock = formatClockTime(job.startTime, "09:00 AM");
-  const endClock = formatClockTime(job.endTime, "05:00 PM");
-  const timingLabel =
-    job.hours === "custom" && job.startTime && job.endTime
-      ? `${startClock} – ${endClock}`
-      : "09:00 AM – 05:00 PM";
-  const shiftBadge = job.hours === "custom" ? "Custom" : "8 Hours";
-  const shiftSub = job.hours === "custom" ? "Custom timings" : "Standard day shift";
-  const hoursIcon = job.hours === "custom" ? "⏱️" : "☀️";
-
-  // Matched Experience details with respective icons from post-work flow
+  const endClock = formatClockTime(job.endTime, "06:00 PM");
+  // Experience level
   const matchedExp =
     dynamicExperienceOptions.find((o) => o.value === job.experience) ||
     (job.experience === "expert"
-      ? {
-          value: "expert",
-          badge: "Expert",
-          label: "3+ Years",
-          subtext: "Master level pro",
-          icon: "👑",
-        }
+      ? { badge: "Expert", label: "3+ Years", icon: "👑" }
       : job.experience === "some"
-      ? {
-          value: "some",
-          badge: "Skilled",
-          label: "1–2 Years",
-          subtext: "Independent tool work",
-          icon: "⚡",
-        }
-      : {
-          value: "any",
-          badge: "Any",
-          label: "Any Level",
-          subtext: "Freshers welcome",
-          icon: "🌱",
-        });
+      ? { badge: "Experienced", label: "1–2 Years", icon: "⚡" }
+      : { badge: "Any Level", label: "Fresher / Any", icon: "🌱" });
 
-  // Wage & Total Project Value
-  const wagePerUnit = Math.round(job.payPaise / 100);
-  const payWhenMap: Record<string, { label: string; icon: string; desc: string }> = {
-    after: { label: "After Work", icon: "✅", desc: "Paid immediately after work completion" },
-    daily: { label: "Daily Payout", icon: "📅", desc: "Paid daily at shift completion" },
-    weekly: { label: "Weekly Payout", icon: "📆", desc: "Weekly bank/UPI settlement" },
-    monthly: { label: "Monthly Cycle", icon: "🏦", desc: "Monthly direct billing" },
+  // Wage
+  const wagePerUnit = Math.round(job.payPaise / 100).toLocaleString("en-IN");
+  const payWhenMap: Record<string, string> = {
+    after: "Paid upon completion",
+    daily: "Paid same day / daily",
+    weekly: "Paid weekly",
+    monthly: "Paid monthly at month end",
   };
-  const paySchedule = payWhenMap[job.paidWhen || "after"] || {
-    label: "Direct Settlement",
-    icon: "✅",
-    desc: "Direct payout upon shift completion",
-  };
+  const payScheduleText = payWhenMap[job.paidWhen || "after"] || "Paid upon completion";
 
-  const totalWorkers = job.workers || 1;
-  const workerGenderBadge =
-    (job as any).gender === "male"
-      ? "Male Only"
-      : (job as any).gender === "female"
-      ? "Female Only"
-      : "All Welcome";
-  let estimatedTotalPayout = wagePerUnit * totalWorkers;
-  if (job.duration === "few" && totalDays > 1 && job.payUnit === "day") {
-    estimatedTotalPayout = wagePerUnit * totalDays * totalWorkers;
-  }
-
+  const totalWorkers = Math.max(1, job.workers || 1);
+  const acceptedWorkers = Math.max(0, job.acceptedCount ?? (totalWorkers - (job.remainingWorkers ?? totalWorkers)));
+  const remainingWorkers = Math.max(0, job.remainingWorkers ?? (totalWorkers - acceptedWorkers));
   const extrasList = Array.isArray(job.extras) ? job.extras : [];
   const applicantsList = Array.isArray(job.applicants) ? job.applicants : [];
   const applicantsCount = job.applicantCount || applicantsList.length || 0;
-  const jobReference = (job.id || "BULAO").slice(0, 8).toUpperCase();
+  const hasActiveApplication = ["PENDING", "ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(job.myApplication?.status || "");
   const isStopped = job.status === "PAUSED";
-  const isFilled = job.status === "FILLED";
+  const isFilled = job.status === "FILLED" || remainingWorkers === 0;
+  const isClosed = ["CANCELLED", "COMPLETED", "DELETED", "EXPIRED"].includes(job.status);
+  const isUnavailable = isStopped || isFilled || isClosed;
+  const isOnline = Boolean(
+    job.area?.toLowerCase().includes("online") || /work mode\s*:\s*online/i.test(job.details || "")
+  );
+  const rawWorkMode = job.details.match(/work mode\s*:\s*(online|home|center|site|flexible)/i)?.[1]?.toLowerCase();
+  const workModeLabel = isOnline
+    ? "Online"
+    : rawWorkMode === "center"
+      ? "At a center"
+      : rawWorkMode === "home"
+        ? "At employer’s location"
+        : rawWorkMode === "flexible"
+          ? "Flexible"
+          : "On site";
+  const isAcceptedSeeker = ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(job.myApplication?.status || "");
+  const canViewExactLocation = !isOnline && (isOwner || isAcceptedSeeker);
+  const hasDestination = hasExactCoords || Boolean(job.address?.trim());
+  const canNavigateToWorksite = !isOwner && !isOnline &&
+    ["ACCEPTED", "IN_PROGRESS"].includes(job.myApplication?.status || "") && hasDestination;
+
+  const overviewDetails = getJobOverviewDetails(job.details);
+  const approximateDistance = formatApproximateDistance(job.distanceKm);
+  const hasProviderRating = typeof job.ownerRating === "number" && job.ownerRating > 0;
+  const handleOverviewScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (mapZoomAnimated.current || mapTopInScroll.current === null || scrollViewportHeight.current === 0) return;
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const mapTop = mapTopInScroll.current;
+    const mapBottom = mapTop + 148;
+    const viewportBottom = scrollY + scrollViewportHeight.current;
+    if (viewportBottom <= mapTop || scrollY >= mapBottom) return;
+
+    mapZoomAnimated.current = true;
+    setMapHasEnteredView(true);
+    if (Platform.OS !== "web" && hasMapCenter) {
+      mapViewRef.current?.animateToRegion({
+        latitude: mapLatitude!,
+        longitude: mapLongitude!,
+        latitudeDelta: 0.16,
+        longitudeDelta: 0.16,
+      }, 900);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top"]}>
+    <View style={styles.screen}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={[theme.emeraldDark, "#0B6046", theme.canvas]}
+        locations={[0, 0.42, 1]}
+        style={[styles.topPageGradient, { height: Math.round(windowHeight * 0.3) }]}
+      />
+      <View style={{ height: insets.top, backgroundColor: "transparent" }} />
+      <StatusBar style="light" />
       <PageTransition style={{ flex: 1 }}>
-        {/* ── 1. EXECUTIVE GLASS-FINISH HEADER BAR ── */}
-      <View style={styles.topNav}>
-        <Pressable
-          style={styles.navRoundBtn}
-          onPress={() => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace("/find-work");
-            }
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="arrow-back" size={20} color={pro.ink} />
-        </Pressable>
+        {/* ── 1. CLEAN APP HEADER ── */}
+        <View style={styles.topNav}>
+          <Pressable
+            style={styles.navRoundBtn}
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace("/find-work");
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={8}
+          >
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+          </Pressable>
 
-        <View style={styles.navCenter}>
-          <Text style={styles.navTitle}>Job Overview</Text>
-          <View style={styles.navSerialPill}>
-            <Text style={styles.navSerialText}>POSTER REF #{jobReference}</Text>
-          </View>
-        </View>
-
-        <Pressable
-          style={styles.navRoundBtn}
-          onPress={handleShare}
-          accessibilityRole="button"
-          accessibilityLabel="Share Job"
-        >
-          <Ionicons name="share-social-outline" size={19} color={pro.ink} />
-        </Pressable>
-      </View>
-
-      {/* ── FLOATING NOTIFICATION TOAST (SMOOTH SPRING IN & SILKY EASE OUT) ── */}
-      {!!toastMessage && (
-        <Animated.View
-          style={[
-            styles.toastBox,
-            {
-              opacity: toastAnim,
-              transform: [
-                {
-                  translateY: toastAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-24, 0],
-                  }),
-                },
-                {
-                  scale: toastAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.93, 1],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Ionicons name="checkmark-circle" size={17} color={pro.emeraldLight} />
-          <Text style={styles.toastText}>{toastMessage}</Text>
-        </Animated.View>
-      )}
-
-      {/* ── SCROLLABLE MASTER POSTER CANVAS ── */}
-      <ScrollView
-        style={styles.scrollContainer}
-        contentContainerStyle={[
-          styles.scrollInner,
-          { paddingBottom: insets.bottom + 120 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── 2. HERO POSTER IDENTITY CARD ── */}
-        <View style={styles.heroPosterCard}>
-          {/* Top Hierarchy Row: Category Badge + Dynamic Status Indicator */}
-          <View style={styles.heroMetaRow}>
-            <View style={styles.categoryBadge}>
-              <Ionicons name="briefcase-outline" size={12} color={pro.emeraldPrimary} />
-              <Text style={styles.categoryBadgeText}>{categoryLabel}</Text>
-            </View>
-
-            {isStopped ? (
-              <View style={[styles.liveStatusTag, { backgroundColor: pro.goldSoft }]}>
-                <View style={[styles.statusDot, { backgroundColor: pro.gold }]} />
-                <Text style={[styles.liveStatusText, { color: pro.gold }]}>
-                  Posting On Hold
-                </Text>
-              </View>
-            ) : isFilled ? (
-              <View style={[styles.liveStatusTag, { backgroundColor: pro.blueSoft }]}>
-                <View style={[styles.statusDot, { backgroundColor: pro.blueAccent }]} />
-                <Text style={[styles.liveStatusText, { color: pro.blueAccent }]}>
-                  Position Filled
-                </Text>
-              </View>
-            ) : (
-              <View style={[styles.liveStatusTag, { backgroundColor: pro.emeraldSoft }]}>
-                <View style={[styles.statusDot, { backgroundColor: pro.emeraldLight }]} />
-                <Text style={[styles.liveStatusText, { color: pro.emeraldPrimary }]}>
-                  Active • Hiring Now
-                </Text>
-              </View>
-            )}
+          <View style={styles.navCenter}>
+            <Text style={styles.navTitle}>Job details</Text>
           </View>
 
-          {/* Trade Identity Spotlight */}
-          <View style={styles.tradeHeaderRow}>
-            <View style={styles.tradeEmblemBox}>
-              <Text style={styles.tradeEmblemEmoji}>{roleEmoji}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.tradeRoleName}>{roleLabel}</Text>
-              <Text style={styles.tradeCustomHeadline} numberOfLines={2}>
-                {displayTitle}
-              </Text>
-            </View>
-          </View>
-
-          {/* Poster Metadata Strip */}
-          <View style={styles.heroCardFooter}>
-            <View style={styles.metaIconTag}>
-              <Ionicons name="time-outline" size={13} color={pro.muted} />
-              <Text style={styles.metaIconText}>
-                Published {formatRelativeTime(job.createdAt)}
-              </Text>
-            </View>
-
-            {isOwner ? (
-              <View style={styles.ownerNoticeTag}>
-                <Ionicons name="person-circle" size={13} color={pro.emeraldPrimary} />
-                <Text style={styles.ownerNoticeTagText}>Your Job Posting</Text>
-              </View>
-            ) : (
-              <View style={styles.verifiedJobTag}>
-                <Ionicons name="shield-checkmark" size={13} color={pro.emeraldPrimary} />
-                <Text style={styles.verifiedJobTagText}>Direct Employer</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── 3. COMPENSATION & REMUNERATION VAULT CARD ── */}
-        <LinearGradient
-          colors={[pro.emeraldDark, pro.emeraldPrimary]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.compGradientCard}
-        >
-          {/* Top Guarantee Pill */}
-          <View style={styles.compHeaderRow}>
-            <Text style={styles.compSubtitle}>OFFERED REMUNERATION</Text>
-            <View style={styles.zeroFeePill}>
-              <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
-              <Text style={styles.zeroFeeText}>0% Platform Fee • 100% Payout</Text>
-            </View>
-          </View>
-
-          {/* Wage Main Display */}
-          <View style={styles.compAmountRow}>
-            <Text style={styles.compCurrencySign}>₹</Text>
-            <Text style={styles.compAmountNumber}>
-              {wagePerUnit.toLocaleString("en-IN")}
-            </Text>
-            <Text style={styles.compUnitLabel}>/ {job.payUnit.toUpperCase()}</Text>
-          </View>
-
-          {/* Payout Schedule Note */}
-          <View style={styles.compDivider} />
-
-          <View style={styles.compFooterRow}>
-            <View style={styles.payoutTimingChip}>
-              <Text style={styles.payoutTimingChipEmoji}>{paySchedule.icon}</Text>
-              <Text style={styles.payoutTimingChipText}>{paySchedule.label}</Text>
-            </View>
-
-            {/* Total Budget / Multi-worker Calculation */}
-            {totalWorkers > 1 || (job.duration === "few" && totalDays > 1 && job.payUnit === "day") ? (
-              <View style={styles.totalBudgetChip}>
-                <Text style={styles.totalBudgetText}>
-                  Est. Budget: ₹{estimatedTotalPayout.toLocaleString("en-IN")}
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.directEscrowNote}>{paySchedule.desc}</Text>
-            )}
-          </View>
-        </LinearGradient>
-
-        {/* ── 4. KEY SPECIFICATIONS (PREMIUM 2x2 BALANCED GRID — ZERO UNDERFLOW / NO CLIPPING) ── */}
-        <View style={styles.bentoSection}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionHeading}>KEY SPECIFICATIONS</Text>
-            <View style={styles.verifiedSpecsBadge}>
-              <Ionicons name="checkmark-done" size={12} color={pro.emeraldPrimary} />
-              <Text style={styles.verifiedSpecsBadgeText}>Verified Requirements</Text>
-            </View>
-          </View>
-
-          {/* 4 Balanced Cards with Generous Breathing Room */}
-          <View style={styles.bentoGrid}>
-            {/* 1. Workers */}
-            <View style={styles.bentoCard}>
-              <View style={styles.bentoHeaderRow}>
-                <View style={styles.bentoIconLabelGroup}>
-                  <View style={[styles.bentoIconBox, { backgroundColor: pro.emeraldSoft }]}>
-                    <Text style={styles.bentoEmoji}>👥</Text>
-                  </View>
-                  <Text style={styles.bentoLabel}>Workers</Text>
-                </View>
-                <View style={[styles.bentoBadgePill, { backgroundColor: pro.emeraldSoft }]}>
-                  <Text style={[styles.bentoBadgePillText, { color: pro.emeraldPrimary }]}>
-                    {workerGenderBadge}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.bentoBody}>
-                <Text
-                  style={styles.bentoPrimaryVal}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.85}
-                >
-                  {totalWorkers} {totalWorkers === 1 ? "Worker" : "Workers"}
-                </Text>
-                <Text style={styles.bentoSubVal} numberOfLines={2}>
-                  On-site placement
-                </Text>
-              </View>
-            </View>
-
-            {/* 2. Experience */}
-            <View style={styles.bentoCard}>
-              <View style={styles.bentoHeaderRow}>
-                <View style={styles.bentoIconLabelGroup}>
-                  <View style={[styles.bentoIconBox, { backgroundColor: pro.goldSoft }]}>
-                    <Text style={styles.bentoEmoji}>{matchedExp.icon}</Text>
-                  </View>
-                  <Text style={styles.bentoLabel}>Experience</Text>
-                </View>
-                <View style={[styles.bentoBadgePill, { backgroundColor: pro.goldSoft }]}>
-                  <Text style={[styles.bentoBadgePillText, { color: pro.gold }]}>
-                    {matchedExp.badge}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.bentoBody}>
-                <Text
-                  style={styles.bentoPrimaryVal}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.85}
-                >
-                  {matchedExp.label}
-                </Text>
-                <Text style={styles.bentoSubVal} numberOfLines={2}>
-                  {matchedExp.subtext}
-                </Text>
-              </View>
-            </View>
-
-            {/* 3. Start Date */}
-            <View style={styles.bentoCard}>
-              <View style={styles.bentoHeaderRow}>
-                <View style={styles.bentoIconLabelGroup}>
-                  <View style={[styles.bentoIconBox, { backgroundColor: pro.blueSoft }]}>
-                    <Text style={styles.bentoEmoji}>{durationIcon}</Text>
-                  </View>
-                  <Text style={styles.bentoLabel}>Start Date</Text>
-                </View>
-                <View style={[styles.bentoBadgePill, { backgroundColor: pro.blueSoft }]}>
-                  <Text style={[styles.bentoBadgePillText, { color: pro.blueAccent }]}>
-                    {durationLabel}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.bentoBody}>
-                <Text
-                  style={styles.bentoPrimaryVal}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.85}
-                >
-                  {formattedStartDate}
-                </Text>
-                <Text style={styles.bentoSubVal} numberOfLines={2}>
-                  {durationSubLabel}
-                </Text>
-              </View>
-            </View>
-
-            {/* 4. Timings */}
-            <View style={styles.bentoCard}>
-              <View style={styles.bentoHeaderRow}>
-                <View style={styles.bentoIconLabelGroup}>
-                  <View style={[styles.bentoIconBox, { backgroundColor: pro.purpleSoft }]}>
-                    <Text style={styles.bentoEmoji}>{hoursIcon}</Text>
-                  </View>
-                  <Text style={styles.bentoLabel}>Timings</Text>
-                </View>
-                <View style={[styles.bentoBadgePill, { backgroundColor: pro.purpleSoft }]}>
-                  <Text style={[styles.bentoBadgePillText, { color: pro.purpleAccent }]}>
-                    {shiftBadge}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.bentoBody}>
-                <Text
-                  style={styles.bentoPrimaryVal}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.80}
-                >
-                  {timingLabel}
-                </Text>
-                <Text style={styles.bentoSubVal} numberOfLines={2}>
-                  {shiftSub}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* ── 5. WORKSITE LOCATION & EXACT GOOGLE MAP PIN ── */}
-        <View style={styles.venueCard}>
-          <View style={styles.venueHeaderRow}>
-            <View style={styles.venueIconSquare}>
-              <Ionicons name="location" size={20} color={pro.emeraldPrimary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.venueHeaderLabel}>WORKSITE VENUE & LOCATION</Text>
-              <Text style={styles.venueAreaName}>{job.area}</Text>
-            </View>
-
-            {hasExactCoords && (
-              <View style={styles.gpsCoordBadge}>
-                <Ionicons name="navigate-circle" size={12} color={pro.emeraldPrimary} />
-                <Text style={styles.gpsCoordText}>Exact Pin</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Embedded Google Map View with Exact Coordinates */}
-          <View style={styles.mapWrap}>
-            <MapView
-              key={`map-${jobLat}-${jobLng}`}
-              provider={PROVIDER_GOOGLE}
-              style={styles.map}
-              initialRegion={{
-                latitude: jobLat,
-                longitude: jobLng,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
-              }}
-              region={{
-                latitude: jobLat,
-                longitude: jobLng,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
-              }}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              showsCompass={true}
-              scrollEnabled={true}
-              zoomEnabled={true}
-              pitchEnabled={false}
-              rotateEnabled={false}
-              mapType="standard"
-            >
-              <Marker
-                coordinate={{
-                  latitude: jobLat,
-                  longitude: jobLng,
-                }}
-                title={job.area || "Worksite"}
-                description={job.address || job.area || "Exact worksite location"}
-                pinColor={pro.emeraldPrimary}
-              />
-            </MapView>
-
-            <View style={styles.mapTopBadge}>
-              <View style={styles.livePulseDot} />
-              <Text style={styles.mapTopBadgeText}>Exact Worksite Location</Text>
-            </View>
-
-            <View style={styles.mapFooterStrip}>
-              <Ionicons name="navigate-outline" size={12} color={pro.muted} />
-              <Text style={styles.mapFooterStripText}>
-                {hasExactCoords
-                  ? `${jobLat.toFixed(5)}° N, ${jobLng.toFixed(5)}° E • Verified GPS Point`
-                  : `${job.area} • Worksite location`}
-              </Text>
-            </View>
-          </View>
-
-          {/* Full Street Address with Exact Venue Tag */}
-          <View style={styles.addressBox}>
-            <Ionicons name="business-outline" size={16} color={pro.emeraldPrimary} style={{ marginTop: 2 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.venueAddressHeader}>EXACT ADDRESS</Text>
-              <Text style={styles.venueFullAddress}>
-                {job.address && job.address.trim().length > 0
-                  ? job.address.trim()
-                  : `${job.area}, Worksite`}
-              </Text>
-              {job.area && job.address && !job.address.toLowerCase().includes(job.area.toLowerCase()) ? (
-                <Text style={styles.venueAreaSub}>{job.area}</Text>
-              ) : null}
-            </View>
-          </View>
-
-          {/* Action Row: Copy Address + Open in Google Maps */}
-          <View style={styles.venueActionRow}>
+          <View style={{ width: 36, alignItems: "flex-end" }}>
             <Pressable
-              style={styles.actionPillBtn}
-              onPress={handleCopyAddress}
+              style={styles.navRoundBtn}
+              onPress={handleShare}
               accessibilityRole="button"
-              accessibilityLabel="Copy address"
+              accessibilityLabel="Share"
+              hitSlop={8}
             >
-              <Ionicons
-                name={copiedAddress ? "checkmark" : "copy-outline"}
-                size={14}
-                color={pro.emeraldPrimary}
-              />
-              <Text style={styles.actionPillBtnText}>
-                {copiedAddress ? "Copied" : "Copy Address"}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.actionPillBtn, styles.actionPillBtnSecondary]}
-              onPress={handleOpenMaps}
-              accessibilityRole="button"
-              accessibilityLabel="View directions in Google Maps"
-            >
-              <Ionicons name="map-outline" size={14} color={pro.ink} />
-              <Text style={[styles.actionPillBtnText, { color: pro.ink }]}>
-                Open in Maps
-              </Text>
+              <Ionicons name="share-social-outline" size={19} color="#FFFFFF" />
             </Pressable>
           </View>
         </View>
 
-        {/* ── 6. FACILITIES & PERKS CLOUD ── */}
-        {extrasList.length > 0 && (
-          <View style={styles.sectionWrap}>
-            <Text style={styles.sectionHeading}>PROVIDED AMENITIES & PERKS</Text>
-            <View style={styles.perksWrap}>
-              {extrasList.map((item: string, idx: number) => {
-                let iconName: keyof typeof Ionicons.glyphMap = "checkmark-circle";
-                const lower = item.toLowerCase();
-                if (lower.includes("food") || lower.includes("meal")) iconName = "restaurant";
-                else if (lower.includes("travel") || lower.includes("transport")) iconName = "car";
-                else if (lower.includes("tool")) iconName = "hammer";
-                else if (lower.includes("safety") || lower.includes("gear")) iconName = "shield";
-                else if (lower.includes("stay") || lower.includes("room") || lower.includes("accom")) iconName = "bed";
-                else if (lower.includes("tea") || lower.includes("coffee")) iconName = "cafe";
-                else if (lower.includes("bonus") || lower.includes("overtime")) iconName = "cash";
-
-                return (
-                  <View key={idx} style={styles.perkChip}>
-                    <Ionicons name={iconName} size={15} color={pro.emeraldPrimary} />
-                    <Text style={styles.perkChipText}>{item}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
+        {/* ── Floating Toast ── */}
+        {toastMessage && (
+          <Animated.View
+            style={[
+              styles.toastBox,
+              {
+                opacity: toastAnim,
+                transform: [
+                  {
+                    translateY: toastAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-12, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </Animated.View>
         )}
 
-        {/* ── 7. SCOPE OF WORK & CLIENT INSTRUCTIONS ── */}
-        {job.details && job.details.trim().length > 0 ? (
-          <View style={styles.sectionWrap}>
-            <Text style={styles.sectionHeading}>JOB SPECIFICATION & NOTES</Text>
-            <View style={styles.scopeCard}>
-              <View style={styles.scopeHeaderRow}>
-                <Ionicons name="document-text" size={16} color={pro.emeraldPrimary} />
-                <Text style={styles.scopeCardTitle}>Instructions from Client</Text>
+        {/* ── JOB OVERVIEW ── */}
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollContainer}
+          contentContainerStyle={[styles.overviewContent, { paddingBottom: Math.max(insets.bottom, 16) + 70 }]}
+          showsVerticalScrollIndicator={false}
+          onLayout={(event) => { scrollViewportHeight.current = event.nativeEvent.layout.height; }}
+          onScroll={handleOverviewScroll}
+          scrollEventThrottle={16}
+        >
+          <View style={styles.introCard}>
+            <View style={styles.introTopRow}>
+              <Text style={styles.categoryEyebrow} numberOfLines={1}>{categoryLabel}</Text>
+              <View style={[styles.statusPill, isStopped ? styles.statusPillPaused : isFilled || isClosed ? styles.statusPillClosed : styles.statusPillOpen]}>
+                <View style={[styles.statusDot, isStopped ? styles.statusDotPaused : isFilled || isClosed ? styles.statusDotClosed : styles.statusDotOpen]} />
+                <Text style={[styles.statusText, isStopped ? styles.statusTextPaused : isFilled || isClosed ? styles.statusTextClosed : styles.statusTextOpen]}>
+                  {isStopped ? "Paused" : isFilled ? "Filled" : isClosed ? "Closed" : "Open"}
+                </Text>
               </View>
-              <Text style={styles.scopeBodyText}>{job.details.trim()}</Text>
-            </View>
-          </View>
-        ) : null}
-
-        {/* ── 8. AUTHORIZED EMPLOYER CREDENTIALS ── */}
-        <View style={styles.sectionWrap}>
-          <View style={styles.employerCard}>
-            <View style={styles.employerAvatarSquare}>
-              <Text style={styles.employerAvatarInitial}>
-                {(job.ownerName || "E").charAt(0).toUpperCase()}
-              </Text>
             </View>
 
-            <View style={{ flex: 1 }}>
-              <Text style={styles.employerSubtitle}>POSTED & VERIFIED BY</Text>
-              <Text style={styles.employerNameText}>
-                {job.ownerName || "Verified Employer"}
-              </Text>
-              <View style={styles.employerBadgeRow}>
-                <Ionicons name="shield-checkmark" size={13} color={pro.emeraldLight} />
-                <Text style={styles.employerBadgeText}>Identity & Phone Verified Client</Text>
-              </View>
-              {!isOwner && job.ownerPhone ? (
-                <View style={styles.employerPhoneRow}>
-                  <Ionicons name="call" size={12} color={pro.emeraldPrimary} />
-                  <Text style={styles.employerPhoneText}>
-                    {formatDirectPhone(job.ownerPhone)}
-                  </Text>
+            <Text style={styles.overviewTitle}>{displayTitle}</Text>
+
+            <View style={styles.providerRow}>
+              <Pressable
+                style={styles.providerProfileButton}
+                onPress={() => router.push({ pathname: "/profile/[id]", params: { id: job.ownerId, jobId: job.id } })}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${job.ownerName || "provider"}'s profile`}
+                hitSlop={4}
+              >
+                <View style={styles.providerAvatar}>
+                  {job.ownerPhotoUrl ? (
+                    <AppImage source={{ uri: job.ownerPhotoUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  ) : (
+                    <Text style={styles.providerInitial}>{(job.ownerName || "P").trim().charAt(0).toUpperCase()}</Text>
+                  )}
                 </View>
+                <View style={styles.providerIdentity}>
+                  <View style={styles.providerNameLine}>
+                    <Text style={styles.providerName} numberOfLines={1}>{job.ownerName || "Provider"}</Text>
+                    {job.ownerVerified ? <View style={styles.phoneVerifiedTag}><Ionicons name="checkmark-circle" size={12} color={theme.emeraldPrimary} /><Text style={styles.phoneVerifiedText}>Phone verified</Text></View> : null}
+                  </View>
+                  <View style={styles.providerRatingLine}>
+                    <Ionicons name={hasProviderRating ? "star" : "star-outline"} size={12} color={hasProviderRating ? theme.gold : theme.faint} />
+                    <Text style={styles.providerRatingText}>{hasProviderRating ? job.ownerRating!.toFixed(1) : "New provider"}</Text>
+                    {hasProviderRating && job.ownerReviewsCount ? <Text style={styles.providerReviewText}>· {job.ownerReviewsCount} reviews</Text> : null}
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={14} color={theme.faint} />
+              </Pressable>
+              {!isOwner && job.ownerPhone ? (
+                <Pressable style={styles.providerCallButton} onPress={() => handleCall(job.ownerPhone)} accessibilityRole="button" accessibilityLabel="Call provider">
+                  <Ionicons name="call-outline" size={16} color={theme.emeraldDark} />
+                  <Text style={styles.providerCallText}>Call</Text>
+                </Pressable>
+              ) : !isOwner && job.ownerId ? (
+                <Pressable style={styles.reportButton} onPress={() => router.push({ pathname: "/safety", params: { targetId: job.ownerId } })} accessibilityRole="button" accessibilityLabel="Report provider">
+                  <Ionicons name="flag-outline" size={16} color={theme.slate} />
+                </Pressable>
               ) : null}
             </View>
+          </View>
 
-            {!isOwner && job.ownerPhone ? (
-              <Pressable
-                style={styles.directCallButton}
-                onPress={() => handleCall(job.ownerPhone)}
-                accessibilityRole="button"
-                accessibilityLabel="Call employer"
+          {isOwner ? (
+            <Pressable style={styles.applicantHubCard} onPress={() => setApplicationsModalVisible(true)} accessibilityRole="button" accessibilityLabel="View applications">
+              <View style={styles.applicantHubIconCircle}><Ionicons name="people" size={19} color={theme.emeraldDark} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.applicantHubCount}>{applicantsCount} {applicantsCount === 1 ? "applicant" : "applicants"}</Text>
+                <Text style={styles.applicantHubSubtext}>{applicantsCount ? "Review applications for this job" : "Your posting is visible to nearby workers"}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.emeraldDark} />
+            </Pressable>
+          ) : null}
+
+          <View style={styles.payCard}>
+            <View style={styles.payCardMain}>
+              <Text style={styles.sectionEyebrow}>PAY RATE</Text>
+              <View style={styles.payAmountLine}>
+                <Text style={styles.payCurrency}>₹</Text>
+                <Text style={styles.payAmount}>{wagePerUnit}</Text>
+                <Text style={styles.payUnit}>/ {job.payUnit}</Text>
+              </View>
+            </View>
+            <View style={styles.payDivider} />
+            <View style={styles.payTimingBlock}>
+              <Ionicons name="wallet-outline" size={16} color={theme.emeraldDark} />
+              <Text style={styles.payTimingText}>{payScheduleText}</Text>
+            </View>
+          </View>
+
+          <View style={styles.overviewSection}>
+            <Text style={styles.sectionTitle}>At a glance</Text>
+            <View style={styles.factsGrid}>
+              <View style={styles.factCell}>
+                <View style={styles.factLabelRow}><Ionicons name="calendar-outline" size={14} color={theme.emeraldPrimary} /><Text style={styles.factLabel}>WHEN</Text></View>
+                <Text style={styles.factValue}>{startDateDetails.fullDate}</Text>
+                <Text style={styles.factSubValue}>{startClock}{endClock ? ` – ${endClock}` : ""}</Text>
+                {isMultiDay && endDateDetails ? <Text style={styles.factSubValue}>Until {endDateDetails.fullDate}</Text> : null}
+              </View>
+              <View style={styles.factCell}>
+                <View style={styles.factLabelRow}><Ionicons name="people-outline" size={14} color={theme.emeraldPrimary} /><Text style={styles.factLabel}>MEMBERS NEEDED</Text></View>
+                <Text style={styles.factValue}>{acceptedWorkers} of {totalWorkers} accepted</Text>
+                <Text style={styles.factSubValue}>{remainingWorkers > 0 ? `${remainingWorkers} ${remainingWorkers === 1 ? "spot" : "spots"} remaining` : "All spots filled"}</Text>
+              </View>
+              <View style={styles.factCell}>
+                <View style={styles.factLabelRow}><Ionicons name="sparkles-outline" size={14} color={theme.emeraldPrimary} /><Text style={styles.factLabel}>EXPERIENCE</Text></View>
+                <Text style={styles.factValue}>{matchedExp.label}</Text>
+                <Text style={styles.factSubValue}>{matchedExp.badge}</Text>
+              </View>
+              <View style={styles.factCell}>
+                <View style={styles.factLabelRow}><Ionicons name={isOnline ? "laptop-outline" : "business-outline"} size={14} color={theme.emeraldPrimary} /><Text style={styles.factLabel}>WORK TYPE</Text></View>
+                <Text style={styles.factValue}>{workModeLabel}</Text>
+                <Text style={styles.factSubValue}>{isOnline ? "No commute" : "In person"}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.overviewSection}>
+            <View style={styles.sectionHeadingRow}>
+              <Text style={styles.sectionTitle}>Location</Text>
+              <View style={styles.locationPrivacyBadge}>
+                <Ionicons name={isOnline ? "globe-outline" : canViewExactLocation ? "lock-open-outline" : "lock-closed-outline"} size={12} color={theme.emeraldDark} />
+                <Text style={styles.locationPrivacyBadgeText}>{isOnline ? "Online" : canViewExactLocation ? "Shared with you" : "Private until accepted"}</Text>
+              </View>
+            </View>
+            {!isOnline ? (
+              <View
+                ref={mapFrameRef}
+                style={styles.areaMapFrame}
+                onLayout={() => {
+                  mapFrameRef.current?.measureLayout(
+                    scrollViewRef.current as any,
+                    (_x, y) => { mapTopInScroll.current = y; },
+                    () => {},
+                  );
+                }}
+                accessibilityLabel={`Approximate map area for ${job.area}. No exact worksite pin is shown.`}
               >
-                <Ionicons name="call" size={16} color="#FFFFFF" />
+                {Platform.OS === "web" && webMapUrl ? (
+                  <>
+                    {React.createElement("iframe" as any, {
+                      key: `map-${mapResourceKey}`,
+                      title: `Approximate map of ${job.area || "work area"}`,
+                      src: webMapUrl,
+                      loading: "lazy",
+                      onLoad: () => setMapIsReady(true),
+                      referrerPolicy: "no-referrer",
+                      style: {
+                        position: "absolute", inset: 0, width: "100%", height: "100%", border: 0,
+                        transform: mapHasEnteredView ? "scale(1.18)" : "scale(1)",
+                        transition: "transform 900ms cubic-bezier(0.2, 0.75, 0.25, 1)",
+                      },
+                    })}
+                    <View pointerEvents="none" style={styles.webMapAreaHighlight}>
+                      <View style={styles.webMapAreaRing} />
+                      <View style={styles.webMapAreaName}>
+                        <Ionicons name="map-outline" size={13} color={theme.emeraldDark} />
+                        <Text style={styles.webMapAreaNameText} numberOfLines={1}>{job.area || "Work area"}</Text>
+                      </View>
+                    </View>
+                  </>
+                ) : Platform.OS !== "web" && hasMapCenter ? (
+                  <UniversalMap
+                    key={`map-${mapResourceKey}`}
+                    ref={mapViewRef}
+                    latitude={mapLatitude!}
+                    longitude={mapLongitude!}
+                    locality={job.area || "Work area"}
+                    radiusKm={2.8}
+                    interactive={false}
+                    style={StyleSheet.absoluteFill}
+                  />
+                ) : (
+                  <View style={styles.areaMapFallback}>
+                    <Ionicons name="map-outline" size={26} color={theme.emeraldDark} />
+                    <Text style={styles.areaMapFallbackText}>{job.area || "Work area"}</Text>
+                    <Text style={styles.areaMapFallbackHint}>
+                      {areaMapQuery.isFetching ? "Loading area map…" : "Map preview unavailable"}
+                    </Text>
+                  </View>
+                )}
+                {showMapLoadingSkeleton ? (
+                  <View pointerEvents="none" style={styles.mapLoadingOverlay}>
+                    <Skeleton width="100%" height={148} borderRadius={16} />
+                  </View>
+                ) : null}
+                <View style={styles.mapPrivacyPill}>
+                  <Ionicons name="shield-checkmark" size={12} color={theme.emeraldDark} />
+                  <Text style={styles.mapPrivacyPillText}>Approximate area · no pin</Text>
+                </View>
+                {hasMapCenter ? (
+                  <Pressable
+                    style={styles.mapExpandButton}
+                    onPress={() => setMapFullScreenOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open approximate area map full screen"
+                    hitSlop={6}
+                  >
+                    <Ionicons name="expand-outline" size={17} color={theme.emeraldDark} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+            <View style={styles.locationCard}>
+              <View style={styles.locationPin}><Ionicons name={isOnline ? "laptop-outline" : "location"} size={18} color={theme.emeraldDark} /></View>
+              <View style={styles.locationCopy}>
+                <Text style={styles.locationArea}>{isOnline ? "Online work" : job.area || "Worksite area"}</Text>
+                {isOnline ? (
+                  <Text style={styles.locationSupportingText}>The provider will share session details after acceptance.</Text>
+                ) : canViewExactLocation ? (
+                  <>
+                    <Text style={styles.locationAddress}>
+                      {job.address?.trim() || (hasExactCoords ? "Precise worksite location set" : "Exact worksite address not added yet")}
+                    </Text>
+                    {approximateDistance ? <Text style={styles.locationSupportingText}>{approximateDistance} from your selected area</Text> : null}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.locationSupportingText}>{approximateDistance || "Approximate area shared before acceptance"}</Text>
+                    <Text style={styles.locationPrivacyText}>The exact meeting point is shared if your application is accepted.</Text>
+                  </>
+                )}
+              </View>
+            </View>
+            {canNavigateToWorksite ? (
+              <Pressable style={styles.directionsButton} onPress={() => void handleOpenMaps()} accessibilityRole="button" accessibilityLabel="Open directions to the exact worksite">
+                <Ionicons name="navigate-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.directionsButtonText}>Open directions</Text>
+                <Ionicons name="arrow-up-right-box" size={14} color="#FFFFFF" />
               </Pressable>
             ) : null}
           </View>
-        </View>
-      </ScrollView>
 
-      {/* ============================================================
-          9. STRATEGIC BOTTOM COMMAND DOCK
-          ============================================================ */}
-      <View style={[styles.bottomDock, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        {isOwner ? (
-          /* OWNER MODE: Side-By-Side [View Applications] & [Edit Job] */
-          <View style={styles.ownerSideBySideRow}>
-            {/* Left Button: View Applications */}
-            <Pressable
-              style={styles.viewAppsButton}
-              onPress={() => setApplicationsModalVisible(true)}
-              accessibilityRole="button"
-              accessibilityLabel="View Applications"
-            >
-              <View style={styles.viewAppsInner}>
-                <Ionicons name="people" size={18} color={pro.emeraldPrimary} />
+          {overviewDetails.description || overviewDetails.attributes.length ? (
+            <View style={styles.overviewSection}>
+              <View style={styles.aboutHeadingRow}>
+                <View style={styles.aboutHeadingIcon}>
+                  <Ionicons name="document-text" size={18} color={theme.emeraldDark} />
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.sectionTitle}>About this job</Text>
+                  <Text style={styles.aboutHeadingHint}>
+                    {overviewDetails.description && overviewDetails.attributes.length
+                      ? "Key requirements and role description"
+                      : overviewDetails.attributes.length
+                        ? "Specific requirements for this role"
+                        : "What this work involves"}
+                  </Text>
+                </View>
+                {job.categoryName ? (
+                  <View style={styles.aboutCategoryTag}>
+                    <Text style={styles.aboutCategoryTagText}>{job.categoryName}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.aboutCard}>
+                {/* 1. Key Requirements & Attributes */}
+                {overviewDetails.attributes.length ? (
+                  <View style={styles.aboutSectionBlock}>
+                    <View style={styles.aboutBlockHeader}>
+                      <Ionicons name="sparkles" size={13} color={theme.emeraldDark} />
+                      <Text style={styles.aboutBlockHeaderText}>ROLE REQUIREMENTS</Text>
+                    </View>
+                    <View style={styles.aboutDetailsGrid}>
+                      {overviewDetails.attributes.map((item) => (
+                        <View
+                          key={`${item.label}-${item.value}`}
+                          style={[
+                            styles.aboutDetailTile,
+                            overviewDetails.attributes.length === 1 && styles.aboutDetailTileWide,
+                          ]}
+                        >
+                          <View style={styles.aboutTileIconRing}>
+                            <Ionicons name={getRequirementIcon(item.label)} size={15} color={theme.emeraldDark} />
+                          </View>
+                          <View style={styles.aboutTileContent}>
+                            <Text style={styles.requirementLabel} numberOfLines={1}>{item.label}</Text>
+                            <Text style={styles.requirementValue} numberOfLines={2}>{item.value}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Divider between Attributes and Description if both exist */}
+                {overviewDetails.description && overviewDetails.attributes.length ? (
+                  <View style={styles.aboutDivider} />
+                ) : null}
+
+                {/* 2. Work Details & Description Bubble */}
+                {overviewDetails.description ? (
+                  <View style={styles.aboutDescriptionBlock}>
+                    <View style={styles.aboutBlockHeader}>
+                      <Ionicons name="reader-outline" size={13} color={theme.emeraldDark} />
+                      <Text style={styles.aboutBlockHeaderText}>WORK DETAILS & OVERVIEW</Text>
+                    </View>
+                    <View style={styles.descriptionBubble}>
+                      <Text style={styles.descriptionText}>{overviewDetails.description}</Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Trust Footnote */}
+                <View style={styles.aboutTrustFootnote}>
+                  <Ionicons name="shield-checkmark" size={13} color={theme.emeraldDark} />
+                  <Text style={styles.aboutTrustFootnoteText}>
+                    Verified requirements shared directly by the employer
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {extrasList.length ? (
+            <View style={styles.overviewSection}>
+              <Text style={styles.sectionTitle}>What’s included</Text>
+              <View style={styles.extrasWrap}>
+                {extrasList.map((item, index) => <View key={`${item}-${index}`} style={styles.extraChip}><Ionicons name="checkmark-circle-outline" size={14} color={theme.emeraldDark} /><Text style={styles.extraChipText}>{item}</Text></View>)}
+              </View>
+            </View>
+          ) : null}
+        </ScrollView>
+        {/* ── 6. STRATEGIC BOTTOM DOCK ── */}
+        <View style={[styles.bottomDock, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          {isOwner ? (
+            <View style={styles.ownerActionRow}>
+              <Pressable
+                style={styles.viewAppsButton}
+                onPress={() => setApplicationsModalVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="View Applications"
+              >
+                <Ionicons name="people" size={17} color="#FFFFFF" />
                 <Text style={styles.viewAppsButtonText}>
                   Applications ({applicantsCount})
                 </Text>
-              </View>
-            </Pressable>
+              </Pressable>
 
-            {/* Right Button: Edit Job */}
-            <Pressable
-              style={styles.editJobButton}
-              onPress={handleEditJob}
-              accessibilityRole="button"
-              accessibilityLabel="Edit Job"
-            >
-              <LinearGradient
-                colors={[pro.emeraldPrimary, pro.emeraldDark]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.editGradient}
+              <Pressable
+                style={styles.editJobButton}
+                onPress={handleEditJob}
+                accessibilityRole="button"
+                accessibilityLabel="Edit Job"
               >
-                <Ionicons name="create-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.editButtonText}>Edit Job</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
-        ) : job?.myApplication ? (
-          /* WORKER ALREADY APPLIED */
-          <View style={styles.workerApplyRow}>
-            {job.myApplication.status === "ACCEPTED" || job.myApplication.status === "IN_PROGRESS" ? (
-              <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
-                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: pro.emeraldSoft, borderRadius: 14, paddingVertical: 12 }}>
-                  <Ionicons name="checkmark-circle" size={18} color={pro.emeraldPrimary} />
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: pro.emeraldPrimary }}>
-                    Application Accepted!
-                  </Text>
+                <Ionicons name="create-outline" size={16} color={theme.emeraldDark} />
+                <Text style={styles.editJobButtonText}>Edit</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.deleteJobOwnerBtn}
+                onPress={handleDeleteJob}
+                accessibilityRole="button"
+                accessibilityLabel="Delete Job"
+              >
+                <Ionicons name="trash-outline" size={17} color="#DC2626" />
+              </Pressable>
+            </View>
+          ) : job?.myApplication && hasActiveApplication ? (
+            <View style={styles.workerStatusRow}>
+              {job.myApplication.status === "ACCEPTED" || job.myApplication.status === "IN_PROGRESS" ? (
+                <View style={styles.appStatusAcceptedBox}>
+                  <Ionicons name="checkmark-circle" size={18} color={theme.emeraldDark} />
+                  <Text style={styles.appStatusAcceptedText}>{job.myApplication.status === "IN_PROGRESS" ? "Work in progress" : "Application accepted"}</Text>
                 </View>
-                <Pressable
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FECACA", alignItems: "center", justifyContent: "center" }}
-                  onPress={() => setCancellingJobModal(true)}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: "700", color: "#DC2626" }}>Cancel Job</Text>
-                </Pressable>
-              </View>
-            ) : job.myApplication.status === "PENDING" ? (
-              <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
-                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#FEF3C7", borderRadius: 14, paddingVertical: 12 }}>
-                  <Ionicons name="time-outline" size={18} color="#B45309" />
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: "#B45309" }}>
-                    Pending Review
-                  </Text>
+              ) : job.myApplication.status === "PENDING" ? (
+                <View style={{ flex: 1, flexDirection: "row", gap: 10 }}>
+                  <View style={styles.appStatusPendingBox}>
+                    <Ionicons name="time-outline" size={16} color="#B45309" />
+                    <Text style={styles.appStatusPendingText}>Under Review</Text>
+                  </View>
+                  <Pressable
+                    style={styles.appWithdrawBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        "Cancel Application?",
+                        "Are you sure you want to cancel your application for this job?",
+                        [
+                          { text: "Keep Application", style: "cancel" },
+                          {
+                            text: "Yes, Cancel",
+                            style: "destructive",
+                            onPress: () => setCancellingJobModal(true),
+                          },
+                        ]
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel Application"
+                  >
+                    <Ionicons name="close-circle-outline" size={14} color="#E11D48" />
+                    <Text style={styles.appWithdrawText}>Cancel</Text>
+                  </Pressable>
                 </View>
-                <Pressable
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center", justifyContent: "center" }}
-                  onPress={() => setCancellingJobModal(true)}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#64748B" }}>Withdraw</Text>
-                </Pressable>
-              </View>
-            ) : job.myApplication.status === "REJECTED" ? (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FEE2E2", borderRadius: 14, paddingVertical: 14 }}>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: "#DC2626" }}>
-                  Application Not Selected
-                </Text>
-              </View>
-            ) : job.myApplication.status === "COMPLETED" ? (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#DBEAFE", borderRadius: 14, paddingVertical: 14 }}>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: "#1E40AF" }}>
-                  Job Completed ✓
-                </Text>
-              </View>
-            ) : (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F1F5F9", borderRadius: 14, paddingVertical: 14 }}>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: "#64748B" }}>
-                  Application Cancelled
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : (
-          /* WORKER MODE: Full-width Apply Button */
-          <View style={styles.workerApplyRow}>
+              ) : (
+                <View style={styles.appStatusCompletedBox}>
+                  <Text style={styles.appStatusCompletedText}>Application Closed</Text>
+                </View>
+              )}
+            </View>
+          ) : (
             <Pressable
-              style={styles.applyFullButton}
+              style={[
+                styles.applyFullButton,
+                isUnavailable && styles.applyFullButtonDisabled,
+              ]}
               onPress={handleInitiateApply}
-              disabled={isStopped || isFilled}
+              disabled={isUnavailable}
               accessibilityRole="button"
-              accessibilityLabel="Apply for this Job"
             >
-              <LinearGradient
-                colors={
-                  isStopped || isFilled
-                    ? ["#94A3B8", "#64748B"]
-                    : [pro.emeraldPrimary, pro.emeraldDark]
-                }
-                style={styles.applyGradient}
-              >
-                <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.applyFullButtonText}>
-                  {isStopped
-                    ? "Position Temporarily On Hold"
-                    : isFilled
-                    ? "Position Filled"
-                    : "Apply for this Job"}
-                </Text>
-              </LinearGradient>
+              <Ionicons name="paper-plane" size={17} color="#FFFFFF" />
+              <Text style={styles.applyFullButtonText}>
+                {isStopped
+                  ? "Position On Hold"
+                  : isFilled
+                  ? "Position Filled"
+                  : job.status === "EXPIRED"
+                  ? "Applications Closed"
+                  : isClosed
+                  ? "Applications Closed"
+                  : "Apply for this Job"}
+              </Text>
             </Pressable>
-          </View>
-        )}
-      </View>
-
-      {/* ============================================================
-          10. APPLICATIONS BOTTOM SHEET MODAL (SMOOTH SPRING ENTRANCE & SILKY EASE EXIT)
-          ============================================================ */}
-      <JobApplicationsModal
-        visible={applicationsModalVisible}
-        jobId={id}
-        jobTitle={job?.customTitle || job?.title}
-        initialApplicants={applicantsList}
-        initialApplicantCount={applicantsCount}
-        onClose={() => setApplicationsModalVisible(false)}
-      />
-
-      {/* Seeker Job Cancellation Modal */}
-      <CancellationModal
-        visible={cancellingJobModal}
-        title="Cancel Job Application"
-        isProvider={false}
-        onClose={() => setCancellingJobModal(false)}
-        onConfirm={handleCancelApplication}
-      />
-
-      {/* ============================================================
-          11. WORKER APPLY CONFIRMATION MODAL
-          ============================================================ */}
-      <Modal
-        visible={applyModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setApplyModalVisible(false)}
-      >
-        <View style={styles.modalBackdropCenter}>
-          <View style={styles.applyPromptCard}>
-            <View style={styles.applyPromptIconRing}>
-              <Ionicons name="send" size={24} color={pro.emeraldPrimary} />
-            </View>
-            <Text style={styles.applyPromptTitle}>Apply for {roleLabel}?</Text>
-            <Text style={styles.applyPromptDesc}>
-              Your verified profile, phone number, and trade details will be shared with the client for immediate review.
-            </Text>
-
-            <View style={styles.applyPromptBtnRow}>
-              <Pressable
-                style={styles.applyPromptCancelBtn}
-                onPress={() => setApplyModalVisible(false)}
-              >
-                <Text style={styles.applyPromptCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={styles.applyPromptConfirmBtn}
-                onPress={() => applyMutation.mutate()}
-                disabled={applyMutation.isPending}
-              >
-                {applyMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.applyPromptConfirmText}>Submit Application</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
+          )}
         </View>
-      </Modal>
+
+        <Modal
+          visible={mapFullScreenOpen}
+          animationType="slide"
+          onRequestClose={() => setMapFullScreenOpen(false)}
+        >
+          <SafeAreaView style={styles.fullMapScreen} edges={["top", "bottom"]}>
+            <StatusBar style="light" />
+            <View style={styles.fullMapHeader}>
+              <Pressable
+                style={styles.fullMapCloseButton}
+                onPress={() => setMapFullScreenOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close full screen map"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={21} color="#FFFFFF" />
+              </Pressable>
+              <View style={styles.fullMapHeading}>
+                <Text style={styles.fullMapTitle} numberOfLines={1}>{job.area || "Work area"}</Text>
+                <Text style={styles.fullMapSubtitle}>Approximate area · exact location hidden</Text>
+              </View>
+              <View style={{ width: 40 }} />
+            </View>
+            <View style={styles.fullMapCanvas}>
+              {Platform.OS === "web" && webMapUrl ? (
+                <>
+                  {React.createElement("iframe" as any, {
+                    key: `full-map-${mapResourceKey}`,
+                    title: `Full screen approximate map of ${job.area || "work area"}`,
+                    src: webMapUrl,
+                    loading: "eager",
+                    referrerPolicy: "no-referrer",
+                    style: { position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 },
+                  })}
+                  <View pointerEvents="none" style={styles.webMapAreaHighlight}>
+                    <View style={styles.webMapAreaRing} />
+                    <View style={styles.webMapAreaName}>
+                      <Ionicons name="map-outline" size={13} color={theme.emeraldDark} />
+                      <Text style={styles.webMapAreaNameText} numberOfLines={1}>{job.area || "Work area"}</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <UniversalMap
+                  key={`full-map-${mapResourceKey}`}
+                  latitude={mapLatitude!}
+                  longitude={mapLongitude!}
+                  locality={job.area || "Work area"}
+                  radiusKm={2.8}
+                  interactive={true}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+              <View style={styles.fullMapPrivacyPill}>
+                <Ionicons name="shield-checkmark" size={13} color={theme.emeraldDark} />
+                <Text style={styles.mapPrivacyPillText}>Approximate area · no pin</Text>
+              </View>
+            </View>
+          </SafeAreaView>
+        </Modal>
+
+        {/* ── APPLICATIONS MODAL ── */}
+        <JobApplicationsModal
+          visible={applicationsModalVisible}
+          jobId={id}
+          jobTitle={displayTitle}
+          initialApplicants={applicantsList}
+          initialApplicantCount={applicantsCount}
+          onClose={() => setApplicationsModalVisible(false)}
+        />
+
+        {/* ── CANCELLATION MODAL ── */}
+        <CancellationModal
+          visible={cancellingJobModal}
+          title="Cancel Job Application"
+          isProvider={false}
+          onClose={() => setCancellingJobModal(false)}
+          onConfirm={handleCancelApplication}
+        />
+
+        {/* ── APPLY PROMPT MODAL ── */}
+        <Modal
+          visible={applyModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setApplyModalVisible(false)}
+        >
+          <View style={styles.modalBackdropCenter}>
+            <View style={styles.applyPromptCard}>
+              <View style={styles.applyPromptIconRing}>
+                <Ionicons name="paper-plane" size={22} color={theme.emeraldDark} />
+              </View>
+              <Text style={styles.applyPromptTitle}>Apply for {roleLabel}?</Text>
+              <Text style={styles.applyPromptDesc}>
+                The employer can review your application. Your phone number stays private until your application is accepted.
+              </Text>
+
+              <View style={styles.applyPromptBtnRow}>
+                <Pressable
+                  style={styles.applyPromptCancelBtn}
+                  onPress={() => setApplyModalVisible(false)}
+                >
+                  <Text style={styles.applyPromptCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.applyPromptConfirmBtn}
+                  onPress={() => applyMutation.mutate()}
+                  disabled={applyMutation.isPending}
+                >
+                  {applyMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.applyPromptConfirmText}>Submit Application</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </PageTransition>
-    </SafeAreaView>
+    </View>
   );
 }
 
-// ── Peak-Level Stylesheet ──
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: pro.canvas,
+    backgroundColor: theme.canvas,
   },
+  topPageGradient: { position: "absolute", top: 0, left: 0, right: 0 },
   stateCenter: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
-    backgroundColor: pro.canvas,
-  },
-  loadingLabel: {
-    marginTop: 14,
-    color: pro.slate,
-    fontSize: 14,
-    fontWeight: "600",
+    backgroundColor: theme.canvas,
   },
   errorHeading: {
-    color: pro.ink,
-    fontSize: 19,
-    fontWeight: "700",
+    color: theme.ink,
+    fontSize: 18,
+    fontWeight: "800",
     marginTop: 14,
   },
   errorSubtext: {
-    color: pro.muted,
+    color: theme.muted,
     fontSize: 13,
     textAlign: "center",
     marginTop: 6,
@@ -1186,7 +1371,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: pro.emeraldPrimary,
+    backgroundColor: theme.emeraldDark,
     paddingHorizontal: 20,
     paddingVertical: 11,
     borderRadius: 12,
@@ -1195,130 +1380,383 @@ const styles = StyleSheet.create({
   errorBackBtnText: {
     color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
 
-  // ── Executive Navigation Bar ──
+  /* Top Nav */
   topNav: {
-    height: 56,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    backgroundColor: pro.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: pro.borderLight,
+    backgroundColor: "transparent",
   },
   navRoundBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: pro.cardBg,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: pro.borderLight,
+    borderColor: "rgba(255,255,255,0.18)",
   },
   navCenter: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
   },
   navTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "800",
-    color: pro.ink,
-    letterSpacing: -0.2,
+    color: "#FFFFFF",
+    letterSpacing: -0.3,
   },
   navSerialPill: {
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
+    backgroundColor: theme.emeraldSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 5,
     marginTop: 2,
   },
   navSerialText: {
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: "800",
-    color: pro.emeraldPrimary,
+    color: theme.emeraldDark,
     letterSpacing: 0.6,
   },
 
-  // ── Toast Notification ──
+  /* Toast Notification */
   toastBox: {
     position: "absolute",
-    top: 66,
-    left: 18,
-    right: 18,
+    top: 60,
+    left: 16,
+    right: 16,
     zIndex: 99,
-    backgroundColor: pro.emeraldDark,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    backgroundColor: theme.emeraldDark,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
     elevation: 6,
   },
   toastText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: 12.5,
+    fontWeight: "700",
     flex: 1,
   },
 
-  // ── Scrollable Stage ──
+  /* Scroll Container */
   scrollContainer: {
     flex: 1,
   },
-  scrollInner: {
+  overviewContent: {
+    paddingHorizontal: 14,
+    paddingTop: 9,
+    gap: 10,
+  },
+  introCard: {
+    backgroundColor: theme.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    padding: 14,
+    shadowColor: "#10271D",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.045,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  introTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  categoryEyebrow: { flex: 1, color: theme.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  statusPill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 20 },
+  statusPillOpen: { backgroundColor: "#EAF5EE" },
+  statusPillPaused: { backgroundColor: theme.goldSoft },
+  statusPillClosed: { backgroundColor: theme.borderSubtle },
+  statusDotOpen: { backgroundColor: theme.emeraldPrimary },
+  statusDotPaused: { backgroundColor: theme.gold },
+  statusDotClosed: { backgroundColor: theme.faint },
+  statusText: { fontSize: 10.5, fontWeight: "800" },
+  statusTextOpen: { color: theme.emeraldDark },
+  statusTextPaused: { color: "#9A5E00" },
+  statusTextClosed: { color: theme.slate },
+  overviewTitle: { color: theme.ink, fontSize: 22, lineHeight: 27, fontWeight: "800", letterSpacing: -0.55, marginTop: 9 },
+  providerRow: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: theme.borderSubtle },
+  providerProfileButton: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 9 },
+  providerAvatar: { width: 42, height: 42, borderRadius: 21, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: "#E6F0E9" },
+  providerInitial: { color: theme.emeraldDark, fontSize: 17, fontWeight: "800" },
+  providerIdentity: { flex: 1, minWidth: 0, gap: 3 },
+  providerNameLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+  providerName: { flexShrink: 1, color: theme.ink, fontSize: 13, fontWeight: "750" as any },
+  phoneVerifiedTag: { flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0 },
+  phoneVerifiedText: { color: theme.emeraldDark, fontSize: 9.5, fontWeight: "700" },
+  providerRatingLine: { flexDirection: "row", alignItems: "center", gap: 4 },
+  providerRatingText: { color: theme.slate, fontSize: 11, fontWeight: "700" },
+  providerReviewText: { color: theme.muted, fontSize: 10.5, fontWeight: "500" },
+  providerCallButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12, backgroundColor: theme.emeraldSoft },
+  providerCallText: { color: theme.emeraldDark, fontSize: 11.5, fontWeight: "800" },
+  reportButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: theme.borderSubtle },
+  payCard: { backgroundColor: "#EAF5EE", borderRadius: 16, borderWidth: 1, borderColor: "#D7E9DC", padding: 13, gap: 9 },
+  payCardMain: { gap: 4 },
+  sectionEyebrow: { color: "#668074", fontSize: 9.5, fontWeight: "800", letterSpacing: 1 },
+  payAmountLine: { flexDirection: "row", alignItems: "baseline", gap: 3 },
+  payCurrency: { color: theme.emeraldDark, fontSize: 20, fontWeight: "800" },
+  payAmount: { color: theme.emeraldDark, fontSize: 28, lineHeight: 33, fontWeight: "900", letterSpacing: -0.7 },
+  payUnit: { color: "#4C6D5C", fontSize: 14, fontWeight: "700" },
+  payDivider: { height: 1, backgroundColor: "#D3E5D9" },
+  payTimingBlock: { flexDirection: "row", alignItems: "center", gap: 7 },
+  payTimingText: { color: "#375C49", fontSize: 12, fontWeight: "650" as any },
+  overviewSection: { gap: 7 },
+  sectionHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  sectionTitle: { color: theme.ink, fontSize: 15, fontWeight: "800", letterSpacing: -0.2 },
+  factsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  factCell: { width: "48%", minHeight: 86, justifyContent: "center", backgroundColor: theme.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.borderLight, paddingHorizontal: 11, paddingVertical: 10 },
+  factLabelRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
+  factLabel: { color: theme.muted, fontSize: 9, fontWeight: "800", letterSpacing: 0.6, flexShrink: 1 },
+  factValue: { color: theme.ink, fontSize: 13, lineHeight: 18, fontWeight: "750" as any },
+  factSubValue: { color: theme.slate, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  locationPrivacyBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.emeraldSoft, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20 },
+  locationPrivacyBadgeText: { color: theme.emeraldDark, fontSize: 9.5, fontWeight: "700" },
+  areaMapFrame: { height: 148, overflow: "hidden", position: "relative", borderRadius: 15, borderWidth: 1, borderColor: theme.borderLight, backgroundColor: "#E8EFE9" },
+  mapLoadingOverlay: { ...StyleSheet.absoluteFillObject, borderRadius: 16, overflow: "hidden" },
+  areaMapFallback: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 7, backgroundColor: "#EAF1EB" },
+  areaMapFallbackText: { color: theme.emeraldDark, fontSize: 12, fontWeight: "700" },
+  areaMapFallbackHint: { color: theme.slate, fontSize: 10, fontWeight: "500" },
+  mapPrivacyPill: { position: "absolute", top: 10, left: 10, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.96)", borderWidth: 1, borderColor: "rgba(226,232,240,0.9)" },
+  mapPrivacyPillText: { color: theme.emeraldDark, fontSize: 10, fontWeight: "800" },
+  mapExpandButton: { position: "absolute", top: 9, right: 9, width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "rgba(255,255,255,0.97)", borderWidth: 1, borderColor: "rgba(226,232,240,0.95)", elevation: 3 },
+  fullMapScreen: { flex: 1, backgroundColor: "#F8FAFC" },
+  fullMapHeader: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: theme.emeraldDark },
+  fullMapCloseButton: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: 19, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  fullMapHeading: { flex: 1, minWidth: 0, gap: 3 },
+  fullMapTitle: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  fullMapSubtitle: { color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "600" },
+  fullMapCanvas: { flex: 1, position: "relative", overflow: "hidden", backgroundColor: "#E8EFE9" },
+  fullMapPrivacyPill: { position: "absolute", top: 14, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.97)", borderWidth: 1, borderColor: "rgba(226,232,240,0.9)", elevation: 3 },
+  webMapAreaHighlight: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  webMapAreaRing: { position: "absolute", width: 108, height: 108, borderRadius: 54, borderWidth: 2, borderColor: "rgba(4,120,87,0.8)", backgroundColor: "rgba(16,185,129,0.12)" },
+  webMapAreaName: { maxWidth: "78%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.97)", borderWidth: 1, borderColor: "rgba(4,120,87,0.28)", elevation: 3, shadowColor: "#0F172A", shadowOpacity: 0.14, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  webMapAreaNameText: { flexShrink: 1, color: theme.emeraldDark, fontSize: 11, fontWeight: "800" },
+  nativeMapAreaName: { maxWidth: 190, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.97)", borderWidth: 1, borderColor: "rgba(4,120,87,0.32)", elevation: 4 },
+  nativeMapAreaNameText: { flexShrink: 1, color: theme.emeraldDark, fontSize: 11, fontWeight: "800" },
+  locationCard: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.borderLight, borderRadius: 14, padding: 12 },
+  locationPin: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: theme.emeraldSoft },
+  locationCopy: { flex: 1, minWidth: 0, gap: 3 },
+  locationArea: { color: theme.ink, fontSize: 13, fontWeight: "800" },
+  locationAddress: { color: theme.slate, fontSize: 12, lineHeight: 17 },
+  locationSupportingText: { color: theme.muted, fontSize: 11, lineHeight: 16 },
+  locationPrivacyText: { color: theme.emeraldDark, fontSize: 11, lineHeight: 16, fontWeight: "600", marginTop: 3 },
+  directionsButton: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 14, borderRadius: 13, backgroundColor: theme.emeraldDark },
+  directionsButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  aboutHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 2,
+  },
+  aboutHeadingIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: theme.emeraldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#D1EADB",
+  },
+  aboutHeadingHint: {
+    color: "#64748B",
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: "500",
+  },
+  aboutCategoryTag: {
+    backgroundColor: "#EAF5EE",
+    borderWidth: 1,
+    borderColor: "#D5EADA",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  aboutCategoryTagText: {
+    color: theme.emeraldDark,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "capitalize",
+  },
+  aboutCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2ECE5",
+    borderRadius: 20,
     padding: 16,
     gap: 14,
+    ...Platform.select({
+      ios: { shadowColor: "#0D2318", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.05, shadowRadius: 10 },
+      android: { elevation: 2 },
+    }),
+  },
+  aboutSectionBlock: {
+    gap: 10,
+  },
+  aboutBlockHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  aboutBlockHeaderText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    color: theme.emeraldDark,
+    letterSpacing: 0.7,
+  },
+  aboutDetailsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  aboutDetailTile: {
+    width: "48%",
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "#F7FAF8",
+    borderWidth: 1,
+    borderColor: "#E5EEE8",
+  },
+  aboutDetailTileWide: {
+    width: "100%",
+  },
+  aboutTileIconRing: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#EBF5EF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#D8EBE0",
+    flexShrink: 0,
+  },
+  aboutTileContent: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+  requirementLabel: {
+    color: "#6B7D73",
+    fontSize: 9.5,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  requirementValue: {
+    color: "#0F291E",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+  },
+  aboutDivider: {
+    height: 1,
+    backgroundColor: "#EEF3F0",
+    marginVertical: 2,
+  },
+  aboutDescriptionBlock: {
+    gap: 8,
+  },
+  descriptionBubble: {
+    backgroundColor: "#F8FAF8",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5ECE7",
+    borderLeftWidth: 3.5,
+    borderLeftColor: theme.emeraldDark,
+    padding: 13,
+  },
+  descriptionText: {
+    color: "#1E3328",
+    fontSize: 13.5,
+    lineHeight: 21,
+    letterSpacing: -0.1,
+  },
+  aboutTrustFootnote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F4F1",
+  },
+  aboutTrustFootnoteText: {
+    color: "#657A6F",
+    fontSize: 11,
+    fontWeight: "600",
+    flex: 1,
+  },
+  extrasWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  extraChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.borderLight, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12 },
+  extraChipText: { color: theme.slate, fontSize: 11.5, fontWeight: "650" as any },
+  scrollInner: {
+    padding: 14,
+    gap: 12,
   },
 
-  // ── Hero Poster Card ──
-  heroPosterCard: {
-    backgroundColor: pro.surface,
-    borderRadius: 22,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: pro.borderLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+  /* 1. Hero Card */
+  heroCard: {
+    backgroundColor: theme.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1.2,
+    borderColor: theme.borderLight,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
   },
   heroMetaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 10,
   },
-  categoryBadge: {
+  heroCategoryBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    gap: 4,
+    backgroundColor: theme.emeraldSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
   },
-  categoryBadgeText: {
-    color: pro.emeraldPrimary,
-    fontSize: 10.5,
+  heroCategoryBadgeText: {
+    color: theme.emeraldDark,
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
   },
   liveStatusTag: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 6,
   },
   statusDot: {
     width: 6,
@@ -1326,868 +1764,840 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   liveStatusText: {
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: 10,
+    fontWeight: "800",
   },
-  tradeHeaderRow: {
+  heroTradeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    marginBottom: 14,
+    gap: 10,
+    marginBottom: 10,
   },
-  tradeEmblemBox: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
-    backgroundColor: pro.emeraldFrost,
-    justifyContent: "center",
+  heroIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: theme.emeraldSoft,
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: pro.emeraldLight + "50",
+    justifyContent: "center",
+    borderWidth: 1.2,
+    borderColor: "#A7F3D0",
   },
-  tradeEmblemEmoji: {
-    fontSize: 32,
-  },
-  tradeRoleName: {
+  heroIconEmoji: {
     fontSize: 22,
-    fontWeight: "900",
-    color: pro.ink,
-    letterSpacing: -0.4,
   },
-  tradeCustomHeadline: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: pro.slate,
-    marginTop: 2,
-    lineHeight: 20,
+  heroRoleLabel: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: theme.muted,
+    marginBottom: 1,
+  },
+  heroJobTitle: {
+    fontSize: 15.5,
+    fontWeight: "900",
+    color: theme.ink,
+    letterSpacing: -0.3,
   },
   heroCardFooter: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: pro.borderSubtle,
-    paddingTop: 12,
-    marginTop: 2,
+    borderTopColor: theme.borderSubtle,
   },
-  metaIconTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  metaIconText: {
-    fontSize: 11.5,
-    color: pro.muted,
-    fontWeight: "500",
-  },
-  ownerNoticeTag: {
+  metaTimeTag: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 6,
   },
-  ownerNoticeTagText: {
+  metaTimeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: theme.muted,
+  },
+  ownerNoticeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: theme.emeraldSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+  },
+  ownerNoticeText: {
     fontSize: 10.5,
     fontWeight: "800",
-    color: pro.emeraldPrimary,
+    color: theme.emeraldDark,
   },
-  verifiedJobTag: {
+  verifiedJobBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 6,
   },
-  verifiedJobTagText: {
+  verifiedJobText: {
     fontSize: 10.5,
     fontWeight: "700",
-    color: pro.emeraldPrimary,
+    color: theme.emeraldDark,
   },
 
-  // ── Compensation Remuneration Card ──
-  compGradientCard: {
-    borderRadius: 22,
-    padding: 20,
-    shadowColor: pro.emeraldPrimary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  compHeaderRow: {
+  /* 2. Applicant Hub Card */
+  applicantHubCard: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
+    backgroundColor: "#F0FDF4",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1.2,
+    borderColor: "#86EFAC",
   },
-  compSubtitle: {
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    color: "#A7F3D0",
-  },
-  zeroFeePill: {
+  applicantHubLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 6,
+    gap: 10,
+    flex: 1,
   },
-  zeroFeeText: {
-    fontSize: 10.5,
-    fontWeight: "800",
-    color: "#FFFFFF",
+  applicantHubIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
   },
-  compAmountRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    marginVertical: 4,
+  applicantHubCount: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.ink,
   },
-  compCurrencySign: {
-    fontSize: 26,
+  reviewPill: {
+    backgroundColor: theme.emeraldDark,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
+  reviewPillText: {
+    fontSize: 8.5,
     fontWeight: "900",
     color: "#FFFFFF",
+    letterSpacing: 0.5,
   },
-  compAmountNumber: {
-    fontSize: 38,
-    fontWeight: "900",
-    color: "#FFFFFF",
-    letterSpacing: -1,
-  },
-  compUnitLabel: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#D1FAE5",
-    marginLeft: 5,
-  },
-  compDivider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginVertical: 12,
-  },
-  compFooterRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  payoutTimingChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  payoutTimingChipEmoji: {
-    fontSize: 13,
-  },
-  payoutTimingChipText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  totalBudgetChip: {
-    backgroundColor: "rgba(255,255,255,0.20)",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  totalBudgetText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  directEscrowNote: {
+  applicantHubSubtext: {
     fontSize: 11,
     fontWeight: "500",
-    color: "#A7F3D0",
+    color: theme.slate,
+    marginTop: 1,
+  },
+  applicantHubActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: theme.emeraldDark,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    marginLeft: 6,
+  },
+  applicantHubActionBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 
-  // ── Key Specifications (Horizontal: Icon Beside Details) ──
-  bentoSection: {
+  /* 3. Unified Master Specifications Card */
+  unifiedMasterCard: {
+    backgroundColor: theme.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1.2,
+    borderColor: theme.borderLight,
+    gap: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  blockMiniLabel: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: theme.faint,
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  masterSectionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 10,
   },
-  sectionHeaderRow: {
+  cardInternalDivider: {
+    height: 1,
+    backgroundColor: theme.borderSubtle,
+    width: "100%",
+  },
+
+  /* Wage Display */
+  wageRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 2,
+    alignItems: "baseline",
+    gap: 3,
   },
-  sectionHeading: {
-    fontSize: 11.5,
+  wageCurrencySign: {
+    fontSize: 18,
     fontWeight: "800",
-    color: pro.muted,
-    letterSpacing: 0.8,
+    color: theme.emeraldDark,
   },
-  verifiedSpecsBadge: {
+  wageAmountNumber: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: theme.ink,
+    letterSpacing: -0.4,
+  },
+  wageUnitText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.muted,
+  },
+  payoutSchedulePill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  verifiedSpecsBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: pro.emeraldPrimary,
-  },
-  bentoGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 10,
-  },
-  bentoCard: {
-    width: (width - 44) / 2,
-    backgroundColor: pro.surface,
-    borderRadius: 16,
-    paddingTop: 12,
-    paddingBottom: 13,
-    paddingHorizontal: 12,
+    backgroundColor: theme.emeraldSoft,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: pro.borderLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.035,
-    shadowRadius: 4,
-    elevation: 1.5,
-    justifyContent: "space-between",
-    minHeight: 112,
+    borderColor: "#A7F3D0",
   },
-  bentoHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  payoutSchedulePillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.emeraldDark,
+  },
+
+  /* Compact Tear-Sheet Calendar */
+  compactTearSheet: {
+    width: 48,
+    height: 52,
+    borderRadius: 7,
+    overflow: "hidden",
+    borderWidth: 1.2,
+    borderColor: theme.emeraldDark,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
-    marginBottom: 7,
   },
-  bentoIconLabelGroup: {
+  compactTearSheetHeader: {
+    width: "100%",
+    backgroundColor: theme.emeraldDark,
+    paddingVertical: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactTearSheetMonth: {
+    fontSize: 9,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    letterSpacing: 0.8,
+  },
+  compactTearSheetBody: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    width: "100%",
+  },
+  compactTearSheetDay: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: theme.ink,
+    lineHeight: 18,
+  },
+  compactTearSheetWeekday: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: theme.muted,
+  },
+  scheduleFullDateText: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: theme.ink,
+  },
+  multiDaySubText: {
+    fontSize: 10.5,
+    fontWeight: "600",
+    color: theme.emeraldDark,
+  },
+  shiftCapsuleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    flexShrink: 1,
+    marginTop: 1,
   },
-  bentoIconBox: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    justifyContent: "center",
-    alignItems: "center",
+  shiftTimeRangeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.slate,
   },
-  bentoEmoji: {
-    fontSize: 13.5,
-  },
-  bentoLabel: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: pro.muted,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  bentoBadgePill: {
+  compactDurationBadge: {
+    backgroundColor: theme.emeraldSoft,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 5,
   },
-  bentoBadgePillText: {
-    fontSize: 9,
-    fontWeight: "700",
-  },
-  bentoBody: {
-    marginTop: "auto",
-  },
-  bentoPrimaryVal: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: pro.ink,
-    letterSpacing: -0.2,
-    lineHeight: 19,
-  },
-  bentoSubVal: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: pro.slate,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-
-  // ── Worksite Location & Google Maps Card ──
-  venueCard: {
-    backgroundColor: pro.surface,
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: pro.borderLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  venueHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 12,
-  },
-  venueIconSquare: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: pro.emeraldSoft,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  venueHeaderLabel: {
-    fontSize: 9.5,
-    fontWeight: "800",
-    color: pro.muted,
-    letterSpacing: 0.8,
-  },
-  venueAreaName: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: pro.ink,
-    marginTop: 1,
-  },
-  gpsCoordBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 6,
-  },
-  gpsCoordText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: pro.emeraldPrimary,
-  },
-
-  // Map Wrap (Exact Pinpoint View)
-  mapWrap: {
-    borderRadius: 16,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: pro.borderLight,
-    backgroundColor: "#E2EBE6",
-    marginBottom: 12,
-  },
-  map: {
-    width: "100%",
-    height: 195,
-  },
-  mapTopBadge: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255, 255, 255, 0.92)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  livePulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: pro.emeraldPrimary,
-  },
-  mapTopBadgeText: {
+  compactDurationBadgeText: {
     fontSize: 10,
     fontWeight: "800",
-    color: pro.ink,
-  },
-  mapFooterStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: pro.borderSubtle,
-    backgroundColor: "#FAFCFB",
-  },
-  mapFooterStripText: {
-    fontSize: 10.5,
-    fontWeight: "500",
-    color: pro.muted,
+    color: theme.emeraldDark,
   },
 
-  // Address Box with Clean Nested Spacing
-  addressBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: pro.cardBg,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: pro.borderLight,
-    marginBottom: 12,
-  },
-  venueAddressHeader: {
-    fontSize: 9.5,
-    fontWeight: "800",
-    color: pro.muted,
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  venueFullAddress: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: pro.ink,
-    lineHeight: 18,
-  },
-  venueAreaSub: {
-    fontSize: 11.5,
-    fontWeight: "500",
-    color: pro.muted,
-    marginTop: 2,
-  },
-  venueActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  actionPillBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: pro.emeraldLight + "40",
-    flex: 1,
-    justifyContent: "center",
-  },
-  actionPillBtnSecondary: {
-    backgroundColor: pro.surface,
-    borderColor: pro.borderLight,
-  },
-  actionPillBtnText: {
-    fontSize: 12.5,
-    fontWeight: "700",
-    color: pro.emeraldPrimary,
-  },
-
-  // ── General Section Wraps ──
-  sectionWrap: {
-    gap: 8,
-  },
-  perksWrap: {
+  /* Staffing Chips */
+  staffingChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-  perkChip: {
+  staffingPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: pro.surface,
+    gap: 5,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: pro.emeraldLight + "50",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
+    borderColor: theme.borderLight,
   },
-  perkChipText: {
+  staffingPillText: {
     fontSize: 12,
-    fontWeight: "700",
-    color: pro.emeraldDark,
+    fontWeight: "800",
+    color: theme.ink,
+  },
+  staffingPillSub: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: theme.muted,
   },
 
-  // ── Scope of Work Card ──
-  scopeCard: {
-    backgroundColor: pro.surface,
-    borderRadius: 18,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: pro.borderLight,
+  /* Location in Master Block */
+  masterLocationBlock: {
+    gap: 8,
   },
-  scopeHeaderRow: {
+  locationHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  gpsVerifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: theme.borderSubtle,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  gpsVerifiedText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: theme.muted,
+  },
+  onlineNoticeBox: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 10,
-  },
-  scopeCardTitle: {
-    fontSize: 11.5,
-    fontWeight: "800",
-    color: pro.emeraldPrimary,
-    letterSpacing: 0.4,
-  },
-  scopeBodyText: {
-    fontSize: 14,
-    color: pro.charcoal,
-    lineHeight: 22,
-    fontWeight: "500",
-  },
-
-  // ── Employer Card ──
-  employerCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    backgroundColor: pro.surface,
-    borderRadius: 18,
-    padding: 16,
+    backgroundColor: "#F8FAFC",
+    padding: 10,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: pro.borderLight,
+    borderColor: theme.borderLight,
   },
-  employerAvatarSquare: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: pro.emeraldPrimary,
-    justifyContent: "center",
-    alignItems: "center",
+  onlineNoticeText: {
+    fontSize: 11.5,
+    color: theme.slate,
+    fontWeight: "600",
+    flex: 1,
+    lineHeight: 16,
   },
-  employerAvatarInitial: {
-    fontSize: 19,
+  locationDetailWrap: {
+    gap: 8,
+  },
+  localityRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  localityHeadline: {
+    fontSize: 13.5,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: theme.ink,
   },
-  employerSubtitle: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: pro.muted,
-    letterSpacing: 0.8,
-  },
-  employerNameText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: pro.ink,
+  fullStreetAddress: {
+    fontSize: 11.5,
+    color: theme.muted,
+    lineHeight: 16,
     marginTop: 1,
   },
-  employerBadgeRow: {
+  locationActionButtonsRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 3,
+    gap: 8,
+    marginTop: 2,
   },
-  employerBadgeText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: pro.emeraldPrimary,
-  },
-  employerPhoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-    backgroundColor: pro.emeraldSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+  locationActionPill: {
     alignSelf: "flex-start",
-  },
-  employerPhoneText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: pro.emeraldPrimary,
-    letterSpacing: 0.5,
-  },
-  directCallButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: pro.emeraldPrimary,
-    justifyContent: "center",
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 7,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  locationActionPillText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: theme.ink,
   },
 
-  // ── Strategic Command Dock ──
+  /* 4. Guidelines Master Card */
+  guidelinesMasterCard: {
+    backgroundColor: theme.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1.2,
+    borderColor: theme.borderLight,
+    gap: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  guidelinesHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  guidelinesHeaderIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: theme.emeraldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guidelinesSectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.ink,
+  },
+  guidelinesSectionHint: {
+    fontSize: 11,
+    color: theme.muted,
+  },
+  guidelinesPriorityBadge: {
+    backgroundColor: theme.emeraldSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  guidelinesPriorityBadgeCritical: {
+    backgroundColor: theme.goldSoft,
+    borderColor: "#FDE68A",
+  },
+  guidelinesPriorityBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "900",
+    color: theme.emeraldDark,
+    letterSpacing: 0.5,
+  },
+  guidelinesPriorityBadgeTextCritical: {
+    color: theme.gold,
+  },
+  clientRemarksBox: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 3.5,
+    borderLeftColor: theme.emeraldDark,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    gap: 6,
+  },
+  clientRemarksHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  clientRemarksLabel: {
+    fontSize: 9.5,
+    fontWeight: "900",
+    color: theme.emeraldDark,
+    letterSpacing: 0.6,
+  },
+  clientRemarksText: {
+    fontSize: 13,
+    color: theme.ink,
+    lineHeight: 19,
+    fontWeight: "600",
+    fontStyle: "italic",
+  },
+  clientRemarksFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 4,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: theme.borderSubtle,
+  },
+  clientRemarksFooterText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: theme.emeraldDark,
+    flex: 1,
+  },
+  amenitiesBlock: {
+    gap: 6,
+  },
+  perksRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  perkChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  perkChipText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: theme.ink,
+  },
+  protocolPillsContainer: {
+    gap: 8,
+  },
+  protocolGrid: {
+    gap: 8,
+  },
+  protocolCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  protocolIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: theme.emeraldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  protocolCardTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.ink,
+  },
+  protocolCardDesc: {
+    fontSize: 11,
+    color: theme.muted,
+    marginTop: 1,
+  },
+
+  /* 5. Compact Employer Card */
+  employerCompactCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: theme.surface,
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1.2,
+    borderColor: theme.borderLight,
+  },
+  employerAvatarBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: theme.emeraldDark,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  employerAvatarText: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  employerNameText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.ink,
+  },
+  employerVerifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginTop: 1,
+  },
+  employerVerifiedText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: theme.emeraldDark,
+  },
+  directCallBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.emeraldDark,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reportEmployerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF3ED",
+    borderWidth: 1,
+    borderColor: "#F1D8CE",
+    marginLeft: 8,
+  },
+
+  /* 6. Bottom Dock */
   bottomDock: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: pro.surface,
+    backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: pro.borderLight,
+    borderTopColor: theme.borderLight,
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 10,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
     elevation: 8,
   },
-  ownerSideBySideRow: {
+  ownerActionRow: {
     flexDirection: "row",
     gap: 10,
   },
   viewAppsButton: {
-    flex: 1,
-    borderRadius: 16,
-    backgroundColor: pro.emeraldSoft,
-    borderWidth: 1.2,
-    borderColor: pro.emeraldLight + "60",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 14,
-  },
-  viewAppsInner: {
+    flex: 1.6,
+    height: 46,
+    borderRadius: 11,
+    backgroundColor: theme.emeraldDark,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
+    gap: 6,
   },
   viewAppsButtonText: {
     fontSize: 14,
     fontWeight: "800",
-    color: pro.emeraldPrimary,
-    letterSpacing: 0.2,
+    color: "#FFFFFF",
   },
   editJobButton: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-  },
-  editGradient: {
+    flex: 0.9,
+    height: 46,
+    borderRadius: 11,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: theme.emeraldDark,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 14,
+    gap: 5,
+  },
+  editJobButtonText: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: theme.emeraldDark,
+  },
+  deleteJobOwnerBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 11,
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1.5,
+    borderColor: "#FECACA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  applyFullButton: {
+    height: 46,
+    borderRadius: 11,
+    backgroundColor: theme.emeraldDark,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 7,
   },
-  editButtonText: {
+  applyFullButtonDisabled: {
+    backgroundColor: theme.faint,
+  },
+  applyFullButtonText: {
     fontSize: 14.5,
     fontWeight: "800",
     color: "#FFFFFF",
-    letterSpacing: 0.2,
   },
-
-  workerApplyRow: {
+  workerStatusRow: {
+    width: "100%",
+  },
+  appStatusAcceptedBox: {
     flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: theme.emeraldSoft,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
-  applyFullButton: {
+  appStatusAcceptedText: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: theme.emeraldDark,
+  },
+  appStatusPendingBox: {
     flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-  },
-  applyGradient: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 15,
-    gap: 8,
+    gap: 6,
+    backgroundColor: theme.goldSoft,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
-  applyFullButtonText: {
-    fontSize: 15.5,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 0.3,
-  },
-
-  // ── Applications Bottom Sheet Modal ──
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "flex-end",
-  },
-  appsSheetCard: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    maxHeight: "82%",
-  },
-  sheetHandleIndicator: {
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: pro.borderLight,
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-  sheetMainTitle: {
-    fontSize: 19,
-    fontWeight: "900",
-    color: pro.ink,
-  },
-  sheetSubTitle: {
-    fontSize: 12.5,
-    color: pro.muted,
-    marginTop: 2,
-  },
-  sheetCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: pro.cardBg,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: pro.borderLight,
-  },
-  candidatesScrollView: {
-    marginBottom: 10,
-  },
-  candidateCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: pro.borderSubtle,
-  },
-  candidateAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: pro.emeraldSoft,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  candidateAvatarText: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: pro.emeraldPrimary,
-  },
-  candidateNameText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: pro.ink,
-  },
-  candidateAreaText: {
-    fontSize: 12.5,
-    color: pro.slate,
-    marginTop: 1,
-  },
-  candidateAppliedAt: {
-    fontSize: 11,
-    color: pro.muted,
-    marginTop: 2,
-  },
-  candidateCallBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: pro.emeraldPrimary,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  emptyApplicantsBox: {
-    alignItems: "center",
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-  },
-  emptyApplicantsRing: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: pro.emeraldSoft,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  emptyApplicantsTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: pro.ink,
-    marginBottom: 6,
-  },
-  emptyApplicantsDesc: {
+  appStatusPendingText: {
     fontSize: 13,
-    color: pro.muted,
-    textAlign: "center",
-    lineHeight: 19,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  appWithdrawBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#FFF1F2",
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  appWithdrawText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#E11D48",
+  },
+  appStatusCompletedBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.borderSubtle,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  appStatusCompletedText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.muted,
   },
 
-  // ── Apply Prompt Modal ──
+  /* Apply Confirmation Modal */
   modalBackdropCenter: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
   },
   applyPromptCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 22,
-    padding: 24,
     width: "100%",
     maxWidth: 320,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
     alignItems: "center",
   },
   applyPromptIconRing: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: pro.emeraldSoft,
-    justifyContent: "center",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: theme.emeraldSoft,
     alignItems: "center",
-    marginBottom: 14,
+    justifyContent: "center",
+    marginBottom: 10,
   },
   applyPromptTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "800",
-    color: pro.ink,
-    marginBottom: 6,
+    color: theme.ink,
+    textAlign: "center",
+    marginBottom: 5,
   },
   applyPromptDesc: {
-    fontSize: 13,
-    color: pro.slate,
+    fontSize: 12,
+    color: theme.muted,
     textAlign: "center",
-    lineHeight: 18,
-    marginBottom: 20,
+    lineHeight: 17,
+    marginBottom: 16,
   },
   applyPromptBtnRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
     width: "100%",
   },
   applyPromptCancelBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    height: 42,
+    borderRadius: 9,
     backgroundColor: "#F1F5F9",
     alignItems: "center",
+    justifyContent: "center",
   },
   applyPromptCancelText: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: "700",
-    color: pro.slate,
+    color: theme.slate,
   },
   applyPromptConfirmBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: pro.emeraldPrimary,
+    flex: 1.3,
+    height: 42,
+    borderRadius: 9,
+    backgroundColor: theme.emeraldDark,
     alignItems: "center",
+    justifyContent: "center",
   },
   applyPromptConfirmText: {
-    fontSize: 13.5,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "800",
     color: "#FFFFFF",
   },
 });

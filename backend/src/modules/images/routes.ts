@@ -62,11 +62,17 @@ images.post("/confirm", async (c) => {
     .first();
   if (!intent) throw new ApiError("INVALID_IMAGE", 403);
   const asset = await storage(c.env).verifyAsset(c.get("userId"), assetId);
+  const writes = [c.env.DB.prepare(`
+    INSERT INTO uploaded_image_assets(id,user_id,purpose,thumbnail_url,medium_url,full_url,created_at)
+    VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+    purpose=excluded.purpose,thumbnail_url=excluded.thumbnail_url,
+    medium_url=excluded.medium_url,full_url=excluded.full_url
+  `).bind(asset.id,c.get('userId'),purpose,asset.thumbnailUrl,asset.mediumUrl,asset.fullUrl,now())];
   if (purpose === "profile") {
-    await c.env.DB.prepare("UPDATE users SET photo_url=? WHERE id=?")
-      .bind(asset.thumbnailUrl, c.get("userId"))
-      .run();
+    writes.push(c.env.DB.prepare("UPDATE users SET photo_url=? WHERE id=?")
+      .bind(asset.thumbnailUrl, c.get("userId")));
   }
+  await c.env.DB.batch(writes);
   await recordUsage(c.env.DB, "cloudinary", "verified_upload", true);
   return ok(c, asset);
 });

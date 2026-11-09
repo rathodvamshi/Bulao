@@ -1,8 +1,10 @@
+import { AppImage as Image } from '../../../components/AppImage';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { View, Pressable, StyleSheet, Image, Animated, Easing, AccessibilityInfo } from "react-native";
+import { View, Pressable, StyleSheet, Animated, Easing, AccessibilityInfo } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { ServiceGrowthSheet } from "./ServiceGrowthSheet";
+import { ServiceRequestsModal } from "../../../components/service/ServiceRequestsModal";
 import type { ServiceItem } from "../types";
 import {
   ServiceActionsPopover,
@@ -94,6 +96,7 @@ export function MyServiceCollection({
   }, [filter, page, reduceMotion, cardsProgress, cardsOffset]);
   const [anchor, setAnchor] = useState<ServiceMenuAnchor | null>(null);
   const [moreId, setMoreId] = useState<string | null>(null);
+  const [requestsService, setRequestsService] = useState<ServiceItem | null>(null);
   const [failedPhotos, setFailedPhotos] = useState<Record<string, boolean>>({});
   const active = services.filter((item) => item.available).length;
   const filtered = services.filter(
@@ -230,7 +233,7 @@ export function MyServiceCollection({
 
               <View style={s.info}>
                 <View style={s.titleHeaderRow}>
-                  <Text style={s.cardTitle} numberOfLines={2}>
+                  <Text style={s.cardTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                     {item.title || item.categoryName}
                   </Text>
                   <ThreeDotAction
@@ -240,10 +243,6 @@ export function MyServiceCollection({
                     }}
                   />
                 </View>
-
-                <Text style={s.categoryBreadcrumb} numberOfLines={1}>
-                  {item.categoryName}{item.title ? ` › ${item.title}` : ""}
-                </Text>
 
                 <View style={s.ratingRow}>
                   <Ionicons
@@ -313,19 +312,30 @@ export function MyServiceCollection({
             <View style={s.actions}>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => open(item)}
+                accessibilityLabel={`View requests for ${item.title || item.categoryName}`}
+                onPress={() => setRequestsService(item)}
                 style={[s.actionBtn, s.actionBtnPrimary]}
               >
-                <Ionicons name="eye-outline" size={14} color="#FFFFFF" />
-                <Text style={s.actionPrimaryText}>View Details</Text>
+                <Ionicons name="mail-unread-outline" size={14} color="#FFFFFF" />
+                <Text style={s.actionPrimaryText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>View Requests</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel="View service details"
+                onPress={() => open(item)}
+                style={s.actionBtn}
+              >
+                <Ionicons name="eye-outline" size={14} color={theme.green} />
+                <Text style={s.actionSecondaryText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>Details</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Edit service"
                 onPress={() => open(item, true)}
                 style={s.actionBtn}
               >
                 <Ionicons name="create-outline" size={14} color={theme.green} />
-                <Text style={s.actionSecondaryText}>Edit</Text>
+                <Text style={s.actionSecondaryText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>Edit</Text>
               </Pressable>
             </View>
           </View>
@@ -413,6 +423,12 @@ export function MyServiceCollection({
           onClose={() => setMoreId(null)}
         />
       )}
+      <ServiceRequestsModal
+        visible={!!requestsService}
+        onClose={() => setRequestsService(null)}
+        serviceId={requestsService?.id}
+        serviceTitle={requestsService?.title || requestsService?.categoryName}
+      />
     </View>
   );
 }
@@ -620,6 +636,8 @@ const s = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: "800",
     lineHeight: 20,
@@ -712,10 +730,10 @@ const s = StyleSheet.create({
     minWidth: 0,
   },
   metaLabel: {
-    fontSize: 8.5,
-    fontWeight: "800",
+    fontSize: 7.5,
+    fontWeight: "700",
     color: "#64748B",
-    letterSpacing: 0.6,
+    letterSpacing: 0.3,
     marginBottom: 1,
   },
   metaVal: {
@@ -731,15 +749,16 @@ const s = StyleSheet.create({
     height: 24,
     backgroundColor: "#E2E8F0",
   },
-  actions: { flexDirection: "row", gap: 8 },
+  actions: { flexDirection: "row", gap: 6, width: "100%" },
   actionBtn: {
     flex: 1,
+    minWidth: 0,
     minHeight: 40,
     flexDirection: "row",
-    gap: 6,
+    gap: 4,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 6,
     borderRadius: 12,
     backgroundColor: "#F0FDF4",
     borderWidth: 1,
@@ -750,8 +769,8 @@ const s = StyleSheet.create({
     backgroundColor: "#034E3B",
     borderColor: "#034E3B",
   },
-  actionPrimaryText: { fontSize: 12.5, fontWeight: "700", color: "#FFFFFF" },
-  actionSecondaryText: { fontSize: 12.5, fontWeight: "700", color: "#034E3B" },
+  actionPrimaryText: { flexShrink: 1, minWidth: 0, fontSize: 11.5, lineHeight: 14, fontWeight: "700", color: "#FFFFFF" },
+  actionSecondaryText: { flexShrink: 1, minWidth: 0, fontSize: 11.5, lineHeight: 14, fontWeight: "700", color: "#034E3B" },
   action: {
     flex: 1,
     minHeight: 40,

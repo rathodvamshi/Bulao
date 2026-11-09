@@ -1,7 +1,9 @@
+import { AppImage as Image } from '../src/components/AppImage';
 import {
   View,
   Text,
   TextInput,
+  Animated,
   Pressable,
   StyleSheet,
   Platform,
@@ -11,9 +13,9 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Image,
-} from "react-native";
-import { useState, useMemo } from "react";
+  Keyboard,
+  } from "react-native";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -22,31 +24,15 @@ import { StatusBar } from "expo-status-bar";
 import { api, ApiError } from "../src/api/client";
 import { useAuth } from "../src/auth";
 import { dash } from "../src/components/provider/palette";
-import { ServiceCollectionSkeleton } from "../src/components/SkeletonLoader";
 import { ServiceBottomNav } from "../src/components/service/ServiceBottomNav";
 import { serviceApi, tenDigitPhone, servicePhoneVisible } from "../src/api/serviceApi";
 import { useLocation } from "../src/store/location";
-
-type CategoryFilter =
-  | "all"
-  | "automotive"
-  | "appliance"
-  | "electrical"
-  | "plumbing"
-  | "cleaning"
-  | "painting"
-  | "carpentry"
-  | "cooking"
-  | "pest"
-  | "beauty";
-
-interface CategoryMeta {
-  id: CategoryFilter;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  bg: string;
-}
+import {
+  ALL_CATEGORIES_LIST,
+  type CategoryFilter,
+} from "../src/components/service/searchCategories";
+import { ServiceCategoryRail } from "../src/components/service/ServiceCategoryRail";
+import { useRotatingSearchHint } from "../src/components/service/useRotatingSearchHint";
 
 interface ServiceSearchResult {
   id: string;
@@ -55,6 +41,8 @@ interface ServiceSearchResult {
   providerName: string;
   providerPhoto?: string | null;
   providerPhone?: string | null;
+  ownerRating: number | null;
+  ownerReviewsCount: number;
   coverImage?: string | null;
   category: string;
   categorySlug: CategoryFilter;
@@ -73,62 +61,133 @@ interface ServiceSearchResult {
   phoneVisible: boolean;
 }
 
-const ALL_CATEGORIES_LIST: CategoryMeta[] = [
-  { id: "all", label: "All Services", icon: "grid-outline", color: "#047857", bg: "#ECFDF5" },
-  { id: "automotive", label: "Car & Auto", icon: "car-outline", color: "#047857", bg: "#ECFDF5" },
-  { id: "appliance", label: "AC & Appliance", icon: "snow-outline", color: "#2B6CB0", bg: "#E8F1FF" },
-  { id: "electrical", label: "Electrical", icon: "flash-outline", color: "#D97706", bg: "#FEF3C7" },
-  { id: "plumbing", label: "Plumbing", icon: "water-outline", color: "#0369A1", bg: "#E0F2FE" },
-  { id: "cleaning", label: "Cleaning", icon: "sparkles-outline", color: "#1A7A4A", bg: "#E8F6EE" },
-  { id: "painting", label: "Painting", icon: "color-palette-outline", color: "#BE185D", bg: "#FCE7F3" },
-  { id: "carpentry", label: "Carpentry", icon: "hammer-outline", color: "#B45309", bg: "#FEF3C7" },
-  { id: "cooking", label: "Cook & Chef", icon: "restaurant-outline", color: "#C05621", bg: "#FFF1E4" },
-  { id: "pest", label: "Pest Control", icon: "bug-outline", color: "#4C1D95", bg: "#F3E8FF" },
-  { id: "beauty", label: "Beauty & Salon", icon: "cut-outline", color: "#DB2777", bg: "#FCE7F3" },
-];
-
-const ALL_PILL: CategoryMeta = ALL_CATEGORIES_LIST[0]!;
-
-const TOP_FIVE_CATEGORIES = ALL_CATEGORIES_LIST.slice(0, 5);
-
 const INITIAL_PAGE_SIZE = 6;
 
 const ROLE_SYNONYMS: Record<string, string[]> = {
-  automotive: ["car", "auto", "vehicle", "mechanic", "motor", "repair", "garage", "puncture", "wheel", "engine", "car repair"],
+  automotive: ["car", "auto", "vehicle", "mechanic", "motor", "repair", "garage", "puncture", "wheel", "engine", "car repair", "bike", "scooter"],
+  mechanic: ["car", "auto", "vehicle", "mechanic", "motor", "repair", "garage", "puncture", "wheel", "engine", "bike", "scooter"],
   electrical: ["electrician", "wiring", "light", "fan", "switch", "fuse", "power", "short circuit", "appliance", "electricals"],
+  electrician: ["electrician", "wiring", "light", "fan", "switch", "fuse", "power", "short circuit", "appliance", "electricals"],
   plumbing: ["plumber", "pipe", "leak", "tap", "sink", "drain", "water", "toilet", "bathroom", "faucet"],
+  plumber: ["plumber", "pipe", "leak", "tap", "sink", "drain", "water", "toilet", "bathroom", "faucet"],
   cleaning: ["cleaner", "maid", "housekeeping", "sweeping", "washing", "deep clean", "sanitization", "cleaning"],
+  cleaner: ["cleaner", "maid", "housekeeping", "sweeping", "washing", "deep clean", "sanitization", "cleaning"],
   appliance: ["ac", "fridge", "refrigerator", "washing machine", "tv", "microwave", "oven", "cooler", "air conditioner"],
   cooking: ["cook", "chef", "catering", "meal", "food", "kitchen", "dinner", "lunch"],
+  "food-catering": ["cook", "chef", "catering", "meal", "food", "kitchen", "dinner", "lunch", "tiffin"],
   painting: ["painter", "paint", "wall", "color", "whitewash", "texture"],
+  painter: ["painter", "paint", "wall", "color", "whitewash", "texture"],
   carpentry: ["carpenter", "wood", "furniture", "door", "table", "chair", "bed", "sofa"],
+  carpenter: ["carpenter", "wood", "furniture", "door", "table", "chair", "bed", "sofa"],
   pest: ["pest", "cockroach", "termite", "bedbug", "mosquito", "insects", "rat"],
   beauty: ["salon", "makeup", "haircut", "beautician", "barber", "grooming", "facial"],
+  "beauty-service": ["salon", "makeup", "haircut", "beautician", "barber", "grooming", "facial", "salon", "parlour"],
+  tutoring: ["tutor", "tuition", "teacher", "maths", "physics", "class", "exam", "coaching", "school", "college"],
+  "computer-repair": ["laptop", "computer", "pc", "desktop", "mac", "windows", "software", "printer"],
+  "mobile-repair": ["mobile", "phone", "iphone", "android", "display", "screen", "charging"],
+  gardener: ["garden", "gardener", "lawn", "plant", "trees", "grass", "pots"],
+  driver: ["driver", "driving", "cab", "chauffeur", "car driver"],
+  health: ["nurse", "caregiver", "elderly", "patient", "medical", "physiotherapy", "health"],
+  security: ["cctv", "security", "guard", "camera", "watchman"],
+  other: ["other", "custom", "specialist"],
 };
+
+function normalizeCategoryText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function resolveCategorySlug(value: string): CategoryFilter {
+  const normalized = normalizeCategoryText(value);
+  if (!normalized) return "all";
+
+  const exactCategory = ALL_CATEGORIES_LIST.find((category) => {
+    if (category.id === "all") return false;
+    const id = normalizeCategoryText(category.id);
+    const label = normalizeCategoryText(category.label);
+    return normalized.includes(id) || normalized.includes(label);
+  });
+  if (exactCategory) return exactCategory.id;
+
+  const synonymCategory = ALL_CATEGORIES_LIST.find((category) => {
+    if (category.id === "all") return false;
+    return (ROLE_SYNONYMS[category.id] || []).some((term) => {
+      const normalizedTerm = normalizeCategoryText(term);
+      return normalizedTerm.length > 2 && normalized.includes(normalizedTerm);
+    });
+  });
+  return synonymCategory?.id || "all";
+}
+
+function formatDistanceText(distanceKm: number | null | undefined): string {
+  if (distanceKm === undefined || distanceKm === null) return "1.2 km away";
+  const num = Number(distanceKm);
+  if (isNaN(num) || num <= 0) return "0.5 km away";
+  if (num < 0.1) return "0.2 km away";
+  return `${num.toFixed(1)} km away`;
+}
+
+function getSpecificationIcon(tag: string): keyof typeof Ionicons.glyphMap {
+  const lower = tag.toLowerCase();
+  if (/clean|wash|maid|housekeep|sanit/i.test(lower)) return "sparkles";
+  if (/water|pipe|leak|plumb|tap|sink|drain/i.test(lower)) return "water";
+  if (/wire|electric|light|power|switch|fan/i.test(lower)) return "flash";
+  if (/ac|cool|air|fridge|refrig/i.test(lower)) return "snow";
+  if (/engine|motor|brake|oil|clutch|gear|tyre|wheel|puncture|bike|car|auto|mechanic/i.test(lower)) return "construct";
+  if (/paint|wall|color/i.test(lower)) return "color-palette";
+  if (/wood|door|bed|table|sofa|carpenter/i.test(lower)) return "hammer";
+  if (/hair|salon|beauty|facial|makeup/i.test(lower)) return "cut";
+  if (/inspect|check|diag|tune|general/i.test(lower)) return "checkmark-done-circle";
+  if (/pest|bug|termite/i.test(lower)) return "shield-half";
+  if (/tutor|teach|class|exam/i.test(lower)) return "school";
+  return "checkmark-circle";
+}
+
+export const RADIUS_FILTER_OPTIONS = [
+  { id: "all", label: "All (50+ km)", maxKm: Infinity },
+  { id: "50", label: "50 km", maxKm: 50 },
+  { id: "30", label: "30 km", maxKm: 30 },
+  { id: "20", label: "20 km", maxKm: 20 },
+  { id: "10", label: "10 km", maxKm: 10 },
+  { id: "5", label: "5 km", maxKm: 5 },
+  { id: "2", label: "2 km", maxKm: 2 },
+] as const;
+
+export type RadiusFilterId = (typeof RADIUS_FILTER_OPTIONS)[number]["id"];
 
 export default function ServiceSearchScreen() {
   const params = useLocalSearchParams<{ q?: string; category?: string }>();
   const [query, setQuery] = useState(params.q || "");
-  const initialCategory = (params.category as CategoryFilter) || "all";
+  const requestedCategory = params.category as CategoryFilter | undefined;
+  const initialCategory = ALL_CATEGORIES_LIST.some((category) => category.id === requestedCategory)
+    ? requestedCategory!
+    : "all";
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>(initialCategory);
-  const [horizontalCategories, setHorizontalCategories] = useState<CategoryMeta[]>(() => {
-    if (initialCategory === "all") return ALL_CATEGORIES_LIST.slice(0, 5);
-    const targetMeta = ALL_CATEGORIES_LIST.find((c) => c.id === initialCategory);
-    if (!targetMeta) return ALL_CATEGORIES_LIST.slice(0, 5);
-    const nonAllList = ALL_CATEGORIES_LIST.filter(
-      (c) => c.id !== "all" && c.id !== initialCategory
-    );
-    return [ALL_PILL, targetMeta, ...nonAllList].slice(0, 5);
-  });
+  const [activeRadius, setActiveRadius] = useState<RadiusFilterId>("all");
   const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const searchInputRef = useRef<TextInput>(null);
 
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const location = useLocation((state) => state.location);
+  const { hint, opacity } = useRotatingSearchHint(location?.area);
 
-  // Category Bottom Sheet Modal State
-  const [categorySheetVisible, setCategorySheetVisible] = useState(false);
-  const [isCategoryFetching, setIsCategoryFetching] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Lazy Loading & Pagination State
   const [visibleCount, setVisibleCount] = useState(INITIAL_PAGE_SIZE);
@@ -147,22 +206,21 @@ export default function ServiceSearchScreen() {
 
   // Live Database Fetch for Services (Zero Seed Defaults or Fake Data)
   const servicesDbQuery = useQuery({
-    queryKey: ["db-services-search", activeCategory, query, location],
+    queryKey: ["db-services-search", debouncedQuery, location],
     queryFn: async () => {
-      try {
-        const queryParams = new URLSearchParams();
-        if (!location) return [];
-        queryParams.set("latitude", String(location.latitude));
-        queryParams.set("longitude", String(location.longitude));
-        queryParams.set("radiusKm", "50");
-        if (query.trim()) {
-          queryParams.set("q", query.trim());
-        }
-        const res = await api<{ items?: Array<any> }>(`/services?${queryParams.toString()}`);
-        const dbItems = res?.items || [];
-        return dbItems.map((s: any) => {
-          const categoryText = String(s.category || s.categoryName || "").toLowerCase();
-          const categorySlug = (Object.keys(ROLE_SYNONYMS).find((key) => categoryText.includes(key)) || "all") as CategoryFilter;
+      const queryParams = new URLSearchParams();
+      if (!location) return [];
+      queryParams.set("latitude", String(location.latitude));
+      queryParams.set("longitude", String(location.longitude));
+      queryParams.set("radiusKm", "50");
+      if (debouncedQuery) {
+        queryParams.set("q", debouncedQuery);
+      }
+      const res = await api<{ items?: Array<any> }>(`/services?${queryParams.toString()}`);
+      const dbItems = res?.items || [];
+      return dbItems.map((s: any) => {
+          const categoryText = String(s.category || s.categoryName || "");
+          const categorySlug = resolveCategorySlug(categoryText);
           const matchingCatMeta =
             ALL_CATEGORIES_LIST.find((c) => c.id === categorySlug) || ALL_CATEGORIES_LIST[0]!;
 
@@ -173,33 +231,58 @@ export default function ServiceSearchScreen() {
             portfolio = [];
           }
 
-          let offeredList: string[] = [];
+          let rawOffered: any[] = [];
           try {
-            offeredList = typeof s.offeredServices === "string" ? JSON.parse(s.offeredServices) : s.offeredServices || [];
+            rawOffered = typeof s.offeredServices === "string" ? JSON.parse(s.offeredServices) : s.offeredServices || [];
           } catch {
-            offeredList = [];
+            rawOffered = [];
           }
+          const offeredList: string[] = (Array.isArray(rawOffered) ? rawOffered : [])
+            .filter((x: any) => typeof x === "string" && x.trim().length > 0)
+            .map((tag: string) =>
+              tag
+                .replace(/[-_]+/g, " ")
+                .trim()
+                .replace(/\b\w/g, (char) => char.toUpperCase())
+            );
 
           const coverPhoto = s.shopPhotoUrl || portfolio[0] || s.providerPhoto || null;
 
           const modeTag =
             s.serviceMode === "doorstep"
-              ? "Home Service"
+              ? "Doorstep"
               : s.serviceMode === "at_center"
-              ? "Shop Service"
-              : "Shop + Home";
+              ? "In-Shop"
+              : "Hybrid (Home & Shop)";
 
           const ratingVal = s.rating !== null && s.rating !== undefined ? Number(s.rating) : null;
-          const reviewsCountVal = s.completed ? Number(s.completed) : (s.totalReviews ? Number(s.totalReviews) : 0);
-          const basePriceTextVal = s.basePricePaise ? `₹${Math.round(s.basePricePaise / 100)} base rate` : null;
+          const reviewsCountVal = s.totalReviews ? Number(s.totalReviews) : (s.completed ? Number(s.completed) : 0);
+          const ownerRatingVal = s.ownerRating !== null && s.ownerRating !== undefined ? Number(s.ownerRating) : null;
+          const ownerReviewsCountVal = s.ownerReviewsCount ? Number(s.ownerReviewsCount) : 0;
+
+          let basePriceTextVal: string | null = null;
+          if (s.basePricePaise && Number(s.basePricePaise) > 0) {
+            const amount = Math.round(Number(s.basePricePaise) / 100);
+            if (s.pricingModel === "hourly") {
+              basePriceTextVal = `₹${amount}/hr`;
+            } else if (s.pricingModel === "visit" || s.pricingModel === "inspection") {
+              basePriceTextVal = `₹${amount} visit`;
+            } else {
+              basePriceTextVal = `₹${amount} onwards`;
+            }
+          } else if (s.pricingModel === "free_inspection") {
+            basePriceTextVal = "Free inspection";
+          }
 
           return {
             id: s.id,
             providerId: s.userId,
             title: s.title || s.category || "Service Profile",
             providerName: s.providerName || "Service Provider",
-            providerPhoto: coverPhoto,
+            providerPhoto: s.providerPhoto || null,
             providerPhone: s.providerPhone || s.ownerPhone || null,
+            ownerRating: ownerRatingVal,
+            ownerReviewsCount: ownerReviewsCountVal,
             coverImage: coverPhoto,
             category: s.category || s.categoryName || "Service category not provided",
             categorySlug,
@@ -217,46 +300,52 @@ export default function ServiceSearchScreen() {
             isVerified: Boolean(s.providerVerified ?? true),
             phoneVisible: servicePhoneVisible(s.phoneVisible) || Boolean(s.ownerPhone),
           } as ServiceSearchResult;
-        });
-      } catch (err) {
-        console.warn("[ServiceSearch] DB query error:", err);
-        return [];
-      }
+      });
     },
     enabled: !!location,
     staleTime: 10000,
   });
 
-  // On-Demand Category Selection Handler (with FIFO Queue Promotion)
+  // Category filtering is local because the service query already loads all categories.
   const handleSelectCategory = (catId: CategoryFilter) => {
     setActiveCategory(catId);
     setVisibleCount(INITIAL_PAGE_SIZE);
-    setIsCategoryFetching(true);
-    setTimeout(() => {
-      setIsCategoryFetching(false);
-    }, 300);
+    searchInputRef.current?.blur();
+    Keyboard.dismiss();
+  };
 
-    if (catId === "all") return;
-
-    const targetMeta = ALL_CATEGORIES_LIST.find((c) => c.id === catId);
-    if (!targetMeta) return;
-
-    setHorizontalCategories((prev) => {
-      const allPill = prev.find((c) => c.id === "all") || ALL_PILL;
-      const nonAllPills = prev.filter((c) => c.id !== "all" && c.id !== catId);
-      const newNonAll = [targetMeta, ...nonAllPills].slice(0, 4);
-      return [allPill, ...newNonAll];
-    });
+  const handleSelectRadius = (radiusId: RadiusFilterId) => {
+    setActiveRadius(radiusId);
+    setVisibleCount(INITIAL_PAGE_SIZE);
   };
 
   const dbServicesList = servicesDbQuery.data || [];
 
-  // Multi-Field Fuzzy Match (Category + Role + Title + Provider Name + Area)
+  const selectedRadiusOption = useMemo(() => {
+    return (
+      RADIUS_FILTER_OPTIONS.find((opt) => opt.id === activeRadius) || RADIUS_FILTER_OPTIONS[0]
+    );
+  }, [activeRadius]);
+
+  // Combined Multi-Field Filtering Strategy (Category + Radius + Text Fuzzy Match)
+  // Cards sorted in ASCENDING order (closest first: 0.2 km -> 0.5 km -> 1.2 km ...)
   const results = useMemo(() => {
     let list = dbServicesList;
+
+    // 1. Category Filtering
     if (activeCategory !== "all") {
       list = list.filter((s) => s.categorySlug === activeCategory);
     }
+
+    // 2. Radius Filtering (Distance <= maxKm)
+    if (selectedRadiusOption.maxKm !== Infinity) {
+      list = list.filter((s) => {
+        const dist = s.distanceKm ?? 0;
+        return dist <= selectedRadiusOption.maxKm;
+      });
+    }
+
+    // 3. Multi-Field Fuzzy Match (Category + Role + Title + Provider Name + Area + Synonyms)
     if (query.trim()) {
       const q = query.toLowerCase().trim();
       list = list.filter((s) => {
@@ -271,12 +360,29 @@ export default function ServiceSearchScreen() {
         return titleMatch || providerMatch || categoryMatch || areaMatch || synonymMatch;
       });
     }
-    return list;
-  }, [dbServicesList, query, activeCategory]);
+
+    // 4. Sort Cards in ASCENDING Order (Closest distance first)
+    return [...list].sort((a, b) => {
+      const distA = a.distanceKm ?? 999999;
+      const distB = b.distanceKm ?? 999999;
+      if (distA !== distB) {
+        return distA - distB; // Ascending distance (closest first)
+      }
+      const ratingA = a.rating ?? 0;
+      const ratingB = b.rating ?? 0;
+      if (ratingA !== ratingB) {
+        return ratingB - ratingA; // Secondary sort: higher rating
+      }
+      return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+    });
+  }, [dbServicesList, query, activeCategory, selectedRadiusOption]);
 
   const paginatedResults = useMemo(() => {
     return results.slice(0, visibleCount);
   }, [results, visibleCount]);
+
+  const activeCategoryLabel =
+    ALL_CATEGORIES_LIST.find((category) => category.id === activeCategory)?.label || "services";
 
   const hasMoreResults = visibleCount < results.length;
 
@@ -392,7 +498,7 @@ export default function ServiceSearchScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <StatusBar style="dark" translucent />
 
@@ -400,26 +506,42 @@ export default function ServiceSearchScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         {/* Search Bar Row */}
         <View style={styles.searchContainer}>
-          <Pressable
-            onPress={() => router.back()}
-            style={styles.backBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={22} color={dash.ink} />
-          </Pressable>
-
           <View style={styles.inputWrapper}>
-            <Ionicons name="search" size={19} color="#047857" style={styles.searchIcon} />
+            <Pressable
+              onPress={() => router.back()}
+              style={styles.backBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="arrow-back" size={20} color={dash.ink} />
+            </Pressable>
             <TextInput
-              autoFocus
+              ref={searchInputRef}
+              autoFocus={!params.q && !params.category}
               value={query}
-              onChangeText={setQuery}
-              placeholder="Search 'AC repair', 'car', 'Vamshi'..."
-              placeholderTextColor="#94A3B8"
+              onChangeText={(value) => {
+                setQuery(value);
+                setVisibleCount(INITIAL_PAGE_SIZE);
+              }}
+              placeholder=""
               style={styles.input}
               returnKeyType="search"
             />
+            {!query && (
+              <Animated.Text
+                pointerEvents="none"
+                numberOfLines={1}
+                style={[
+                  styles.inputHint,
+                  {
+                    opacity,
+                    transform: [{ translateY: opacity.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }],
+                  },
+                ]}
+              >
+                {hint}
+              </Animated.Text>
+            )}
             {query.length > 0 && (
               <Pressable onPress={() => setQuery("")} style={styles.clearBtn} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color="#94A3B8" />
@@ -428,55 +550,52 @@ export default function ServiceSearchScreen() {
           </View>
         </View>
 
-        {/* Categories Horizontal Scroll + View More Pill */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoryScroll}
-        >
-          {horizontalCategories.map((cat) => {
-            const isActive = activeCategory === cat.id;
-            return (
-              <Pressable
-                key={cat.id}
-                onPress={() => handleSelectCategory(cat.id)}
-                style={[
-                  styles.catPill,
-                  isActive ? styles.catPillActive : styles.catPillInactive,
-                ]}
-              >
-                <View
+        <ServiceCategoryRail activeCategory={activeCategory} onSelect={handleSelectCategory} style={{ marginTop: 8, height: 50 }} />
+
+        {/* Radius Filtering Rail (Descending Order: Highest First) */}
+        <View style={styles.radiusFilterBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.radiusScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.radiusFilterLabelPill}>
+              <Ionicons name="navigate-circle" size={13} color="#047857" />
+              <Text style={styles.radiusFilterLabelText}>Radius</Text>
+            </View>
+
+            {RADIUS_FILTER_OPTIONS.map((opt) => {
+              const isActive = activeRadius === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter by radius ${opt.label}`}
+                  onPress={() => handleSelectRadius(opt.id)}
                   style={[
-                    styles.catIconBadge,
-                    isActive ? styles.catIconBadgeActive : { backgroundColor: cat.bg },
+                    styles.radiusChip,
+                    isActive && styles.radiusChipActive,
                   ]}
                 >
                   <Ionicons
-                    name={cat.icon}
-                    size={12}
-                    color={isActive ? "#FFFFFF" : cat.color}
+                    name={opt.id === "all" ? "globe-outline" : "radio-button-on"}
+                    size={11}
+                    color={isActive ? "#FFFFFF" : "#047857"}
                   />
-                </View>
-                <Text style={[styles.catPillText, isActive && styles.catPillTextActive]}>
-                  {cat.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="View all categories"
-            onPress={() => setCategorySheetVisible(true)}
-            style={styles.moreCatPill}
-          >
-            <View style={styles.moreIconBadge}>
-              <Ionicons name="grid" size={12} color="#047857" />
-            </View>
-            <Text style={styles.moreCatPillText}>View More (+)</Text>
-            <Ionicons name="chevron-down" size={12} color="#047857" style={{ marginLeft: 1 }} />
-          </Pressable>
-        </ScrollView>
+                  <Text
+                    style={[
+                      styles.radiusChipText,
+                      isActive && styles.radiusChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
       </View>
 
       {/* Results Area */}
@@ -493,48 +612,110 @@ export default function ServiceSearchScreen() {
         scrollEventThrottle={32}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: 110 + insets.bottom },
+          { paddingBottom: keyboardVisible ? 24 : 110 + insets.bottom },
         ]}
       >
-        {/* Results Count & Sort Row */}
+        {/* Results summary */}
         <View style={styles.resultsHeaderRow}>
-          <Text style={styles.resultsCountText}>
-            {results.length} provider{results.length === 1 ? "" : "s"} near you
-          </Text>
-          <Pressable style={styles.sortBtn}>
-            <Text style={styles.sortBtnText}>Sort</Text>
-            <Ionicons name="options-outline" size={14} color="#047857" />
-          </Pressable>
+          <View>
+            <Text style={styles.resultsCountText}>
+              {results.length} {results.length === 1 ? "service" : "services"}
+            </Text>
+            <Text style={styles.resultsNearText}>
+              Near {location?.area || "your area"}
+              {selectedRadiusOption.maxKm !== Infinity ? ` (within ${selectedRadiusOption.label})` : ""}
+            </Text>
+          </View>
+          <View style={styles.summaryBadgesRow}>
+            {selectedRadiusOption.maxKm !== Infinity && (
+              <Pressable
+                onPress={() => handleSelectRadius("all")}
+                style={styles.activeRadiusBadge}
+              >
+                <Ionicons name="close-circle" size={12} color="#0369A1" />
+                <Text style={styles.activeRadiusBadgeText}>{selectedRadiusOption.label}</Text>
+              </Pressable>
+            )}
+            <View style={styles.activeCategoryBadge}>
+              <Text style={styles.activeCategoryBadgeText}>{activeCategoryLabel}</Text>
+            </View>
+          </View>
         </View>
 
-        {/* Loading State */}
-        {servicesDbQuery.isLoading || isCategoryFetching ? (
-          <View style={{ paddingVertical: 10 }}>
-            <ServiceCollectionSkeleton />
+        {!location ? (
+          <View style={[styles.emptyState, keyboardVisible && styles.emptyStateCompact]}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="location-outline" size={30} color="#047857" />
+            </View>
+            <Text style={styles.emptyTitle}>Choose your area</Text>
+            <Text style={styles.emptySub}>Set your location to find services and providers near you.</Text>
+            <Pressable onPress={() => useLocation.getState().setLocationSheetVisible(true)} style={styles.emptyActionButton}>
+              <Text style={styles.emptyActionText}>Set location</Text>
+              <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+            </Pressable>
           </View>
-        ) : paginatedResults.length === 0 ? (
-          <View style={styles.emptyState}>
+        ) : servicesDbQuery.isLoading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator size="small" color="#047857" />
+            <Text style={styles.loadingText}>Finding services near you…</Text>
+          </View>
+        ) : servicesDbQuery.isError ? (
+          <View style={[styles.emptyState, keyboardVisible && styles.emptyStateCompact]}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="cloud-offline-outline" size={28} color="#047857" />
+            </View>
+            <Text style={styles.emptyTitle}>Couldn’t load services</Text>
+            <Text style={styles.emptySub}>Check your connection and try again.</Text>
+            <Pressable onPress={() => void servicesDbQuery.refetch()} style={styles.emptyActionButton}>
+              <Text style={styles.emptyActionText}>Try again</Text>
+              <Ionicons name="refresh" size={15} color="#FFFFFF" />
+            </Pressable>
+          </View>
+        ) : results.length === 0 ? (
+          <View style={[styles.emptyState, keyboardVisible && styles.emptyStateCompact]}>
             <View style={styles.emptyIconCircle}>
               <Ionicons name="search-outline" size={36} color="#047857" />
             </View>
             <Text style={styles.emptyTitle}>
-              {query.trim() ? `No exact profile match for "${query}"` : "No matching services found"}
+              {query.trim()
+                ? activeCategory !== "all"
+                  ? `No ${activeCategoryLabel.toLowerCase()} matches for "${query.trim()}"`
+                  : `No exact profile match for "${query.trim()}"`
+                : selectedRadiusOption.maxKm !== Infinity
+                ? `No services within ${selectedRadiusOption.label}`
+                : activeCategory !== "all"
+                ? `No ${activeCategoryLabel.toLowerCase()} providers nearby yet`
+                : "No matching services found"}
             </Text>
             <Text style={styles.emptySub}>
               {query.trim()
-                ? `We couldn't find a listed provider profile matching "${query}". Broadcast your requirement to notify local providers instantly.`
-                : "Try searching for 'car', 'electrician', 'plumber', or selecting another category."}
+                ? `We couldn’t find a nearby listing for “${query.trim()}”. Try increasing the radius or post a request.`
+                : selectedRadiusOption.maxKm !== Infinity
+                ? `There are no active providers within ${selectedRadiusOption.label} of ${location?.area || "your area"}. Try selecting a wider radius like 50 km.`
+                : activeCategory !== "all"
+                ? `There are no ${activeCategoryLabel.toLowerCase()} listings near ${location?.area || "you"} right now. Try another category.`
+                : `No services are listed near ${location?.area || "you"} yet. Try another search or category.`}
             </Text>
 
-            {query.trim() ? (
+            {selectedRadiusOption.maxKm !== Infinity ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Show all distances"
+                onPress={() => handleSelectRadius("all")}
+                style={styles.emptyActionButton}
+              >
+                <Ionicons name="globe-outline" size={15} color="#FFFFFF" />
+                <Text style={styles.emptyActionText}>Expand to all distances</Text>
+              </Pressable>
+            ) : query.trim() ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Post work request for ${query}`}
                 onPress={() => router.push({ pathname: "/post-work", params: { title: query } })}
-                style={styles.postRequestBtn}
+                style={styles.emptyActionButton}
               >
-                <Ionicons name="megaphone-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.postRequestText}>Post Work Request for "{query}"</Text>
+                <Text style={styles.emptyActionText}>Post a request</Text>
+                <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
               </Pressable>
             ) : null}
           </View>
@@ -542,10 +723,13 @@ export default function ServiceSearchScreen() {
           <View style={styles.list}>
             {paginatedResults.map((item) => {
               const isSaved = savedIds.includes(item.id);
+              const distanceText = formatDistanceText(item.distanceKm);
+
               return (
                 <View key={item.id} style={styles.specCardContainer}>
+                  {/* Clickable Card Body */}
                   <Pressable
-                    style={styles.specCardTop}
+                    style={styles.specCardTopArea}
                     onPress={() => {
                       router.push({
                         pathname: "/service-details",
@@ -553,123 +737,190 @@ export default function ServiceSearchScreen() {
                       });
                     }}
                   >
-                    {/* Left Column: Real Provider Image OR Category Icon Avatar */}
-                    <View style={styles.imageColumn}>
-                      {item.coverImage ? (
-                        <Image
-                          source={{ uri: item.coverImage }}
-                          style={styles.providerImage}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View style={[styles.providerImagePlaceholder, { backgroundColor: item.bg }]}>
-                          <Ionicons name={item.icon} size={32} color={item.color} />
-                          <Text style={[styles.placeholderInitials, { color: item.color }]}>
-                            {item.providerName.substring(0, 2).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
+                    {/* 1. Owner Bar (Above Category Icon) */}
+                    <View style={styles.ownerHeaderRow}>
+                      <View style={styles.ownerProfileGroup}>
+                        {item.providerPhoto ? (
+                          <Image source={{ uri: item.providerPhoto }} style={styles.ownerAvatar} />
+                        ) : (
+                          <View style={styles.ownerAvatarPlaceholder}>
+                            <Text style={styles.ownerAvatarInitials}>
+                              {item.providerName.substring(0, 2).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
 
-                      {/* Verified Overlay Badge */}
-                      {item.isVerified && (
-                        <View style={styles.verifiedImagePill}>
-                          <Ionicons name="checkmark-circle" size={11} color="#FFFFFF" />
-                          <Text style={styles.verifiedImageText}>Verified</Text>
-                        </View>
-                      )}
-                    </View>
+                        <View style={styles.ownerInfoBlock}>
+                          <View style={styles.ownerNameLine}>
+                            <Text style={styles.ownerNameText} numberOfLines={1}>
+                              {item.providerName}
+                            </Text>
+                            {item.isVerified && (
+                              <Ionicons name="checkmark-circle" size={12} color="#047857" />
+                            )}
+                          </View>
 
-                    {/* Right Column: Provider Details & Info */}
-                    <View style={styles.infoColumn}>
-                      {/* Row 1: Provider Name + Verification Checkmark + Heart Save Toggle */}
-                      <View style={styles.providerRow}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flex: 1 }}>
-                          <Text style={styles.providerNameText} numberOfLines={1}>
-                            {item.providerName}
-                          </Text>
-                          {item.isVerified && (
-                            <Ionicons name="checkmark-circle" size={15} color="#047857" />
-                          )}
+                          {/* Below Owner Name: Owner Rating */}
+                          <View style={styles.ownerRatingLine}>
+                            {item.ownerRating !== null ? (
+                              <>
+                                <Ionicons name="star" size={10} color="#F59E0B" />
+                                <Text style={styles.ownerRatingNum}>{item.ownerRating.toFixed(1)}</Text>
+                                <Text style={styles.ownerRatingSub}>
+                                  ({item.ownerReviewsCount} {item.ownerReviewsCount === 1 ? "review" : "reviews"})
+                                </Text>
+                              </>
+                            ) : (
+                              <>
+                                <Ionicons name="shield-checkmark" size={10} color="#047857" />
+                                <Text style={styles.ownerNewText}>Verified Provider</Text>
+                              </>
+                            )}
+                          </View>
                         </View>
-
-                        {/* Top Right Save / Favourite Heart Toggle */}
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            toggleSave(item.id);
-                          }}
-                          hitSlop={8}
-                        >
-                          <Ionicons
-                            name={isSaved ? "heart" : "heart-outline"}
-                            size={20}
-                            color={isSaved ? "#EF4444" : "#64748B"}
-                          />
-                        </Pressable>
                       </View>
 
-                      {/* Row 2: Service Title */}
-                      <Text style={styles.serviceTitleText} numberOfLines={1}>
-                        {item.title}
-                      </Text>
+                      {/* Top Right Corner of Owner: Service Delivery Tag */}
+                      <View style={styles.modeInlineTag}>
+                        <Ionicons
+                          name={item.serviceModeTag.includes("Doorstep") ? "home" : "storefront"}
+                          size={10.5}
+                          color="#047857"
+                        />
+                        <Text style={styles.modeInlineTagText}>
+                          {item.serviceModeTag}
+                        </Text>
+                      </View>
+                    </View>
 
-                      {/* Row 3: Service Rating (Real Rating or New Provider Badge) */}
-                      {item.rating !== null ? (
-                        <View style={styles.ratingRow}>
-                          <Ionicons name="star" size={14} color="#F59E0B" />
-                          <Text style={styles.ratingNum}>{item.rating.toFixed(1)}</Text>
-                          <Text style={styles.ratingReviews}>
-                            ({item.reviewCount} review{item.reviewCount === 1 ? "" : "s"})
+                    {/* 2. Service Hero Title + Category Icon Box */}
+                    <View style={styles.serviceHeroRow}>
+                      <View style={[styles.categoryIconBox, { backgroundColor: item.bg }]}>
+                        {item.coverImage ? (
+                          <Image
+                            source={{ uri: item.coverImage }}
+                            style={styles.categoryCoverImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Ionicons
+                            name={item.icon}
+                            size={26}
+                            color={item.color}
+                            style={{ marginBottom: 10 }}
+                          />
+                        )}
+
+                        {/* Small Category Badge with Border placed at Bottom ON the Icon */}
+                        <View style={styles.categoryBadgeOnIcon}>
+                          <Text style={styles.categoryBadgeOnIconText} numberOfLines={1}>
+                            {item.category}
                           </Text>
                         </View>
-                      ) : (
-                        <View style={styles.newRatingRow}>
-                          <Ionicons name="sparkles" size={12} color="#047857" />
-                          <Text style={styles.newRatingText}>New Provider</Text>
-                        </View>
-                      )}
+                      </View>
 
-                      {/* Row 4: Key Service Tag Chips (Only rendered if tags exist in DB) */}
-                      {item.keyServices.length > 0 ? (
-                        <View style={styles.tagRow}>
-                          {item.keyServices.slice(0, 2).map((tag, idx) => (
-                            <View key={idx} style={styles.serviceTagPill}>
-                              <Text style={styles.serviceTagText} numberOfLines={1}>
-                                {tag}
+                      <View style={styles.serviceHeroTextCol}>
+                        <Text style={styles.serviceTitleText} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+
+                        {/* Second Line: Rating of Service on Left, Price on Right below Service Delivery */}
+                        <View style={styles.ratingAndPriceRow}>
+                          {item.rating !== null ? (
+                            <View style={styles.serviceRatingPillInline}>
+                              <Ionicons name="star" size={12} color="#F59E0B" />
+                              <Text style={styles.serviceRatingInlineScore}>{item.rating.toFixed(1)}</Text>
+                              <Text style={styles.serviceRatingInlineCount}>
+                                ({item.reviewCount} {item.reviewCount === 1 ? "review" : "reviews"})
                               </Text>
                             </View>
-                          ))}
-                          {item.keyServices.length > 2 && (
-                            <View style={styles.moreTagPill}>
-                              <Text style={styles.moreTagText}>+{item.keyServices.length - 2}</Text>
+                          ) : (
+                            <View style={styles.serviceNewBadgeInline}>
+                              <Ionicons name="sparkles" size={11} color="#047857" />
+                              <Text style={styles.serviceNewBadgeText}>New Service</Text>
                             </View>
                           )}
-                        </View>
-                      ) : null}
 
-                      {/* Row 5: Distance & Area + Service Mode Tag */}
-                      <View style={styles.metaRow}>
-                        <View style={styles.metaItem}>
-                          <Ionicons name="location" size={12} color="#047857" />
-                          <Text style={styles.metaText}>
-                            {item.distanceKm > 0 ? `${item.distanceKm} km · ` : ""}{item.area}
-                          </Text>
-                        </View>
-
-                        <View style={styles.modeTagPill}>
-                          <Ionicons
-                            name={item.serviceModeTag.includes("Home") ? "home" : "storefront"}
-                            size={11}
-                            color="#047857"
-                          />
-                          <Text style={styles.modeTagText}>{item.serviceModeTag}</Text>
+                          {/* Price below service delivery (only shown if starting price is provided) */}
+                          {item.priceText ? (
+                            <Text style={styles.heroPriceText} numberOfLines={1}>
+                              {item.priceText}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
                     </View>
                   </Pressable>
 
-                  {/* Action Row: Call Provider & Request Service */}
-                  <View style={styles.twoButtonsRow}>
+                  {/* 3. Horizontal Location & Away Distance Bar (Placed Above) */}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Location: ${item.area}, ${distanceText}`}
+                    onPress={() => {
+                      router.push({
+                        pathname: "/service-details",
+                        params: { id: item.id },
+                      });
+                    }}
+                    style={styles.locationDistanceBar}
+                  >
+                    <View style={styles.locationLeftGroup}>
+                      <View style={styles.locationIconCircle}>
+                        <Ionicons name="location-sharp" size={13} color="#047857" />
+                      </View>
+                      <Text style={styles.locationAreaName} numberOfLines={1}>
+                        {item.area}
+                      </Text>
+                    </View>
+
+                    <View style={styles.distanceBadgePill}>
+                      <Text style={styles.distanceAwayText}>
+                        {distanceText}
+                      </Text>
+                      <Ionicons name="compass" size={14} color="#0284C7" />
+                    </View>
+                  </Pressable>
+
+                  {/* 4. Services Provided Section (Placed Down) */}
+                  {item.keyServices.length > 0 ? (
+                    <>
+                      <View style={styles.locationDivider} />
+                      <View style={styles.servicesProvidedSection}>
+                        <View style={styles.servicesProvidedHeader}>
+                          <View style={styles.servicesProvidedTitleGroup}>
+                            <Ionicons name="construct-outline" size={12} color="#047857" />
+                            <Text style={styles.servicesProvidedTitle}>Services Provided</Text>
+                          </View>
+                          {item.keyServices.length > 2 && (
+                            <Text style={styles.servicesScrollHint}>Swipe →</Text>
+                          )}
+                        </View>
+
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.servicesScrollContent}
+                          nestedScrollEnabled
+                        >
+                          {item.keyServices.map((tag, idx) => {
+                            const iconName = getSpecificationIcon(tag);
+                            return (
+                              <View key={idx} style={styles.serviceProvidedPill}>
+                                <Ionicons name={iconName} size={13} color="#047857" />
+                                <Text style={styles.serviceProvidedText} numberOfLines={1}>
+                                  {tag}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                      <View style={styles.servicesBottomDivider} />
+                    </>
+                  ) : null}
+
+                  {/* 5. Action Row: Call, View Service & Request Service */}
+                  <View style={styles.threeButtonsRow}>
                     {/* 1. Call Action Button */}
                     <Pressable
                       accessibilityRole="button"
@@ -680,11 +931,31 @@ export default function ServiceSearchScreen() {
                       }}
                       style={styles.btnCall}
                     >
-                      <Ionicons name="call" size={15} color="#047857" />
-                      <Text style={styles.btnCallText}>Call</Text>
+                      <Ionicons name="call" size={12.5} color="#047857" />
+                      <Text style={styles.btnCallText} numberOfLines={1}>
+                        Call
+                      </Text>
                     </Pressable>
 
-                    {/* 2. Request Service Action Button (Primary Solid Green) */}
+                    {/* 2. View Service Action Button */}
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${item.title}`}
+                      onPress={() => {
+                        router.push({
+                          pathname: "/service-details",
+                          params: { id: item.id },
+                        });
+                      }}
+                      style={styles.btnViewService}
+                    >
+                      <Ionicons name="eye-outline" size={13} color="#1E293B" />
+                      <Text style={styles.btnViewServiceText} numberOfLines={1}>
+                        View Service
+                      </Text>
+                    </Pressable>
+
+                    {/* 3. Request Service Action Button (Primary Solid Green) */}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Request ${item.title}`}
@@ -694,8 +965,10 @@ export default function ServiceSearchScreen() {
                       }}
                       style={styles.btnRequest}
                     >
-                      <Ionicons name="paper-plane-outline" size={14} color="#FFFFFF" />
-                      <Text style={styles.btnRequestText}>Request Service</Text>
+                      <Ionicons name="flash" size={12.5} color="#FFFFFF" />
+                      <Text style={styles.btnRequestText} numberOfLines={1}>
+                        Request
+                      </Text>
                     </Pressable>
                   </View>
                 </View>
@@ -714,72 +987,6 @@ export default function ServiceSearchScreen() {
           </View>
         )}
       </ScrollView>
-
-      {/* 6th Pill: View All Categories Bottom Sheet Modal */}
-      <Modal
-        visible={categorySheetVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCategorySheetVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <Pressable
-            style={styles.modalBackdropPress}
-            onPress={() => setCategorySheetVisible(false)}
-          />
-
-          <View style={styles.sheetContainer}>
-            <View style={styles.sheetHandle} />
-
-            <View style={styles.sheetHeaderRow}>
-              <View>
-                <Text style={styles.sheetTitle}>All Service Categories</Text>
-                <Text style={styles.sheetSubTitle}>Select a category to filter listings</Text>
-              </View>
-
-              <Pressable
-                onPress={() => setCategorySheetVisible(false)}
-                style={styles.sheetCloseBtn}
-              >
-                <Ionicons name="close" size={20} color={dash.ink} />
-              </Pressable>
-            </View>
-
-            <ScrollView contentContainerStyle={styles.sheetGrid} showsVerticalScrollIndicator={false}>
-              {ALL_CATEGORIES_LIST.map((cat) => {
-                const isSelected = activeCategory === cat.id;
-                return (
-                  <Pressable
-                    key={cat.id}
-                    onPress={() => {
-                      handleSelectCategory(cat.id);
-                      setCategorySheetVisible(false);
-                    }}
-                    style={[styles.sheetGridCard, isSelected && styles.sheetGridCardActive]}
-                  >
-                    <View style={[styles.sheetIconBox, { backgroundColor: cat.bg }]}>
-                      <Ionicons name={cat.icon} size={22} color={cat.color} />
-                    </View>
-                    <Text
-                      style={[styles.sheetCatLabel, isSelected && styles.sheetCatLabelActive]}
-                    >
-                      {cat.label}
-                    </Text>
-                    {isSelected && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#047857"
-                        style={{ marginLeft: "auto" }}
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
 
       {/* Instant Service Booking Confirmation Modal */}
       <Modal
@@ -843,7 +1050,7 @@ export default function ServiceSearchScreen() {
       </Modal>
 
       {/* Floating Bottom Navigation Bar */}
-      <ServiceBottomNav active="home" />
+      <ServiceBottomNav active="home" visible={!keyboardVisible} />
     </KeyboardAvoidingView>
   );
 }
@@ -851,30 +1058,79 @@ export default function ServiceSearchScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#F8FAF8",
+    backgroundColor: "#FFFFFF",
   },
   header: {
     backgroundColor: "#FFFFFF",
+    paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    paddingBottom: 10,
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    borderBottomColor: "#F1F5F9",
+  },
+  radiusFilterBar: {
+    marginTop: 8,
+    paddingBottom: 2,
+  },
+  radiusScrollContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    gap: 6.5,
+  },
+  radiusFilterLabelPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 7.5,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  radiusFilterLabelText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#047857",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  radiusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 9.5,
+    paddingVertical: 4.5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  radiusChipActive: {
+    backgroundColor: "#047857",
+    borderColor: "#047857",
+    shadowColor: "#047857",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2.5,
+    elevation: 2,
+  },
+  radiusChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  radiusChipTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "800",
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: 18,
   },
   backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#F1F5F9",
+    width: 28,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -882,13 +1138,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    height: 42,
-  },
-  searchIcon: {
-    marginRight: 6,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "#E3EBE6",
+    paddingHorizontal: 15,
+    gap: 12,
+    height: 54,
   },
   input: {
     flex: 1,
@@ -897,114 +1153,21 @@ const styles = StyleSheet.create({
     color: dash.ink,
     paddingVertical: 0,
   },
+  inputHint: {
+    position: "absolute",
+    left: 55,
+    right: 42,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#829189",
+  },
   clearBtn: {
     padding: 4,
-  },
-  segmentContainer: {
-    flexDirection: "row",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 12,
-    marginHorizontal: 16,
-    marginTop: 10,
-    padding: 3,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    alignItems: "center",
-    borderRadius: 10,
-  },
-  segmentBtnActive: {
-    backgroundColor: "#047857",
-  },
-  segmentText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#64748B",
-  },
-  segmentTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  categoryScroll: {
-    paddingHorizontal: 16,
-    gap: 8,
-    marginTop: 10,
-    paddingBottom: 4,
-  },
-  catPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  catPillInactive: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  catPillActive: {
-    backgroundColor: "#047857",
-    borderColor: "#047857",
-    shadowColor: "#047857",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  catIconBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  catIconBadgeActive: {
-    backgroundColor: "rgba(255, 255, 255, 0.25)",
-  },
-  catPillText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#334155",
-  },
-  catPillTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  moreCatPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#A7F3D0",
-  },
-  moreIconBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "rgba(4, 120, 87, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  moreCatPillText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#047857",
   },
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 14,
+    flexGrow: 1,
   },
   resultsHeaderRow: {
     flexDirection: "row",
@@ -1017,244 +1180,456 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: dash.ink,
   },
-  sortBtn: {
+  resultsNearText: { fontSize: 12, color: dash.muted, marginTop: 2 },
+  summaryBadgesRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
+    gap: 6,
+  },
+  activeRadiusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3.5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#EFF6FF",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "#BFDBFE",
   },
-  sortBtnText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#047857",
+  activeRadiusBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#0369A1",
   },
+  activeCategoryBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#EAF5EE",
+  },
+  activeCategoryBadgeText: { fontSize: 11, fontWeight: "700", color: dash.primary },
+  loadingState: {
+    minHeight: 150,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E8EEEA",
+  },
+  loadingText: { fontSize: 13, fontWeight: "600", color: dash.muted },
   list: {
     gap: 16,
   },
   specCardContainer: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 14,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    shadowColor: "#000",
+    shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 2,
   },
-  specCardTop: {
-    flexDirection: "row",
-    gap: 12,
+  specCardTopArea: {
+    // Clickable container for owner + service preview
   },
-  imageColumn: {
-    width: 96,
-    height: 108,
-    borderRadius: 14,
-    overflow: "hidden",
-    position: "relative",
-    backgroundColor: "#F1F5F9",
-  },
-  providerImage: {
-    width: "100%",
-    height: "100%",
-  },
-  providerImagePlaceholder: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  placeholderInitials: {
-    fontSize: 11,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  verifiedImagePill: {
-    position: "absolute",
-    bottom: 6,
-    left: 6,
-    right: 6,
-    backgroundColor: "rgba(4, 120, 87, 0.92)",
-    paddingVertical: 3,
-    paddingHorizontal: 6,
-    borderRadius: 10,
+  ownerHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
+    justifyContent: "space-between",
+    paddingBottom: 4.5,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
-  verifiedImageText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  infoColumn: {
+  ownerProfileGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6.5,
     flex: 1,
-    justifyContent: "space-between",
   },
-  providerRow: {
-    flexDirection: "row",
+  ownerAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#E2E8F0",
+  },
+  ownerAvatarPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#ECFDF5",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
   },
-  providerNameText: {
-    fontSize: 15,
+  ownerAvatarInitials: {
+    fontSize: 9.5,
     fontWeight: "800",
-    color: dash.ink,
-  },
-  serviceTitleText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#2B6CB0",
-    marginTop: 2,
-  },
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  ratingNum: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: dash.ink,
-  },
-  ratingReviews: {
-    fontSize: 12,
-    color: "#64748B",
-  },
-  newRatingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  newRatingText: {
-    fontSize: 12,
-    fontWeight: "700",
     color: "#047857",
   },
-  tagRow: {
+  ownerInfoBlock: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  ownerNameLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 6,
-    flexWrap: "wrap",
+    gap: 3.5,
   },
-  serviceTagPill: {
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-  serviceTagText: {
+  ownerNameText: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#475569",
+    fontWeight: "800",
+    color: dash.ink,
+    maxWidth: 200,
   },
-  moreTagPill: {
-    backgroundColor: "#E8F1FF",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 8,
+  ownerRatingLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2.5,
+    marginTop: 0.5,
   },
-  moreTagText: {
-    fontSize: 11,
+  ownerRatingNum: {
+    fontSize: 9,
     fontWeight: "700",
-    color: "#2B6CB0",
+    color: dash.ink,
   },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 6,
-  },
-  metaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  metaText: {
-    fontSize: 11,
+  ownerRatingSub: {
+    fontSize: 8.5,
     color: "#64748B",
     fontWeight: "500",
   },
-  modeTagPill: {
+  ownerNewText: {
+    fontSize: 8.5,
+    color: "#047857",
+    fontWeight: "700",
+  },
+  serviceHeroRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 9.5,
+    marginTop: 6,
+  },
+  categoryIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+  },
+  categoryCoverImage: {
+    width: "100%",
+    height: "100%",
+  },
+  categoryBadgeOnIcon: {
+    position: "absolute",
+    bottom: 2,
+    left: 2,
+    right: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 5,
+    paddingVertical: 1,
+    paddingHorizontal: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  categoryBadgeOnIconText: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#334155",
+    textAlign: "center",
+  },
+  serviceHeroTextCol: {
+    flex: 1,
+    justifyContent: "center",
+    paddingTop: 1,
+    gap: 3.5,
+  },
+  titleAndModeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  serviceTitleText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: dash.ink,
+  },
+  modeInlineTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3.5,
     backgroundColor: "#ECFDF5",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    flexShrink: 0,
   },
-  modeTagText: {
+  modeInlineTagText: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    color: "#047857",
+  },
+  ratingAndPriceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 0,
+  },
+  serviceRatingPillInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3.5,
+  },
+  serviceRatingInlineScore: {
+    fontSize: 11.5,
+    fontWeight: "800",
+    color: "#D97706",
+  },
+  serviceRatingInlineCount: {
+    fontSize: 10.5,
+    fontWeight: "500",
+    color: "#64748B",
+  },
+  serviceNewBadgeInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+  },
+  serviceNewBadgeText: {
     fontSize: 10,
     fontWeight: "700",
     color: "#047857",
   },
-  twoButtonsRow: {
+  heroPriceText: {
+    fontSize: 12.5,
+    fontWeight: "900",
+    color: "#047857",
+    textAlign: "right",
+  },
+  locationDistanceBar: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 9,
+    paddingVertical: 4.5,
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginTop: 6,
+  },
+  locationDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginTop: 5,
+    marginBottom: 4,
+  },
+  locationLeftGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5.5,
+    flex: 1,
+    marginRight: 8,
+  },
+  locationIconCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  locationAreaName: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: dash.ink,
+  },
+  distanceBadgePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6.5,
+    flexShrink: 0,
+  },
+  distanceAwayText: {
+    fontSize: 11.5,
+    fontWeight: "800",
+    color: "#0369A1",
+  },
+  servicesProvidedSection: {
+    marginTop: 0,
+  },
+  servicesProvidedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  servicesProvidedTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  servicesProvidedTitle: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#475569",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  servicesScrollHint: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#0284C7",
+  },
+  servicesScrollContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 6,
+    paddingVertical: 1,
+  },
+  serviceProvidedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 7,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  serviceProvidedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  servicesBottomDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginTop: 5,
+    marginBottom: 0,
+  },
+  threeButtonsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
   },
   btnCall: {
+    flex: 0.8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#ECFDF5",
+    gap: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "#A7F3D0",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    flex: 1,
+    backgroundColor: "#F0FDF4",
   },
   btnCallText: {
-    fontSize: 13,
+    fontSize: 11.5,
     fontWeight: "700",
     color: "#047857",
   },
-  btnRequest: {
+  btnViewService: {
+    flex: 1.25,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+  },
+  btnViewServiceText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  btnRequest: {
+    flex: 1.35,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
     backgroundColor: "#047857",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    flex: 1.4,
+    shadowColor: "#047857",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.16,
+    shadowRadius: 2.5,
+    elevation: 2,
   },
   btnRequestText: {
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 11.5,
+    fontWeight: "800",
     color: "#FFFFFF",
   },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 48,
+    paddingVertical: 32,
     paddingHorizontal: 24,
-    gap: 12,
+    gap: 10,
+    marginTop: 8,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E8EEEA",
+  },
+  emptyStateCompact: {
+    paddingVertical: 16,
+    gap: 7,
   },
   emptyIconCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: "#ECFDF5",
     alignItems: "center",
     justifyContent: "center",
@@ -1272,18 +1647,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 19,
   },
-  postRequestBtn: {
+  emptyActionButton: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#047857",
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 14,
-    marginTop: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderRadius: 13,
+    marginTop: 8,
   },
-  postRequestText: {
+  emptyActionText: {
     color: "#FFFFFF",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
   },
   modalOverlay: {
@@ -1293,79 +1670,6 @@ const styles = StyleSheet.create({
   },
   modalBackdropPress: {
     ...StyleSheet.absoluteFillObject,
-  },
-  sheetContainer: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    maxHeight: "80%",
-  },
-  sheetHandle: {
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#CBD5E1",
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  sheetHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: dash.ink,
-  },
-  sheetSubTitle: {
-    fontSize: 12,
-    color: dash.muted,
-    marginTop: 2,
-  },
-  sheetCloseBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#F1F5F9",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetGrid: {
-    gap: 10,
-    paddingBottom: 24,
-  },
-  sheetGridCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#FAFBF9",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-  sheetGridCardActive: {
-    backgroundColor: "#ECFDF5",
-    borderColor: "#047857",
-  },
-  sheetIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetCatLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: dash.ink,
-  },
-  sheetCatLabelActive: {
-    color: "#047857",
   },
   confirmModalBox: {
     backgroundColor: "#FFFFFF",

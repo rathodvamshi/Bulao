@@ -21,7 +21,7 @@
 - Full filter set (role, pay, date, availability), custom calendar/time picker and service-problem chips; current UI supports category/radius and simple date/time choices.
 - Persisted offline cache/drafts, session refresh/expiry UX, complete localization of remaining short labels, restored navigation intent after onboarding.
 - Cursor pagination for large activity/review histories and keyset pagination for changing discovery data; current lists are bounded and discovery uses candidate offsets.
-- Push notifications, reminder delivery, product analytics, reports moderation UI, suspension management, provider reconciliation and alerting. Minimal usage API is server-admin-only; no full operations dashboard.
+- Android push notification code and local migration are implemented; Firebase/EAS credentials, Cloudflare queues, remote migration/deployment, and physical-device delivery remain release gates. Reminder delivery, product analytics, reports moderation UI, suspension management, provider reconciliation and external alerting are not implemented. Minimal usage API is server-admin-only; no full operations dashboard.
 - Retention/deletion jobs for OTP challenges, sessions, counters, upload intents and abandoned images; account deletion, privacy/consent policies, backup/restore drill and production WAF/rate rules.
 - Production database/origin/secret provisioning, commercial fallback-map plan, external integration failure drills, abuse/load/accessibility/device E2E checks and independent security review.
 

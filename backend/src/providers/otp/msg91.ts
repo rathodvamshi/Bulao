@@ -22,6 +22,8 @@ export class Msg91OtpProvider implements OtpProvider {
     private transport: Transport = (input, init) => fetch(input, init),
     private requestId?: string,
     private env?: { APP_ENV?: string },
+    private widgetId?: string,
+    private tokenAuth?: string,
   ) {}
 
   private async request<T>(url: URL, method: string): Promise<T> {
@@ -39,22 +41,18 @@ export class Msg91OtpProvider implements OtpProvider {
           requestId: this.requestId,
           operation,
           method,
-          // Never log query parameters: Verify carries the OTP in its query.
           url: `${url.origin}${url.pathname}`,
           hasAuthHeader: true,
           mobileFormat: { startsWith91, length, isNumeric: pattern },
         }));
       }
 
-      // Do not invoke native fetch as a method of the provider instance.
       const transport = this.transport;
       const response = await transport(url, {
         method,
         headers: { authkey: this.key, "Content-Type": "application/json" },
         ...(method === "POST" ? { body: "{}" } : {}),
         signal: AbortSignal.timeout(AUTH_POLICY.providerTimeoutMs),
-        // Workers supports manual, not error. Reject every non-2xx below;
-        // never forward the auth header or OTP to a redirected destination.
         redirect: "manual",
       });
 
@@ -115,6 +113,34 @@ export class Msg91OtpProvider implements OtpProvider {
   }
 
   async send(phone: string): Promise<string> {
+    if (this.widgetId && this.tokenAuth) {
+      const url = new URL("https://control.msg91.com/api/v5/widget/sendOtpMobile");
+      const transport = this.transport;
+      const response = await transport(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          widgetId: this.widgetId,
+          tokenAuth: this.tokenAuth,
+          identifier: phone.replace(/^\+/, ""),
+        }),
+        signal: AbortSignal.timeout(AUTH_POLICY.providerTimeoutMs),
+      });
+
+      if (!response.ok) {
+        console.error(JSON.stringify({ event: "MSG91_WIDGET_SEND_ERROR", status: response.status }));
+        throw new ApiError("PROVIDER_UNAVAILABLE", 503, "We couldn't send a code. Please try again later.");
+      }
+
+      const data = await response.json() as { type?: string; message?: string };
+      console.log(JSON.stringify({ event: "MSG91_WIDGET_SEND_RESPONSE", requestId: this.requestId, data }));
+      if (data.type !== "success" || !data.message) {
+        throw new ApiError("PROVIDER_UNAVAILABLE", 503, "We couldn't send a code. Please try again later.");
+      }
+
+      return data.message;
+    }
+
     const url = new URL("https://control.msg91.com/api/v5/otp");
     url.search = new URLSearchParams({
       mobile: phone.slice(1),
@@ -139,11 +165,36 @@ export class Msg91OtpProvider implements OtpProvider {
     return result.request_id;
   }
 
-  async verify(phone: string, code: string): Promise<boolean> {
+  async verify(phone: string, code: string, msg91RequestId?: string): Promise<boolean> {
     // In staging, allow QA test code 1234 so testing isn't blocked by Indian carrier DLT delay
     if (this.env?.APP_ENV === "staging" && code === "1234") {
       console.log(JSON.stringify({ event: "STAGING_TEST_OTP_ACCEPTED", phone, requestId: this.requestId }));
       return true;
+    }
+
+    if (this.widgetId && this.tokenAuth && msg91RequestId) {
+      const url = new URL("https://control.msg91.com/api/v5/widget/verifyOtp");
+      const transport = this.transport;
+      const response = await transport(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          widgetId: this.widgetId,
+          tokenAuth: this.tokenAuth,
+          reqId: msg91RequestId,
+          otp: code,
+        }),
+        signal: AbortSignal.timeout(AUTH_POLICY.providerTimeoutMs),
+      });
+
+      if (!response.ok) {
+        console.error(JSON.stringify({ event: "MSG91_WIDGET_VERIFY_ERROR", status: response.status }));
+        return false;
+      }
+
+      const data = await response.json() as { type?: string; message?: string };
+      console.log(JSON.stringify({ event: "MSG91_WIDGET_VERIFY_RESPONSE", requestId: this.requestId, type: data.type }));
+      return data.type === "success";
     }
 
     const url = new URL("https://control.msg91.com/api/v5/otp/verify");
@@ -160,7 +211,32 @@ export class Msg91OtpProvider implements OtpProvider {
     );
   }
 
-  async resend(phone: string): Promise<void> {
+  async resend(phone: string, msg91RequestId?: string): Promise<void> {
+    if (this.widgetId && this.tokenAuth) {
+      if (msg91RequestId) {
+        try {
+          const url = new URL("https://control.msg91.com/api/v5/widget/retryOtp");
+          const transport = this.transport;
+          const response = await transport(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              widgetId: this.widgetId,
+              tokenAuth: this.tokenAuth,
+              reqId: msg91RequestId,
+            }),
+            signal: AbortSignal.timeout(AUTH_POLICY.providerTimeoutMs),
+          });
+          const data = await response.json() as { type?: string };
+          if (data.type === "success") return;
+        } catch {
+          // fallback to sendOtpMobile
+        }
+      }
+      await this.send(phone);
+      return;
+    }
+
     const url = new URL("https://control.msg91.com/api/v5/otp/retry");
     url.search = new URLSearchParams({
       mobile: phone.slice(1),

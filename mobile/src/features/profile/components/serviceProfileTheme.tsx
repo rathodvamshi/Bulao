@@ -27,7 +27,7 @@ export function ServiceText({ style, ...props }: TextProps) {
 }
 export function servicePrice(service: ServiceItem) {
   if (service.pricingModel === "visit_quote")
-    return "Quote on request";
+    return "Price on Inspection";
   if (!service.pricingModel || service.basePricePaise == null) return "Price not provided";
   return `₹${(service.basePricePaise / 100).toLocaleString("en-IN")}${service.pricingModel === "hourly" ? " / hour" : " onwards"}`;
 }

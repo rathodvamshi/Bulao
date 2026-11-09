@@ -7,12 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
-  Image,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import type { Location } from "@bulao/domain";
+import type { Location, CategoryFormSchema, ServiceOffering, ProviderCommonProfile } from "@bulao/domain";
+import { CATEGORY_SCHEMAS } from "@bulao/domain";
 import type { ServiceItem } from "../../features/profile/types";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -37,6 +37,16 @@ type ServiceMode = "doorstep" | "at_center" | "both";
 type PricingModel = "fixed" | "hourly" | "visit_quote";
 
 const TOTAL_STEPS = 7;
+const STEP_NAMES = ["Category", "Service", "Profile & pricing", "Service area", "Hours", "Photos & contact", "Review"] as const;
+
+function isUsefulPublicName(value: string): boolean {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length >= 3 && normalized.length <= 60 &&
+    /[\p{L}\p{N}]/u.test(normalized) &&
+    /^[\p{L}\p{N}][\p{L}\p{N} &'().,+\-/]*$/u.test(normalized) &&
+    !/(.)\1{4,}/u.test(normalized) &&
+    !/^(test|asdf|qwerty|none|n\/a|na|xxx+)$/i.test(normalized);
+}
 
 export function CreateServiceWizard() {
   const insets = useSafeAreaInsets();
@@ -77,8 +87,9 @@ export function CreateServiceWizard() {
   const [radiusKm, setRadius] = useState<number>(10);
   const [pricingModel, setPricingModel] = useState<PricingModel>("visit_quote");
   const [rateRupees, setRateRupees] = useState<string>("");
+  const [showPricingDetails, setShowPricingDetails] = useState(false);
   const [operatingHours, setOperatingHours] = useState<string>("");
-  const [experienceYears, setExperienceYears] = useState<string>("");
+  const [experienceYears, setExperienceYears] = useState<string>("0");
 
   // Stage 5 State: Availability
   const [is24x7, setIs24x7] = useState<boolean>(false);
@@ -118,13 +129,43 @@ export function CreateServiceWizard() {
   const [website, setWebsite] = useState<string>("");
   const [instagram, setInstagram] = useState<string>("");
   const [facebook, setFacebook] = useState<string>("");
+  const [dynamicAnswers, setDynamicAnswers] = useState<Record<string, any>>({});
+  const [offerings, setOfferings] = useState<ServiceOffering[]>([]);
+  const [commonProfile, setCommonProfile] = useState<Partial<ProviderCommonProfile>>({});
 
-  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  const schemaQuery = useQuery({
+    queryKey: ["category-schema", categoryId],
+    queryFn: () => api<CategoryFormSchema>(`/service/categories/${categoryId}/schema`).catch(() => CATEGORY_SCHEMAS[categoryId]),
+    enabled: Boolean(categoryId),
+    staleTime: 60 * 60 * 1000,
+  });
 
   const catalogQuery = useQuery({
-    queryKey: ["categories", "service-catalog-v2"],
-    queryFn: () => api<Catalog>("/categories?catalog=service-v2"),
-    refetchOnMount: "always",
+    queryKey: ["categories"],
+    queryFn: async () => {
+      try {
+        const res = await api<any[]>("/service/categories");
+        if (Array.isArray(res) && res.length > 0) {
+          const serviceCats = res.map((c) => ({
+            id: c.id,
+            name: c.name,
+            icon: c.icon,
+            kind: "service" as const,
+          }));
+          return {
+            categories: serviceCats,
+            roles: [],
+            locations: [],
+          } as Catalog;
+        }
+      } catch (err) {
+        console.warn("[Catalog] /service/categories failed, falling back to /categories", err);
+      }
+      return api<Catalog>("/categories");
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 2,
   });
 
   const editQuery = useQuery({
@@ -156,6 +197,10 @@ export function CreateServiceWizard() {
         : "",
     );
     setExperienceYears(String(existingService.experienceYears ?? 0));
+    setShowPricingDetails(Boolean(
+      (existingService.pricingModel && existingService.pricingModel !== "visit_quote") ||
+      existingService.basePricePaise || existingService.experienceYears,
+    ));
     setOperatingHours(existingService.operatingHours || "");
     setOperatingHoursSummary(existingService.operatingHours || "");
     setServicePhotos(
@@ -241,7 +286,6 @@ export function CreateServiceWizard() {
         !isNaN(parsedRate) && parsedRate > 0
           ? Math.round(parsedRate * 100)
           : undefined;
-      if (!experienceYears.trim()) throw new Error("Enter your years of experience (0 if you are starting out).");
       const parsedExp = Number(experienceYears);
       if (!Number.isInteger(parsedExp) || parsedExp < 0 || parsedExp > 70)
         throw new Error("Experience must be a whole number between 0 and 70.");
@@ -256,6 +300,8 @@ export function CreateServiceWizard() {
           businessName,
           offeredServices,
           customServices,
+          dynamicAnswers,
+          offerings,
           servicePhotos: servicePhotos.filter(uri => /^https?:\/\//i.test(uri)),
           shopPhotos: shopPhotos.filter(uri => /^https?:\/\//i.test(uri)),
           website,
@@ -314,10 +360,15 @@ export function CreateServiceWizard() {
     if (step === 0) return Boolean(selectedCategory);
     if (step === 1) return Boolean(serviceId);
     if (step === 2) {
-      const hasTitle = Boolean(title.trim());
+      const hasTitle = isUsefulPublicName(title);
       const hasOffered =
         offeredServices.length > 0 || customServices.length > 0;
-      return hasTitle && hasOffered;
+      const rate = Number(rateRupees);
+      const hasValidPrice = pricingModel === "visit_quote" ||
+        (rateRupees.trim().length > 0 && Number.isFinite(rate) && rate > 0 && rate <= 21474836.47);
+      const experience = Number(experienceYears);
+      const hasValidExperience = Number.isInteger(experience) && experience >= 0 && experience <= 70;
+      return hasTitle && hasOffered && hasValidPrice && hasValidExperience;
     }
     if (step === 3) {
       return Boolean(
@@ -331,8 +382,19 @@ export function CreateServiceWizard() {
     return true;
   };
 
+  const getContinueHint = () => {
+    if (step === 1 && !serviceId) return "Choose the service that best matches your work.";
+    if (step === 2) {
+      if (!isUsefulPublicName(title)) return "Add a clear service title (at least 3 characters).";
+      if (!offeredServices.length && !customServices.length) return "Choose at least one task you provide, or add one under Other Service.";
+      if (pricingModel !== "visit_quote" && (!rateRupees.trim() || !Number.isFinite(Number(rateRupees)) || Number(rateRupees) <= 0 || Number(rateRupees) > 21474836.47)) return "Enter a valid starting price, or choose Quote on request.";
+      if (!Number.isInteger(Number(experienceYears)) || Number(experienceYears) < 0 || Number(experienceYears) > 70) return "Enter experience from 0 to 70 years.";
+    }
+    if (step === 3 && !canGoNext()) return "Choose the area where customers can book your service.";
+    return "";
+  };
+
   const handleNext = () => {
-    setErrorMsg("");
     if (step < TOTAL_STEPS - 1) {
       setStep((s) => s + 1);
     } else {
@@ -344,10 +406,26 @@ export function CreateServiceWizard() {
     setCategory(catId);
     setServiceId("");
     setTitle("");
-    setBusinessName("");
     setDescription("");
     setOfferedServices([]);
     setCustomServices([]);
+    setPricingModel("visit_quote");
+    setRateRupees("");
+    setExperienceYears("0");
+    setShowPricingDetails(false);
+  };
+
+  const handleServiceSelect = (id: string) => {
+    if (id === serviceId) return;
+    setServiceId(id);
+    setTitle("");
+    setDescription("");
+    setOfferedServices([]);
+    setCustomServices([]);
+    setPricingModel("visit_quote");
+    setRateRupees("");
+    setExperienceYears("0");
+    setShowPricingDetails(false);
   };
 
   if (!user) {
@@ -485,7 +563,7 @@ export function CreateServiceWizard() {
         </View>
         <View style={styles.stepBadge}>
           <Text style={styles.stepIndicator}>
-            Step {step + 1} of {TOTAL_STEPS}
+            {step + 1}/{TOTAL_STEPS} · {STEP_NAMES[step]}
           </Text>
         </View>
       </View>
@@ -520,9 +598,7 @@ export function CreateServiceWizard() {
             onSelect={handleCategorySelect}
             loading={catalogQuery.isLoading}
             failed={catalogQuery.isError}
-            onRetry={() => {
-              void catalogQuery.refetch();
-            }}
+            onRetry={() => catalogQuery.refetch()}
           />
         )}
 
@@ -534,9 +610,7 @@ export function CreateServiceWizard() {
             categoryIcon={selectedCategory.icon}
             selectedServiceId={serviceId}
             onServiceSelect={(id) => {
-              setServiceId(id);
-              setOfferedServices([]);
-              setCustomServices([]);
+              handleServiceSelect(id);
             }}
             onChangeCategory={() => setStep(0)}
           />
@@ -561,12 +635,41 @@ export function CreateServiceWizard() {
             customServices={customServices}
             onAddCustomService={handleAddCustomService}
             onRemoveCustomService={handleRemoveCustomService}
+            schema={schemaQuery.data || CATEGORY_SCHEMAS[categoryId]}
+            dynamicAnswers={dynamicAnswers}
+            onChangeDynamicAnswer={(k, v) => setDynamicAnswers((prev) => ({ ...prev, [k]: v }))}
+            offerings={offerings}
+            onChangeOfferings={setOfferings}
             onChangeService={() => setStep(1)}
             onChangeCategory={() => setStep(0)}
           />
         )}
 
         {step === 2 && (
+          <>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showPricingDetails }}
+            onPress={() => setShowPricingDetails((shown) => !shown)}
+            style={{
+              marginTop: 16,
+              padding: 14,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: "#D6E2DD",
+              backgroundColor: "#FFFFFF",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: "#034E3B" }}>Add pricing or experience <Text style={{ fontWeight: "500", color: "#64748B" }}>(optional)</Text></Text>
+              <Text style={{ marginTop: 3, fontSize: 12, color: "#64748B" }}>Quote on request is selected by default.</Text>
+            </View>
+            <Ionicons name={showPricingDetails ? "chevron-up" : "chevron-down"} size={20} color="#15803D" />
+          </Pressable>
+          {showPricingDetails && (
           <View
             style={{
               gap: 12,
@@ -576,9 +679,6 @@ export function CreateServiceWizard() {
               marginTop: 16,
             }}
           >
-            <Text style={{ fontSize: 16, fontWeight: "700", color: "#034E3B" }}>
-              Pricing & experience
-            </Text>
             <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
               {(
                 [
@@ -623,20 +723,51 @@ export function CreateServiceWizard() {
                 }}
               />
             )}
-            <Text style={{ fontWeight: "600" }}>Years of experience</Text>
-            <TextInput
-              accessibilityLabel="Years of experience"
-              value={experienceYears}
-              onChangeText={setExperienceYears}
-              keyboardType="number-pad"
+            <View
               style={{
-                padding: 12,
-                borderWidth: 1,
-                borderColor: "#D6E2DD",
-                borderRadius: 10,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                paddingTop: 2,
               }}
-            />
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: "600", color: "#173B32" }}>Experience</Text>
+                <Text style={{ marginTop: 2, fontSize: 12, color: "#64748B" }}>
+                  Years in this service (optional)
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingLeft: 10,
+                  borderWidth: 1,
+                  borderColor: "#D6E2DD",
+                  borderRadius: 10,
+                  backgroundColor: "#FFFFFF",
+                }}
+              >
+                <TextInput
+                  accessibilityLabel="Years of experience"
+                  value={experienceYears}
+                  onChangeText={(value) => setExperienceYears(value.replace(/\D/g, "").slice(0, 2))}
+                  keyboardType="number-pad"
+                  style={{
+                    width: 42,
+                    paddingVertical: 9,
+                    textAlign: "center",
+                    color: "#173B32",
+                  }}
+                />
+                <Text style={{ paddingRight: 10, fontSize: 13, color: "#64748B" }}>yrs</Text>
+              </View>
+            </View>
           </View>
+          )}
+          </>
         )}
         {/* STEP 3: Service Location & Service Mode */}
         {step === 3 && selectedCategory && (
@@ -807,6 +938,11 @@ export function CreateServiceWizard() {
                   : "Select a category to continue"}
               </Text>
             </View>
+          )}
+          {step > 0 && step < 4 && !!getContinueHint() && (
+            <Text style={styles.stepHint} accessibilityLiveRegion="polite">
+              {getContinueHint()}
+            </Text>
           )}
           <Pressable
             accessibilityRole="button"
@@ -1050,6 +1186,7 @@ const styles = StyleSheet.create({
     color: "#15803D",
     fontWeight: "600",
   },
+  stepHint: { fontSize: 12, color: "#64748B", textAlign: "center", marginBottom: 10 },
   buttonContent: {
     flexDirection: "row",
     alignItems: "center",

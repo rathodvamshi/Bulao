@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   Pressable,
   Modal,
   Animated,
+  Easing,
   StyleSheet,
   Dimensions,
   ScrollView,
@@ -23,48 +24,90 @@ interface JobDetailsSheetProps {
 
 export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(!!job);
+  const [displayJob, setDisplayJob] = useState(job);
+  const mountedRef = useRef(!!job);
+  const closing = useRef(false);
+
+  const animateOut = useCallback((onComplete?: () => void) => {
+    if (closing.current) return;
+    closing.current = true;
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: SHEET_HEIGHT,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished) return;
+      mountedRef.current = false;
+      setMounted(false);
+      setDisplayJob(null);
+      closing.current = false;
+      onComplete?.();
+    });
+  }, [backdropOpacity, translateY]);
 
   useEffect(() => {
     if (job) {
+      closing.current = false;
+      mountedRef.current = true;
+      setDisplayJob(job);
+      setMounted(true);
+      translateY.setValue(SHEET_HEIGHT);
+      backdropOpacity.setValue(0);
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
       Animated.spring(translateY, {
         toValue: 0,
         useNativeDriver: true,
-        damping: 20,
-        stiffness: 200,
+        damping: 24,
+        mass: 0.85,
+        stiffness: 220,
       }).start();
-    } else {
-      Animated.timing(translateY, {
-        toValue: SHEET_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
+    } else if (mountedRef.current) {
+      animateOut();
     }
-  }, [job, translateY]);
+  }, [job, translateY, backdropOpacity, animateOut]);
 
   const handleDismiss = () => {
-    Animated.timing(translateY, {
-      toValue: SHEET_HEIGHT,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      onClose();
-    });
+    animateOut(onClose);
   };
 
-  if (!job) return null;
+  if (!mounted || !displayJob) return null;
+  const visibleJob = displayJob;
 
-  const payInRupees = job.payPaise / 100;
-  const payDisplay = `₹${payInRupees} / ${job.payUnit.toLowerCase()}`;
-  const startDate = new Date(job.startsAt * 1000);
+  const payInRupees = visibleJob.payPaise / 100;
+  const payDisplay = `₹${payInRupees.toLocaleString("en-IN", { maximumFractionDigits: 2 })} / ${visibleJob.payUnit.toLowerCase()}`;
+  const startDate = new Date(visibleJob.startsAt * 1000);
   const isToday = new Date().toDateString() === startDate.toDateString();
   const timeString = startDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const dateDisplay = isToday
     ? `Today at ${timeString}`
     : startDate.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const approximateDistance = visibleJob.distanceKm === undefined
+    ? ""
+    : visibleJob.distanceKm < 1
+      ? "Under 1 km away"
+      : `${Math.floor(visibleJob.distanceKm)}–${Math.floor(visibleJob.distanceKm) + 1} km away`;
 
   return (
-    <Modal transparent visible={!!job} onRequestClose={handleDismiss} animationType="none">
-      <Pressable style={styles.backdrop} onPress={handleDismiss} />
+    <Modal transparent visible={mounted} onRequestClose={handleDismiss} animationType="none">
+      <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
+      </Animated.View>
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
         <View style={styles.handleContainer}>
           <View style={styles.handle} />
@@ -72,7 +115,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
-            <Text style={styles.title}>{job.title}</Text>
+            <Text style={styles.title}>{visibleJob.title}</Text>
             <View style={styles.payBadge}>
               <Text style={styles.payText}>{payDisplay}</Text>
             </View>
@@ -83,7 +126,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
               <Ionicons name="person" size={24} color={colors.green} />
             </View>
             <View>
-              <Text style={styles.ownerName}>{job.ownerName}</Text>
+              <Text style={styles.ownerName}>{visibleJob.ownerName}</Text>
               <Text style={styles.ownerSub}>Posted this job</Text>
             </View>
           </View>
@@ -96,7 +139,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
               <View>
                 <Text style={styles.infoLabel}>Location</Text>
                 <Text style={styles.infoValue}>
-                  {job.area} {job.distanceKm !== undefined ? `(${job.distanceKm} km away)` : ""}
+                  {visibleJob.area} {approximateDistance ? `· ${approximateDistance}` : ""}
                 </Text>
               </View>
             </View>
@@ -113,15 +156,15 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
               <Ionicons name="people-outline" size={20} color={colors.ink} />
               <View>
                 <Text style={styles.infoLabel}>Workers Needed</Text>
-                <Text style={styles.infoValue}>{job.workers} people</Text>
+                <Text style={styles.infoValue}>{visibleJob.workers} people</Text>
               </View>
             </View>
           </View>
 
-          {job.details ? (
+          {visibleJob.details ? (
             <View style={styles.infoSection}>
               <Text style={styles.sectionTitle}>Description</Text>
-              <Text style={styles.description}>{job.details}</Text>
+              <Text style={styles.description}>{visibleJob.details}</Text>
             </View>
           ) : null}
         </ScrollView>
@@ -138,11 +181,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
 
 const styles = StyleSheet.create({
   backdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.45)",
   },
   sheet: {
@@ -155,10 +194,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 16,
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 20,
   },
   handleContainer: {
     alignItems: "center",

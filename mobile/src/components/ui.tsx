@@ -6,15 +6,21 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  ImageBackground,
   Platform,
+  type RefreshControlProps,
 } from "react-native";
 import type { ReactNode } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { t } from "../i18n/en";
+import { AppImage } from './AppImage';
 
 export const colors = {
+  marketplaceGreen: "#005C40",
+  marketplaceInk: "#10132D",
+  marketplaceMuted: "#626780",
+  marketplacePaper: "#F7FAF8",
+  marketplaceLine: "#EBEDF2",
   ink: "#0D2318",         // Very dark green-black — maximum readability
   green: "#1A6645",       // Rich forest green
   greenDark: "#124A31",   // Darker green for pressed states
@@ -36,17 +42,20 @@ export function Screen({
   title,
   back = false,
   backgroundImage,
+  refreshControl,
 }: {
+  refreshControl?: React.ReactElement<RefreshControlProps>;
   children: ReactNode;
   title?: string;
   back?: boolean;
-  backgroundImage?: any;
+  backgroundImage?: string;
 }) {
   const content = (
     <ScrollView
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={s.screen}
       showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
     >
       {back && (
         <Pressable
@@ -72,13 +81,10 @@ export function Screen({
       edges={["top", "left", "right"]}
     >
       {backgroundImage ? (
-        <ImageBackground
-          source={backgroundImage}
-          style={{ flex: 1 }}
-          resizeMode="cover"
-        >
+        <View style={{ flex: 1 }}>
+          <AppImage assetId={backgroundImage} style={StyleSheet.absoluteFill} resizeMode="cover" />
           {content}
-        </ImageBackground>
+        </View>
       ) : (
         content
       )}

@@ -18,7 +18,11 @@ describe("configuration and security contracts without database execution", () =
   });
   it("keeps provider secrets and local databases out of mobile source", () => {
     const text = [...sources("mobile/app"), ...sources("mobile/src")].join("\n");
-    expect(text).not.toMatch(/MSG91_AUTH_KEY|AUTH_HASH_KEY|control\.msg91\.com|api\.msg91\.com|AsyncStorage|localStorage|indexedDB|expo-sqlite/);
+    expect(text).not.toMatch(/MSG91_AUTH_KEY|AUTH_HASH_KEY|control\.msg91\.com|api\.msg91\.com|localStorage|indexedDB|expo-sqlite/);
+    // Public CDN manifests may be cached; account/session data must not use AsyncStorage.
+    const publicManifestCaches = [read('mobile/src/api/stories.ts'),read('mobile/src/api/assets.ts')];
+    expect(publicManifestCaches.reduce((rest,cache)=>rest.replace(cache,''),text)).not.toMatch(/AsyncStorage|async-storage/);
+    for(const cache of publicManifestCaches) expect(cache).not.toMatch(/getAuthToken|setAuthToken|SecureStore|Bearer|phone|password/);
     expect(read("mobile/src/store/session.ts")).toContain("SecureStore.setItemAsync");
     expect(read("mobile/src/store/session.ts")).toContain('Platform.OS !== "web"');
     expect(read("mobile/.env.example")).toContain("bulao-api-staging.codecheck369.workers.dev");

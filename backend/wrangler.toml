@@ -18,6 +18,8 @@ name = "bulao-api-staging"
 APP_ENV = "staging"
 OTP_PROVIDER = "msg91"
 MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
+MSG91_WIDGET_ID = "3669686e4b46393237373639"
+MSG91_TOKEN_AUTH = "568607TBQ8oKK8IF6aa02237P1"
 CLOUDINARY_CLOUD_NAME = "japfuiuz"
 CLOUDINARY_API_KEY = "297519314876632"
 CLOUDINARY_UPLOAD_PRESET = "bulao_signed"
@@ -44,6 +46,20 @@ max_batch_timeout = 5
 max_retries = 5
 dead_letter_queue = "bulao-auth-events-staging-dlq"
 
+[[env.staging.queues.producers]]
+binding = "PUSH_DELIVERIES"
+queue = "bulao-push-deliveries-staging"
+
+[[env.staging.queues.consumers]]
+queue = "bulao-push-deliveries-staging"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 10
+dead_letter_queue = "bulao-push-deliveries-staging-dlq"
+
+[env.staging.triggers]
+crons = ["* * * * *"]
+
 # Production D1 binding provisioned and read back on Cloudflare on 2026-09-07.
 # Production application deployment/migrations await staging validation and confirmation.
 
@@ -54,6 +70,8 @@ name = "bulao-api-production"
 APP_ENV = "production"
 OTP_PROVIDER = "msg91"
 MSG91_TEMPLATE_ID = "6a9e95cd898618ba1a007d22"
+MSG91_WIDGET_ID = "3669686e4b46393237373639"
+MSG91_TOKEN_AUTH = "568607TBQ8oKK8IF6aa02237P1"
 CLOUDINARY_CLOUD_NAME = "japfuiuz"
 CLOUDINARY_API_KEY = "297519314876632"
 CLOUDINARY_UPLOAD_PRESET = "bulao_signed"
@@ -79,6 +97,20 @@ max_batch_size = 25
 max_batch_timeout = 5
 max_retries = 5
 dead_letter_queue = "bulao-auth-events-production-dlq"
+
+[[env.production.queues.producers]]
+binding = "PUSH_DELIVERIES"
+queue = "bulao-push-deliveries-production"
+
+[[env.production.queues.consumers]]
+queue = "bulao-push-deliveries-production"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 10
+dead_letter_queue = "bulao-push-deliveries-production-dlq"
+
+[env.production.triggers]
+crons = ["* * * * *"]
 
 [observability.logs]
 enabled = true

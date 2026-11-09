@@ -5,8 +5,9 @@ export default function PostWorkLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        animation: "default",
-        gestureEnabled: true,
+        // Keep stage changes immediate so the header and content stay aligned.
+        animation: "none",
+        gestureEnabled: false,
       }}
     >
       <Stack.Screen name="index" />

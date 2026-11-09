@@ -8,6 +8,38 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+export const appAssets = sqliteTable('app_assets', {
+  id:text('id').primaryKey(), groupName:text('group_name').notNull(),
+  publicId:text('public_id').notNull(), url:text('url').notNull(),
+  width:integer('width').notNull(),height:integer('height').notNull(),bytes:integer('bytes').notNull(),
+  revision:text('revision').notNull(),updatedAt:integer('updated_at').notNull(),
+});
+export const uploadedImageAssets = sqliteTable('uploaded_image_assets', {
+  id:text('id').primaryKey(), userId:text('user_id').notNull().references(()=>users.id),
+  purpose:text('purpose',{enum:['profile','service']}).notNull(),
+  thumbnailUrl:text('thumbnail_url').notNull(),mediumUrl:text('medium_url').notNull(),fullUrl:text('full_url').notNull(),
+  createdAt:integer('created_at').notNull(),
+},t=>[index('uploaded_image_assets_owner').on(t.userId,t.createdAt)]);
+export const storyCollections = sqliteTable('story_collections', {
+  id: text('id').primaryKey(),
+  activeRevision: text('active_revision').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+export const storyImages = sqliteTable('story_images', {
+  collectionId: text('collection_id').notNull(),
+  revision: text('revision').notNull(),
+  id: text('id').notNull(),
+  sortOrder: integer('sort_order').notNull(),
+  label: text('label').notNull(),
+  publicId: text('public_id').notNull(),
+  url: text('url').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  bytes: integer('bytes').notNull(),
+  fit: text('fit', {enum:['contain','cover']}).notNull(),
+  scale: real('scale').notNull().default(1),
+  offset: real('offset').notNull().default(0.18),
+}, t => [primaryKey({columns:[t.collectionId,t.revision,t.id]}),uniqueIndex('story_images_order').on(t.collectionId,t.revision,t.sortOrder)]);
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   phone: text("phone").notNull().unique(),
@@ -93,6 +125,8 @@ export const jobs = sqliteTable(
     extras: text("extras", { mode: "json" }).$type<string[]>().notNull().default([]),
     details: text("details").notNull(),
     status: text("status").notNull().default("PUBLISHED"),
+    archivedAt: integer("archived_at"),
+    deletedAt: integer("deleted_at"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("jobs_discovery").on(t.status, t.categoryId, t.latitude)],
@@ -165,6 +199,9 @@ export const interactions = sqliteTable(
     status: text("status").notNull().default("PENDING"),
     ownerConfirmedAt: integer("owner_confirmed_at"),
     workerConfirmedAt: integer("worker_confirmed_at"),
+    completionRejectedAt: integer("completion_rejected_at"),
+    completionRejectedBy: text("completion_rejected_by").references(() => users.id),
+    completionRejectionReason: text("completion_rejection_reason"),
     area: text("area"),
     latitude: real("latitude"),
     longitude: real("longitude"),
@@ -175,16 +212,26 @@ export const interactions = sqliteTable(
     cancelledAt: integer("cancelled_at"),
     acceptedAt: integer("accepted_at"),
     rejectedAt: integer("rejected_at"),
+    jobTitleSnapshot: text("job_title_snapshot"),
+    roleNameSnapshot: text("role_name_snapshot"),
+    payPaiseSnapshot: integer("pay_paise_snapshot"),
+    payUnitSnapshot: text("pay_unit_snapshot"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [
-    uniqueIndex("application_unique").on(t.jobId, t.workerId),
+    uniqueIndex("application_unique").on(t.jobId, t.workerId).where(sql`${t.kind}='job' AND ${t.status} IN ('PENDING','ACCEPTED','IN_PROGRESS','COMPLETED')`),
     index("interaction_owner").on(t.ownerId, t.status),
     index("interaction_worker").on(t.workerId, t.status),
     index("interaction_service_status").on(t.serviceId, t.status),
     uniqueIndex("active_service_request").on(t.serviceId, t.workerId).where(sql`${t.kind}='service' AND ${t.status} IN ('PENDING','ACCEPTED','IN_PROGRESS')`),
   ],
 );
+export const serviceOfflinePayments = sqliteTable("service_offline_payments", {
+  interactionId: text("interaction_id").primaryKey().references(() => interactions.id),
+  providerConfirmedAt: integer("provider_confirmed_at"),
+  customerConfirmedAt: integer("customer_confirmed_at"),
+  updatedAt: integer("updated_at").notNull(),
+});
 export const notifications = sqliteTable(
   "notifications",
   {
@@ -200,6 +247,53 @@ export const notifications = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("notifications_user_idx").on(t.userId, t.read, t.createdAt)],
+);
+export const pushDevices = sqliteTable(
+  "push_devices",
+  {
+    installationId: text("installation_id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    expoPushToken: text("expo_push_token").notNull().unique(),
+    platform: text("platform", { enum: ["android"] }).notNull(),
+    active: integer("active").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (t) => [index("push_devices_user_active_idx").on(t.userId, t.active)],
+);
+export const notificationPushOutbox = sqliteTable(
+  "notification_push_outbox",
+  {
+    notificationId: text("notification_id").primaryKey().references(() => notifications.id, { onDelete: "cascade" }),
+    state: text("state", { enum: ["pending", "expanded"] }).notNull().default("pending"),
+    createdAt: integer("created_at").notNull(),
+    expandedAt: integer("expanded_at"),
+  },
+  (t) => [index("notification_push_outbox_pending_idx").on(t.state, t.createdAt)],
+);
+export const pushDeliveries = sqliteTable(
+  "push_deliveries",
+  {
+    id: text("id").primaryKey(),
+    notificationId: text("notification_id").notNull().references(() => notifications.id, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull().references(() => pushDevices.installationId, { onDelete: "cascade" }),
+    state: text("state", { enum: ["pending", "queued", "sending", "receipt_pending", "accepted", "failed", "disabled"] }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at").notNull(),
+    leaseUntil: integer("lease_until"),
+    expoTicketId: text("expo_ticket_id"),
+    receiptCheckedAt: integer("receipt_checked_at"),
+    lastErrorCode: text("last_error_code"),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("push_delivery_notification_device_idx").on(t.notificationId, t.installationId),
+    index("push_deliveries_dispatch_idx").on(t.state, t.nextAttemptAt, t.createdAt),
+    index("push_deliveries_receipt_idx").on(t.state, t.receiptCheckedAt),
+  ],
 );
 export const reviews = sqliteTable(
   "reviews",
@@ -257,6 +351,13 @@ export const serviceRatings = sqliteTable("service_ratings", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at"),
 }, t => [uniqueIndex("unique_customer_service_rating").on(t.customerId,t.serviceId), index("service_ratings_service_id").on(t.serviceId), index("service_ratings_provider_id").on(t.providerId)]);
+export const serviceReviewImages = sqliteTable("service_review_images", {
+  id: text("id").primaryKey(),
+  reviewId: text("review_id").notNull().references(() => serviceRatings.id),
+  imageUrl: text("image_url").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+}, t => [index("service_review_images_review_id").on(t.reviewId)]);
 export const serviceReviewReports = sqliteTable("service_review_reports", {
   id: text("id").primaryKey(),
   reporterId: text("reporter_id").notNull().references(() => users.id),
@@ -348,3 +449,48 @@ export const userLocations = sqliteTable(
   },
   (t) => [index("user_locations_user_id").on(t.userId)],
 );
+
+export const providerCommonProfiles = sqliteTable("provider_common_profiles", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  providerType: text("provider_type", { enum: ["individual", "business", "team"] }).notNull().default("individual"),
+  displayName: text("display_name").notNull(),
+  avatarUrl: text("avatar_url"),
+  introduction: text("introduction").notNull().default(""),
+  overallExperience: integer("overall_experience").notNull().default(0),
+  languages: text("languages", { mode: "json" }).$type<string[]>().notNull().default(["English"]),
+  alternatePhone: text("alternate_phone"),
+  businessName: text("business_name"),
+  teamSize: integer("team_size"),
+  businessDescription: text("business_description"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const serviceOfferings = sqliteTable("service_offerings", {
+  id: text("id").primaryKey(),
+  serviceId: text("service_id").notNull().references(() => serviceProfiles.id),
+  categoryId: text("category_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  pricingModel: text("pricing_model", { enum: ["fixed", "hourly", "per_day", "per_session", "per_month", "per_task", "price_range", "quote", "inspection"] }).notNull(),
+  pricePaise: integer("price_paise"),
+  minPricePaise: integer("min_price_paise"),
+  maxPricePaise: integer("max_price_paise"),
+  pricingUnit: text("pricing_unit").notNull().default("per task"),
+  includedWork: text("included_work").notNull().default(""),
+  additionalCharges: text("additional_charges").notNull().default(""),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [
+  index("service_offerings_service").on(t.serviceId, t.isActive, t.sortOrder),
+  index("service_offerings_category").on(t.categoryId, t.isActive),
+]);
+
+export const serviceCategorySchemas = sqliteTable("service_category_schemas", {
+  categoryId: text("category_id").primaryKey().references(() => categories.id),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  schemaJson: text("schema_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

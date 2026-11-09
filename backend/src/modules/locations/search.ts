@@ -7,24 +7,28 @@ type Candidate = {
   latitude: number;
   longitude: number;
   radiusKm?: number;
+  distanceKm?: number;
+  myApplicationId?: string | null;
+  myApplicationStatus?: string | null;
   [key: string]: unknown;
 };
 export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
   const input = searchSchema.parse(c.req.query());
-  const radiusLimit = Math.min(Math.max(input.radiusKm, 1), 50);
+  const radiusLimit = input.all ? 500 : Math.min(Math.max(input.radiusKm, 1), 500);
   const box = boundingBox(input.latitude, input.longitude, radiusLimit);
   const user = await identify(c.env.DB, c.req.header("Authorization"));
   const table = kind === "job" ? "jobs" : "service_profiles";
   const alias = "p";
   const owner = kind === "job" ? "owner_id" : "user_id";
-  const fields =
+  const baseFields =
     kind === "job"
-      ? "p.id,p.owner_id AS ownerId,COALESCE(NULLIF(p.title, ''), r.name, 'Work Opportunity') AS title,p.title AS customTitle,p.role_id AS roleId,COALESCE(r.name, 'Worker') AS roleName,COALESCE(r.icon, '🛠️') AS roleIcon,p.category_id AS categoryId,COALESCE(cat.name, 'General Work') AS categoryName,COALESCE(cat.icon, '📋') AS categoryIcon,p.area,COALESCE(p.address, '') AS address,p.latitude,p.longitude,p.pay_paise AS payPaise,p.pay_unit AS payUnit,COALESCE(p.paid_when, 'after') AS paidWhen,p.starts_at AS startsAt,COALESCE(p.duration, 'one') AS duration,p.ends_at AS endsAt,COALESCE(p.hours, 'full') AS hours,COALESCE(p.start_time, '09:00') AS startTime,COALESCE(p.end_time, '17:00') AS endTime,p.workers,COALESCE(p.experience, 'any') AS experience,COALESCE(p.details, '') AS details,p.extras,p.status,p.created_at AS createdAt,(SELECT COUNT(*) FROM interactions i WHERE i.job_id=p.id AND i.kind='job') AS applicantCount"
+      ? "p.id,p.owner_id AS ownerId,COALESCE(NULLIF(p.title, ''), r.name, 'Work Opportunity') AS title,p.title AS customTitle,p.role_id AS roleId,COALESCE(r.name, 'Worker') AS roleName,COALESCE(r.icon, '🛠️') AS roleIcon,p.category_id AS categoryId,COALESCE(cat.name, 'General Work') AS categoryName,COALESCE(cat.icon, '📋') AS categoryIcon,p.area,p.latitude,p.longitude,p.pay_paise AS payPaise,p.pay_unit AS payUnit,COALESCE(p.paid_when, 'after') AS paidWhen,p.starts_at AS startsAt,COALESCE(p.duration, 'one') AS duration,p.ends_at AS endsAt,COALESCE(p.hours, 'full') AS hours,COALESCE(p.start_time, '09:00') AS startTime,COALESCE(p.end_time, '17:00') AS endTime,p.workers,(SELECT COUNT(*) FROM interactions i WHERE i.job_id=p.id AND i.kind='job' AND i.status IN ('ACCEPTED','IN_PROGRESS','COMPLETED')) AS acceptedCount,MAX(0,p.workers-(SELECT COUNT(*) FROM interactions i WHERE i.job_id=p.id AND i.kind='job' AND i.status IN ('ACCEPTED','IN_PROGRESS','COMPLETED'))) AS remainingWorkers,COALESCE(p.experience, 'any') AS experience,COALESCE(p.details, '') AS details,p.extras,p.status,p.created_at AS createdAt,(SELECT COUNT(DISTINCT i.worker_id) FROM interactions i WHERE i.job_id=p.id AND i.kind='job') AS applicantCount,u.name AS ownerName,u.photo_url AS ownerPhotoUrl,u.phone_verified AS ownerVerified,(SELECT ROUND(AVG(stars),1) FROM reviews WHERE target_id=u.id) AS ownerRating,(SELECT COUNT(*) FROM reviews WHERE target_id=u.id) AS ownerReviewsCount"
       : `p.id,p.user_id AS userId,p.title AS title,u.name AS providerName,u.photo_url AS providerPhoto,
         (SELECT value FROM json_each(CASE WHEN json_valid(p.wizard_state) THEN p.wizard_state ELSE '{}' END, '$.shopPhotos') WHERE type='text' AND (value LIKE 'https://%' OR value LIKE 'http://%') ORDER BY CAST(key AS INTEGER) LIMIT 1) AS shopPhotoUrl,
         c.icon AS categoryIcon,CASE WHEN p.phone_visible=1 THEN u.phone ELSE NULL END AS providerPhone,
         ${user ? "CASE WHEN p.user_id=? THEN u.phone ELSE NULL END" : "NULL"} AS ownerPhone,
-        u.phone_verified AS providerVerified,c.name AS category,c.id AS categoryId,p.area,p.latitude,p.longitude,p.radius_km AS radiusKm,p.experience AS experienceYears,p.experience AS experience,p.available,p.service_mode AS serviceMode,p.pricing_model AS pricingModel,p.base_price_paise AS basePricePaise,p.operating_hours AS operatingHours,COALESCE(p.portfolio_urls, '[]') AS portfolioUrls,COALESCE(p.offered_services, '[]') AS offeredServices,COALESCE(p.phone_visible, 0) AS phoneVisible,(SELECT ROUND(AVG(stars),1) FROM (SELECT stars FROM service_ratings WHERE service_id=p.id UNION ALL SELECT r.stars FROM reviews r JOIN interactions i ON i.id=r.interaction_id WHERE i.service_id=p.id AND r.author_id=i.worker_id AND NOT EXISTS(SELECT 1 FROM service_ratings sr WHERE sr.service_id=p.id AND sr.customer_id=r.author_id))) AS rating,(SELECT COUNT(*) FROM service_ratings WHERE service_id=p.id)+(SELECT COUNT(*) FROM reviews r JOIN interactions i ON i.id=r.interaction_id WHERE i.service_id=p.id AND r.author_id=i.worker_id AND NOT EXISTS(SELECT 1 FROM service_ratings sr WHERE sr.service_id=p.id AND sr.customer_id=r.author_id)) AS totalReviews`;
+        u.phone_verified AS providerVerified,c.name AS category,c.id AS categoryId,p.area,p.latitude,p.longitude,p.radius_km AS radiusKm,p.experience AS experienceYears,p.experience AS experience,p.available,p.service_mode AS serviceMode,p.pricing_model AS pricingModel,p.base_price_paise AS basePricePaise,p.operating_hours AS operatingHours,COALESCE(p.portfolio_urls, '[]') AS portfolioUrls,COALESCE(p.offered_services, '[]') AS offeredServices,COALESCE(p.phone_visible, 0) AS phoneVisible,(SELECT ROUND(AVG(stars),1) FROM service_ratings WHERE service_id=p.id) AS rating,(SELECT COUNT(*) FROM service_ratings WHERE service_id=p.id) AS totalReviews,(SELECT ROUND(AVG(sr.stars),1) FROM service_ratings sr JOIN service_profiles sp ON sp.id=sr.service_id WHERE sp.user_id=u.id) AS ownerRating,(SELECT COUNT(*) FROM service_ratings sr JOIN service_profiles sp ON sp.id=sr.service_id WHERE sp.user_id=u.id) AS ownerReviewsCount`;
+  const fields = `${baseFields}${kind === "job" && user ? ", (SELECT i.id FROM interactions i WHERE i.job_id=p.id AND i.worker_id=? AND i.kind='job' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) AS myApplicationId, (SELECT i.status FROM interactions i WHERE i.job_id=p.id AND i.worker_id=? AND i.kind='job' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) AS myApplicationStatus" : ""}`;
   const join =
     kind === "job"
       ? "LEFT JOIN roles r ON r.id=p.role_id LEFT JOIN categories cat ON cat.id=p.category_id"
@@ -87,25 +91,41 @@ export async function nearby(c: Context<AppEnv>, kind: "job" | "service") {
   const lonNum = Number(input.longitude).toFixed(8);
   const distSqExpr = `((p.latitude - (${latNum})) * (p.latitude - (${latNum})) + (p.longitude - (${lonNum})) * (p.longitude - (${lonNum})) * ${cosLatSq})`;
 
-  const pageSize = kind === "job" ? 10 : 20;
-  const orderBy = kind === "job" ? `${distSqExpr} ASC, p.created_at DESC` : "p.id";
+  const pageSize = kind === "job" ? 10 : 50;
+  const orderBy = kind === "job" ? `${distSqExpr} ASC, p.created_at DESC` : `${distSqExpr} ASC, p.id DESC`;
   const result = await c.env.DB.prepare(
     `SELECT ${fields} FROM ${table} p ${join} JOIN users u ON u.id=p.${owner} WHERE ${conditions.join(" AND ")} ORDER BY ${orderBy} LIMIT ${pageSize + 1} OFFSET ?`,
   )
-    .bind(...(kind === "service" && user ? [user.id] : []), ...args)
+    .bind(...(kind === "service" && user ? [user.id] : kind === "job" && user ? [user.id, user.id] : []), ...args)
     .all<Candidate>();
   const candidates = result.results.slice(0, pageSize);
   const items = candidates
-    .map((row) => ({ ...row, distanceKm: distanceKm(input, row) }))
+    .map((row): Candidate & { distanceKm: number } => ({
+      ...row,
+      ...(kind === "job" && row.myApplicationId ? {
+        myApplication: { id: String(row.myApplicationId), status: String(row.myApplicationStatus || "") },
+      } : {}),
+      distanceKm: distanceKm(input, row),
+    }))
     .filter(
       (row) =>
         row.distanceKm <= radiusLimit &&
         (kind === "job" || row.distanceKm <= (row.radiusKm ?? 0)),
     )
     .sort((a, b) => a.distanceKm - b.distanceKm)
-    .map(({ latitude, longitude, ...row }) => ({
+    .map(({ latitude, longitude, myApplicationId: _applicationId, myApplicationStatus: _applicationStatus, ...row }) => ({
       ...row,
-      distanceKm: Math.round(row.distanceKm * 10) / 10,
+      ...(kind === "job" ? {
+        // City-scale map center only. Never expose the exact worksite coordinates
+        // through public discovery, including through the map preview.
+        mapLatitude: Math.round(latitude * 10) / 10,
+        mapLongitude: Math.round(longitude * 10) / 10,
+      } : {}),
+      // Keep job distances coarse; precise coordinates are used only for server-side
+      // matching and must never be sent in public discovery responses.
+      distanceKm: kind === "job"
+        ? row.distanceKm < 1 ? 0.5 : Math.floor(row.distanceKm)
+        : Math.round(row.distanceKm * 10) / 10,
     }));
   return {
     items,

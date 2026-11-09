@@ -2,14 +2,16 @@ import { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../src/api/client";
-import { useSession } from "../src/store/session";
+import { useAuth } from "../src/auth";
 import { Screen, Copy, Field, Button, Failure } from "../src/components/ui";
 import { t } from "../src/i18n/en";
 export default function Safety() {
-  const { targetId } = useLocalSearchParams<{ targetId: string }>();
+  const params = useLocalSearchParams<{ targetId?: string | string[] }>();
+  const targetId = Array.isArray(params.targetId) ? params.targetId[0] : params.targetId;
   const [reason, setReason] = useState("");
   const [confirmBlock, setConfirmBlock] = useState(false);
-  const token = useSession((x) => x.token);
+  const { session } = useAuth();
+  const token = session?.token || null;
   const client = useQueryClient();
   const report = useMutation({
     mutationFn: () => api("/reports", { targetId, reason }),
@@ -19,9 +21,14 @@ export default function Safety() {
     onSuccess: () => client.invalidateQueries({ queryKey: ["nearby"] }),
   });
   return (
-    <Screen title={t("report")} back>
+    <Screen title={targetId ? t("report") : "Safety & reporting"} back>
       {!token ? (
         <Button label={t("signIn")} onPress={() => router.push("/auth")} />
+      ) : !targetId ? (
+        <>
+          <Copy>Report a person or block someone from the related job or request so the report is attached to the right account.</Copy>
+          <Button label="Find work" secondary onPress={() => router.push("/find-work")} />
+        </>
       ) : (
         <>
           {report.isSuccess ? (

@@ -13,6 +13,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { ServiceOption, ServiceOptionsResponse } from "../../api/types";
+import type { CategoryFormSchema, ServiceOffering } from "@bulao/domain";
+import { CategoryFormRenderer } from "./form-engine/CategoryFormRenderer";
+import { OfferingManager } from "./form-engine/OfferingManager";
 
 // Design Tokens
 const GREEN = "#15803D";
@@ -100,6 +103,11 @@ export interface ServiceDetailsStepProps {
   onRemoveCustomService: (customName: string) => void;
   onChangeService: () => void;
   onChangeCategory?: () => void;
+  schema?: CategoryFormSchema;
+  dynamicAnswers?: Record<string, any>;
+  onChangeDynamicAnswer?: (key: string, value: any) => void;
+  offerings?: ServiceOffering[];
+  onChangeOfferings?: (offerings: ServiceOffering[]) => void;
 }
 
 // Skeleton loading card
@@ -206,9 +214,18 @@ export function ServiceDetailsStep({
   onAddCustomService,
   onRemoveCustomService,
   onChangeService,
+  onChangeCategory,
+  schema,
+  dynamicAnswers,
+  onChangeDynamicAnswer,
+  offerings,
+  onChangeOfferings,
 }: ServiceDetailsStepProps) {
   const { width: windowWidth } = useWindowDimensions();
   const [isOtherOpen, setIsOtherOpen] = useState<boolean>(customServices.length > 0);
+  const [isOptionalDetailsOpen, setIsOptionalDetailsOpen] = useState<boolean>(
+    Boolean(businessName.trim() || description.trim()),
+  );
   const [customInputText, setCustomInputText] = useState<string>("");
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
@@ -249,12 +266,21 @@ export function ServiceDetailsStep({
   const displayCategoryName = categoryName || "Service Category";
 
   const handleAddCustom = () => {
-    const trimmed = customInputText.trim();
-    if (trimmed && !customServices.includes(trimmed)) {
-      onAddCustomService(trimmed);
-      setCustomInputText("");
-    }
+    const normalized = customInputText.trim().replace(/\s+/g, " ");
+    if (!isValidCustomName(normalized)) return;
+    const duplicate = customServices.some((item) => item.toLowerCase() === normalized.toLowerCase());
+    if (!duplicate) onAddCustomService(normalized);
+    setCustomInputText("");
   };
+
+  const isValidCustomName = (value: string) =>
+    value.length >= 3 && value.length <= 60 &&
+    /[\p{L}\p{N}]/u.test(value) &&
+    /^[\p{L}\p{N}][\p{L}\p{N} &'().,+\-/]*$/u.test(value) &&
+    !/(.)\1{4,}/u.test(value) &&
+    !/^(test|asdf|qwerty|none|n\/a|na|other|service|task|xxx+)$/i.test(value);
+
+  const hasValidTitle = isValidCustomName(title.trim().replace(/\s+/g, " "));
 
   const isOtherActive = isOtherOpen || customServices.length > 0;
 
@@ -335,11 +361,29 @@ export function ServiceDetailsStep({
         </View>
 
         <View style={styles.fieldFooterRow}>
-          <Text style={styles.fieldHelperText}>This will be visible to customers.</Text>
+          <Text style={[styles.fieldHelperText, title.trim().length > 0 && !hasValidTitle && { color: "#B91C1C" }]}>
+            {title.trim().length > 0 && !hasValidTitle
+              ? "Use 3–60 characters and avoid test or placeholder names."
+              : "This will be visible to customers."}
+          </Text>
           <Text style={styles.counterText}>{title.length}/60</Text>
         </View>
       </View>
 
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isOptionalDetailsOpen }}
+        onPress={() => setIsOptionalDetailsOpen((open) => !open)}
+        style={styles.optionalDetailsToggle}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.optionalDetailsTitle}>Add more details <Text style={styles.optionalTag}>(Optional)</Text></Text>
+          <Text style={styles.fieldHelperText}>Business name and a short introduction</Text>
+        </View>
+        <Ionicons name={isOptionalDetailsOpen ? "chevron-up" : "chevron-down"} size={20} color={GREEN} />
+      </Pressable>
+
+      {isOptionalDetailsOpen && <>
       {/* ── 4. Business / Shop Name (Optional) ── */}
       <View style={styles.fieldSection}>
         <View style={styles.fieldHeaderRow}>
@@ -409,6 +453,7 @@ export function ServiceDetailsStep({
           <Text style={styles.counterText}>{description.length}/500</Text>
         </View>
       </View>
+      </>}
 
       {/* ── 6. What Can You Help With? (Multi-Select) ── */}
       <View style={styles.fieldSection}>
@@ -486,20 +531,23 @@ export function ServiceDetailsStep({
                 placeholder="e.g. ABS repair, custom fabrication"
                 placeholderTextColor="#94A3B8"
                 value={customInputText}
-                onChangeText={setCustomInputText}
+                onChangeText={(value) => setCustomInputText(value.replace(/[<>\[\]{}|\\]/g, ""))}
                 maxLength={60}
                 onSubmitEditing={handleAddCustom}
                 returnKeyType="done"
               />
               <Pressable
-                style={[styles.addCustomBtn, !customInputText.trim() && styles.addCustomBtnDisabled]}
-                disabled={!customInputText.trim()}
+                style={[styles.addCustomBtn, !isValidCustomName(customInputText.trim().replace(/\s+/g, " ")) && styles.addCustomBtnDisabled]}
+                disabled={!isValidCustomName(customInputText.trim().replace(/\s+/g, " "))}
                 onPress={handleAddCustom}
               >
                 <Ionicons name="add" size={18} color={WHITE} />
                 <Text style={styles.addCustomBtnText}>Add</Text>
               </Pressable>
             </View>
+            {customInputText.trim().length > 0 && !isValidCustomName(customInputText.trim().replace(/\s+/g, " ")) && (
+              <Text style={styles.customNameHint}>Enter a clear name (3–60 characters). Avoid placeholder words like “test” or “other”.</Text>
+            )}
 
             {/* Custom Added Chips */}
             {customServices.length > 0 && (
@@ -521,6 +569,25 @@ export function ServiceDetailsStep({
           </View>
         )}
       </View>
+
+      {/* ── Category-Specific Dynamic Form ── */}
+      {schema && dynamicAnswers && onChangeDynamicAnswer && (
+        <CategoryFormRenderer
+          schema={schema}
+          answers={dynamicAnswers}
+          onChangeAnswer={onChangeDynamicAnswer}
+        />
+      )}
+
+      {/* ── Service Offerings & Pricing Engine ── */}
+      {offerings && onChangeOfferings && (
+        <OfferingManager
+          categoryId={categoryId}
+          categoryName={categoryName}
+          offerings={offerings}
+          onChangeOfferings={onChangeOfferings}
+        />
+      )}
 
       {/* ── 7. Info Helper Banner ── */}
       <View style={styles.infoBox}>
@@ -639,6 +706,17 @@ const styles = StyleSheet.create({
   fieldSection: {
     gap: 8,
   },
+  optionalDetailsToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  optionalDetailsTitle: { fontSize: 14, fontWeight: "700", color: TEXT_PRIMARY },
   fieldHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -696,6 +774,7 @@ const styles = StyleSheet.create({
     color: TEXT_SECONDARY,
     flex: 1,
   },
+  customNameHint: { fontSize: 12, lineHeight: 17, color: "#B91C1C" },
   counterText: {
     fontSize: 11.5,
     color: "#94A3B8",

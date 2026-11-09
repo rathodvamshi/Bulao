@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import { AppText as Text } from "./AppText";
+import { AppPressable as Pressable } from "./AppPressable";
+import { AppTextInput as TextInput } from "./AppTextInput";
+import React, { useEffect, useState } from "react";
 import {
   Modal,
   View,
-  Text,
   StyleSheet,
-  Pressable,
-  TextInput,
   ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
@@ -53,6 +53,16 @@ export function CancellationModal({
   const [error, setError] = useState<string | null>(null);
 
   const reasons = isProvider ? PROVIDER_REASONS : SEEKER_REASONS;
+  const requiresDetail = selectedReason === "Other reason";
+  const canConfirm = Boolean(selectedReason) && (!requiresDetail || customDetail.trim().length >= 3) && !loading;
+
+  useEffect(() => {
+    if (!visible) return;
+    setSelectedReason("");
+    setCustomDetail("");
+    setError(null);
+    setLoading(false);
+  }, [visible, title, isProvider]);
 
   const handleClose = () => {
     if (loading) return;
@@ -63,16 +73,16 @@ export function CancellationModal({
   };
 
   const handleConfirm = async () => {
-    if (!selectedReason) {
-      setError("Please select a cancellation reason.");
+    if (!selectedReason || (requiresDetail && customDetail.trim().length < 3)) {
+      setError(requiresDetail ? "Add a short reason to continue." : "Choose a reason to continue.");
       return;
     }
     const finalReason =
       selectedReason === "Other reason"
-        ? customDetail.trim() || "Other reason"
+        ? customDetail.trim()
         : customDetail.trim()
-        ? `${selectedReason} - ${customDetail.trim()}`
-        : selectedReason;
+          ? `${selectedReason} - ${customDetail.trim()}`
+          : selectedReason;
 
     if (finalReason.length < 3) {
       setError("Please provide a reason with at least 3 characters.");
@@ -83,7 +93,10 @@ export function CancellationModal({
       setLoading(true);
       setError(null);
       await onConfirm(finalReason);
-      handleClose();
+      setSelectedReason("");
+      setCustomDetail("");
+      setError(null);
+      onClose();
     } catch (err: any) {
       setError(err?.message || "Failed to cancel. Please try again.");
     } finally {
@@ -92,66 +105,88 @@ export function CancellationModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={handleClose}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.overlay}
       >
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} accessibilityLabel="Dismiss cancellation" />
         <View style={styles.container}>
-          {/* Header */}
+          <View style={styles.handle} />
           <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{title}</Text>
-              <Text style={styles.subtitle}>A cancellation reason is required</Text>
+            <View style={styles.headerIcon}>
+              <Ionicons name="close-circle-outline" size={21} color="#B5473A" />
             </View>
-            <Pressable onPress={handleClose} disabled={loading} style={styles.closeBtn}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title} numberOfLines={2}>{title}</Text>
+              <Text style={styles.subtitle}>{isProvider
+                ? "Choose a reason. The seeker will be notified and this spot will reopen."
+                : "Choose a reason. The provider will be notified."}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close cancellation"
+              onPress={handleClose}
+              disabled={loading}
+              style={styles.closeBtn}
+            >
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
           </View>
 
-          {/* Warning banner */}
-          <View style={styles.warningBox}>
-            <Ionicons name="warning-outline" size={20} color="#B45309" />
-            <Text style={styles.warningText}>
-              Cancellations negatively affect your profile reliability rating and completion score.
-              Please cancel only when strictly necessary.
-            </Text>
-          </View>
-
-          {/* Reason options */}
-          <ScrollView style={styles.reasonsList} showsVerticalScrollIndicator={false}>
+          <Text style={styles.sectionLabel}>Reason for cancellation</Text>
+          <ScrollView
+            style={styles.reasonsList}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {reasons.map((r) => {
               const isSelected = selectedReason === r;
               return (
                 <Pressable
                   key={r}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
                   onPress={() => {
                     setSelectedReason(r);
                     setError(null);
                   }}
-                  style={[styles.reasonOption, isSelected && styles.reasonOptionSelected]}
+                  style={[
+                  styles.reasonOption,
+                    isSelected && styles.reasonOptionSelected,
+                  ]}
                 >
-                  <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
+                  <View
+                    style={[
+                      styles.radioCircle,
+                      isSelected && styles.radioCircleSelected,
+                    ]}
+                  >
                     {isSelected && <View style={styles.radioInner} />}
                   </View>
-                  <Text style={[styles.reasonText, isSelected && styles.reasonTextSelected]}>
+                  <Text
+                    style={[
+                      styles.reasonText,
+                      isSelected && styles.reasonTextSelected,
+                    ]}
+                  >
                     {r}
                   </Text>
                 </Pressable>
               );
             })}
 
-            {/* Optional custom note */}
-            <View style={styles.detailInputContainer}>
-              <Text style={styles.inputLabel}>
-                {selectedReason === "Other reason"
-                  ? "Please specify your reason (Required):"
-                  : "Additional details (Optional):"}
-              </Text>
+            {requiresDetail ? <View style={styles.detailInputContainer}>
+              <Text style={styles.inputLabel}>Briefly tell us why</Text>
               <TextInput
                 style={styles.detailInput}
-                placeholder="Provide brief context..."
+                placeholder="Your reason"
                 placeholderTextColor="#94A3B8"
                 value={customDetail}
                 onChangeText={(t) => {
@@ -160,9 +195,9 @@ export function CancellationModal({
                 }}
                 maxLength={300}
                 multiline
-                numberOfLines={3}
+                numberOfLines={2}
               />
-            </View>
+            </View> : null}
           </ScrollView>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -174,21 +209,21 @@ export function CancellationModal({
               onPress={handleClose}
               disabled={loading}
             >
-              <Text style={styles.cancelBtnText}>Keep Active</Text>
+              <Text style={styles.cancelBtnText}>{isProvider ? "Keep hire" : "Keep application"}</Text>
             </Pressable>
 
             <Pressable
               style={[
                 styles.confirmBtn,
-                (!selectedReason || loading) && styles.confirmBtnDisabled,
+                !canConfirm && styles.confirmBtnDisabled,
               ]}
               onPress={handleConfirm}
-              disabled={!selectedReason || loading}
+              disabled={!canConfirm}
             >
               {loading ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.confirmBtnText}>Confirm Cancel</Text>
+                <Text style={styles.confirmBtnText}>{isProvider ? "Cancel hire" : "Cancel application"}</Text>
               )}
             </Pressable>
           </View>
@@ -201,77 +236,94 @@ export function CancellationModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-    justifyContent: "center",
+    backgroundColor: "rgba(13, 27, 21, 0.42)",
+    justifyContent: "flex-end",
     alignItems: "center",
-    padding: 16,
   },
   container: {
     width: "100%",
-    maxWidth: 480,
+    maxWidth: 560,
     backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: "85%",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 24,
+    maxHeight: "88%",
+    shadowColor: "#10251B",
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 16,
+  },
+  handle: {
+    alignSelf: "center",
+    width: 38,
+    height: 4,
+    borderRadius: 3,
+    backgroundColor: "#D8E0DA",
+    marginBottom: 17,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    gap: 11,
+    marginBottom: 18,
+  },
+  headerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#FFF1EF",
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: {
-    fontSize: 18,
+    fontSize: 17,
+    lineHeight: 22,
     fontWeight: "700",
     color: colors.ink,
   },
   subtitle: {
     fontSize: 12,
+    lineHeight: 17,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
   },
   closeBtn: {
-    padding: 4,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F6F3",
   },
-  warningBox: {
-    flexDirection: "row",
-    gap: 8,
-    backgroundColor: "#FEF3C7",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 14,
-    alignItems: "flex-start",
-  },
-  warningText: {
-    flex: 1,
-    fontSize: 12,
-    color: "#92400E",
-    lineHeight: 17,
-    fontWeight: "500",
-  },
+  sectionLabel: { color: colors.ink, fontSize: 13, fontWeight: "700", marginBottom: 9 },
   reasonsList: {
-    maxHeight: 280,
+    maxHeight: 300,
   },
   reasonOption: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
+    minHeight: 46,
+    paddingVertical: 8,
+    paddingHorizontal: 11,
+    borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    marginBottom: 8,
-    backgroundColor: "#FAFCFA",
+    borderColor: "#E7ECE8",
+    marginBottom: 7,
+    backgroundColor: "#FFFFFF",
   },
   reasonOptionSelected: {
-    borderColor: colors.green,
-    backgroundColor: "#F0FDF4",
+    borderColor: "#1C7657",
+    backgroundColor: "#F0F8F3",
   },
   radioCircle: {
     width: 18,
     height: 18,
     borderRadius: 9,
     borderWidth: 2,
-    borderColor: "#CBD5E1",
+    borderColor: "#C7D3CB",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
@@ -286,7 +338,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.green,
   },
   reasonText: {
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: colors.ink,
     flex: 1,
   },
@@ -295,65 +348,69 @@ const styles = StyleSheet.create({
     color: colors.green,
   },
   detailInputContainer: {
-    marginTop: 6,
-    marginBottom: 10,
+    marginTop: 5,
+    marginBottom: 8,
   },
   inputLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
-    color: colors.ink,
+    color: "#394B40",
     marginBottom: 6,
   },
   detailInput: {
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    padding: 10,
+    borderColor: "#DCE5DE",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 13,
     color: colors.ink,
     backgroundColor: "#FAFCFA",
     textAlignVertical: "top",
-    minHeight: 64,
+    minHeight: 58,
   },
   errorText: {
     fontSize: 13,
     color: "#DC2626",
-    marginVertical: 6,
-    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 0,
+    textAlign: "left",
   },
   actionRow: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 14,
+    gap: 10,
+    marginTop: 15,
   },
   cancelBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#CBD5E1",
+    borderColor: "#D5E0D8",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
   },
   cancelBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
-    color: colors.muted,
+    color: "#244738",
   },
   confirmBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#DC2626",
+    backgroundColor: "#B5473A",
   },
   confirmBtnDisabled: {
-    opacity: 0.5,
+    opacity: 0.45,
   },
   confirmBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
     color: "#FFFFFF",
   },

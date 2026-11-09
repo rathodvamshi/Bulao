@@ -5,7 +5,11 @@
     "scheme": "bulao",
     "version": "0.1.0",
     "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#FAF8F2"
+    },
     "plugins": [
       "expo-router",
       "expo-secure-store",
@@ -19,32 +23,58 @@
         "expo-font",
         {
           "fonts": [
-            "./assets/fonts/PlusJakartaSans-Regular.ttf",
-            "./assets/fonts/PlusJakartaSans-Medium.ttf",
-            "./assets/fonts/PlusJakartaSans-SemiBold.ttf",
-            "./assets/fonts/PlusJakartaSans-Bold.ttf",
-            "./assets/fonts/NotoSansDevanagari-Regular.ttf",
-            "./assets/fonts/NotoSansDevanagari-Medium.ttf",
-            "./assets/fonts/NotoSansDevanagari-SemiBold.ttf",
-            "./assets/fonts/NotoSansDevanagari-Bold.ttf",
-            "./assets/fonts/NotoSansTelugu-Regular.ttf",
-            "./assets/fonts/NotoSansTelugu-Medium.ttf",
-            "./assets/fonts/NotoSansTelugu-SemiBold.ttf",
-            "./assets/fonts/NotoSansTelugu-Bold.ttf"
+            "./assets/fonts/Inter-Regular.ttf",
+            "./assets/fonts/Inter-SemiBold.ttf",
+            "./assets/fonts/Inter-Bold.ttf"
           ]
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "updates",
+          "color": "#075B43"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Bulao needs access to your photos to upload profile and work images."
         }
       ]
     ],
     "android": {
       "package": "in.bulao.app",
-      "softwareKeyboardLayoutMode": "resize"
+      "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#074433"
+      }
     },
     "ios": {
       "bundleIdentifier": "in.bulao.app",
       "supportsTablet": true
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a50c7b67-2355-4fc9-bc4b-0e4eb8b948ac"
+      },
+      "apiUrl": "https://bulao-api-staging.codecheck369.workers.dev/api/v1"
     }
   }
 }

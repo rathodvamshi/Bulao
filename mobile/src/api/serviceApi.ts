@@ -23,6 +23,7 @@ export type ServiceSearchItem = {
   categoryId: string; category: string; area: string; distanceKm: number;
   rating: number | null; totalReviews: number; pricingModel: string | null; basePricePaise: number | null;
 };
+
 export const serviceApi = {
   mine: () => api<ServiceItem[]>("/services/mine"),
   detail: (id: string) => api<ServiceItem>(`/services/${encodeURIComponent(id)}`),
@@ -47,11 +48,45 @@ export const serviceApi = {
       ...(scheduledAt === undefined ? {} : { scheduledAt: Math.floor(scheduledAt) }),
     });
   },
+  submitRating: (serviceId: string, stars: number, feedback: string, images?: string[]) =>
+    api<{ success: boolean; message: string; ratingId?: string }>(
+      `/services/${encodeURIComponent(serviceId)}/ratings`,
+      { stars, feedback, images: images || [] }
+    ),
+  getReviews: (serviceId: string, sort: string = "recent", cursor?: string | null, limit: number = 10) => {
+    const params = new URLSearchParams({ sort, limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return api<{
+      rating: number | null;
+      totalReviews: number;
+      ratingBreakdown: { stars1: number; stars2: number; stars3: number; stars4: number; stars5: number };
+      reviews: Array<{
+        id: string;
+        stars: number;
+        body?: string;
+        feedback?: string;
+        createdAt?: number;
+        authorName?: string;
+        authorPhoto?: string | null;
+        images?: string[];
+      }>;
+      hasMore: boolean;
+      nextCursor: string | null;
+    }>(`/services/${encodeURIComponent(serviceId)}/reviews?${params}`);
+  },
+  deleteReview: (serviceId: string, ratingId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/services/${encodeURIComponent(serviceId)}/ratings/${encodeURIComponent(ratingId)}`,
+      undefined,
+      "DELETE"
+    ),
 };
+
 export async function invalidateServiceQueries(client: QueryClient) {
   await client.invalidateQueries({ predicate: ({ queryKey }) => [
     "my-services", "myServices", "nearby", "db-services-search", "service-detail",
     "service-stats", "service-recent", "activity", "activity-interactions", "interaction",
     "service-notifications", "notifications", "profile", "profile-services", "connection",
+    "service-reviews",
   ].includes(String(queryKey[0])) });
 }

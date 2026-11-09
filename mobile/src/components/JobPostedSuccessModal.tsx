@@ -6,8 +6,6 @@ import {
   StyleSheet,
   Modal,
   Animated,
-  ScrollView,
-  useWindowDimensions,
   Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -40,145 +38,196 @@ export function JobPostedSuccessModal({
   visible,
   onClose,
   onViewJob,
-  onGoHome,
   jobDetails,
   isEditing = false,
 }: JobPostedSuccessModalProps) {
-  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
-
-  // Animation values
+  // Animation References
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const modalScale = useRef(new Animated.Value(0.92)).current;
+  const modalScale = useRef(new Animated.Value(0.85)).current;
   const modalOpacity = useRef(new Animated.Value(0)).current;
-  const iconScale = useRef(new Animated.Value(0.6)).current;
-  const outerRingScale = useRef(new Animated.Value(0.8)).current;
+
+  // Icon and burst animations
+  const iconScale = useRef(new Animated.Value(0.2)).current;
+  const ripple1Scale = useRef(new Animated.Value(0.7)).current;
+  const ripple1Opacity = useRef(new Animated.Value(0.8)).current;
+  const ripple2Scale = useRef(new Animated.Value(0.7)).current;
+  const ripple2Opacity = useRef(new Animated.Value(0.5)).current;
+
+  // Sparkles animations
+  const sparklesScale = useRef(new Animated.Value(0.3)).current;
   const sparklesOpacity = useRef(new Animated.Value(0)).current;
-  const sparklesScale = useRef(new Animated.Value(0.5)).current;
+  const sparklesRotate = useRef(new Animated.Value(0)).current;
+
+  // Live status pulse & 2-second Progress Bar
   const dotPulse = useRef(new Animated.Value(1)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
+
+  // Handle instant or automated navigation
+  const hasTriggeredNav = useRef(false);
+
+  const triggerNavigation = () => {
+    if (hasTriggeredNav.current) return;
+    hasTriggeredNav.current = true;
+    if (onViewJob) {
+      onViewJob(jobDetails?.jobId);
+    } else {
+      onClose();
+    }
+  };
 
   useEffect(() => {
     if (visible) {
-      // Reset values
-      backdropOpacity.setValue(0);
-      modalScale.setValue(0.92);
-      modalOpacity.setValue(0);
-      iconScale.setValue(0.6);
-      outerRingScale.setValue(0.8);
-      sparklesOpacity.setValue(0);
-      sparklesScale.setValue(0.5);
+      hasTriggeredNav.current = false;
 
-      // Entrance animation sequence
+      // Reset animation values
+      backdropOpacity.setValue(0);
+      modalScale.setValue(0.85);
+      modalOpacity.setValue(0);
+      iconScale.setValue(0.2);
+      ripple1Scale.setValue(0.7);
+      ripple1Opacity.setValue(0.8);
+      ripple2Scale.setValue(0.7);
+      ripple2Opacity.setValue(0.5);
+      sparklesScale.setValue(0.3);
+      sparklesOpacity.setValue(0);
+      sparklesRotate.setValue(0);
+      progressAnim.setValue(0);
+
+      // 1. Entrance backdrop & modal pop
       Animated.parallel([
         Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(modalOpacity, {
           toValue: 1,
           duration: 250,
           useNativeDriver: true,
         }),
-        Animated.spring(modalScale, {
+        Animated.timing(modalOpacity, {
           toValue: 1,
-          friction: 7,
-          tension: 70,
+          duration: 200,
           useNativeDriver: true,
         }),
-        Animated.sequence([
-          Animated.delay(100),
+        Animated.spring(modalScale, {
+          toValue: 1,
+          friction: 6,
+          tension: 80,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      // 2. Icon burst sequence
+      Animated.sequence([
+        Animated.delay(80),
+        Animated.parallel([
+          Animated.spring(iconScale, {
+            toValue: 1,
+            friction: 4,
+            tension: 75,
+            useNativeDriver: true,
+          }),
+          // Ripple 1 Expanding
           Animated.parallel([
-            Animated.spring(iconScale, {
-              toValue: 1,
-              friction: 5,
-              tension: 80,
+            Animated.timing(ripple1Scale, {
+              toValue: 1.35,
+              duration: 1200,
+              easing: Easing.out(Easing.ease),
               useNativeDriver: true,
             }),
-            Animated.spring(outerRingScale, {
-              toValue: 1,
-              friction: 6,
-              tension: 60,
+            Animated.timing(ripple1Opacity, {
+              toValue: 0,
+              duration: 1200,
               useNativeDriver: true,
             }),
           ]),
-        ]),
-        Animated.sequence([
-          Animated.delay(250),
-          Animated.parallel([
-            Animated.timing(sparklesOpacity, {
-              toValue: 1,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-            Animated.spring(sparklesScale, {
-              toValue: 1,
-              friction: 5,
-              tension: 90,
-              useNativeDriver: true,
-            }),
+          // Ripple 2 Expanding
+          Animated.sequence([
+            Animated.delay(120),
+            Animated.parallel([
+              Animated.timing(ripple2Scale, {
+                toValue: 1.6,
+                duration: 1400,
+                easing: Easing.out(Easing.ease),
+                useNativeDriver: true,
+              }),
+              Animated.timing(ripple2Opacity, {
+                toValue: 0,
+                duration: 1400,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]),
+          // Sparkles burst & spin
+          Animated.sequence([
+            Animated.delay(100),
+            Animated.parallel([
+              Animated.timing(sparklesOpacity, {
+                toValue: 1,
+                duration: 350,
+                useNativeDriver: true,
+              }),
+              Animated.spring(sparklesScale, {
+                toValue: 1,
+                friction: 5,
+                tension: 80,
+                useNativeDriver: true,
+              }),
+              Animated.timing(sparklesRotate, {
+                toValue: 1,
+                duration: 1200,
+                easing: Easing.out(Easing.ease),
+                useNativeDriver: true,
+              }),
+            ]),
           ]),
         ]),
       ]).start();
 
-      // Pulsing green dot animation loop
-      const pulseAnimation = Animated.loop(
+      // 3. Status dot continuous pulse
+      const pulseLoop = Animated.loop(
         Animated.sequence([
           Animated.timing(dotPulse, {
-            toValue: 0.35,
-            duration: 900,
-            easing: Easing.inOut(Easing.ease),
+            toValue: 0.3,
+            duration: 600,
             useNativeDriver: true,
           }),
           Animated.timing(dotPulse, {
             toValue: 1,
-            duration: 900,
-            easing: Easing.inOut(Easing.ease),
+            duration: 600,
             useNativeDriver: true,
           }),
         ])
       );
-      pulseAnimation.start();
+      pulseLoop.start();
 
-      return () => pulseAnimation.stop();
+      // 4. Smooth 2-second progress bar animation
+      Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: 2000,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      }).start();
+
+      // 5. Automated move to job application page after exactly 2 seconds
+      const timer = setTimeout(() => {
+        triggerNavigation();
+      }, 2000);
+
+      return () => {
+        clearTimeout(timer);
+        pulseLoop.stop();
+      };
     }
   }, [visible]);
 
   if (!visible) return null;
 
-  // Format Helper Data
-  const title = jobDetails?.title || jobDetails?.roleName || "Plumber";
-  const category = jobDetails?.categoryName || "Construction";
-  const role = jobDetails?.roleName || "Plumber";
-  const subtitleText = `${category} • ${role}`;
+  const spinInterpolation = sparklesRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "40deg"],
+  });
 
-  const payAmount = jobDetails?.payAmount ? `₹${jobDetails.payAmount}` : "₹500";
-  const payUnit = jobDetails?.payUnit ? `/${jobDetails.payUnit}` : "/day";
-  const priceDisplay = `${payAmount}${payUnit}`;
-
-  const locality = jobDetails?.locality || "Hyderabad";
-  const workersCount = jobDetails?.workers || 2;
-  const workersDisplay = `${workersCount} ${workersCount === 1 ? "Person" : "People"}`;
-
-  let scheduleDisplay = "11 Sep 2026";
-  if (jobDetails?.startDate) {
-    const d = typeof jobDetails.startDate === "string"
-      ? new Date(jobDetails.startDate)
-      : jobDetails.startDate;
-    if (!isNaN(d.getTime())) {
-      scheduleDisplay = d.toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-    }
-  }
-
-  let timingDisplay = "Full Day";
-  if (jobDetails?.hours === "custom" && jobDetails?.startTime && jobDetails?.endTime) {
-    timingDisplay = `${jobDetails.startTime} - ${jobDetails.endTime}`;
-  }
-
-  const isSmallScreen = screenHeight < 680;
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
 
   return (
     <Modal
@@ -186,209 +235,118 @@ export function JobPostedSuccessModal({
       visible={visible}
       animationType="none"
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={triggerNavigation}
     >
-      {/* Dark Blurred Backdrop */}
+      {/* Dark luxury backdrop */}
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={triggerNavigation} />
       </Animated.View>
 
-      {/* Modal Container */}
+      {/* Centered Minimal Animated Modal (Pure Celebration, No Clutter Details) */}
       <View style={styles.centerWrapper} pointerEvents="box-none">
-        <Animated.View
-          style={[
-            styles.modalCard,
-            {
-              opacity: modalOpacity,
-              transform: [{ scale: modalScale }],
-              maxHeight: screenHeight * 0.88,
-            },
-          ]}
-        >
-          {/* Close Button (X) */}
-          <Pressable
-            onPress={onClose}
-            style={styles.closeBtn}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityRole="button"
-            accessibilityLabel="Close confirmation"
+        <Pressable onPress={triggerNavigation}>
+          <Animated.View
+            style={[
+              styles.modalCard,
+              {
+                opacity: modalOpacity,
+                transform: [{ scale: modalScale }],
+              },
+            ]}
           >
-            <Ionicons name="close" size={22} color="#4B5563" />
-          </Pressable>
+            {/* ── Festive Sparkles Burst ── */}
+            <Animated.View
+              style={[
+                styles.sparkleContainer,
+                {
+                  opacity: sparklesOpacity,
+                  transform: [
+                    { scale: sparklesScale },
+                    { rotate: spinInterpolation },
+                  ],
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={[styles.sparkleStar, styles.starTopRight]}>✦</Text>
+              <Text style={[styles.sparkleStar, styles.starTopLeft]}>✧</Text>
+              <Text style={[styles.sparkleStar, styles.starBottomLeft]}>★</Text>
+              <Text style={[styles.sparkleStar, styles.starBottomRight]}>✦</Text>
+              <Text style={[styles.sparkleStar, styles.starFarRight]}>⋆</Text>
+              <Text style={[styles.sparkleStar, styles.starFarLeft]}>⋆</Text>
+            </Animated.View>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-            bounces={false}
-          >
-            {/* ── Success Animation Area ── */}
-            <View style={styles.iconSection}>
-              {/* Decorative Sparkles */}
+            {/* ── Concentric Ripple Rings & Checkmark ── */}
+            <View style={styles.iconWrapper}>
+              {/* Ripple Ring 2 */}
               <Animated.View
                 style={[
-                  styles.sparkleWrapper,
+                  styles.rippleRing2,
                   {
-                    opacity: sparklesOpacity,
-                    transform: [{ scale: sparklesScale }],
+                    transform: [{ scale: ripple2Scale }],
+                    opacity: ripple2Opacity,
                   },
                 ]}
-                pointerEvents="none"
-              >
-                {/* Top Right Sparkle */}
-                <Text style={[styles.sparkleText, styles.sparkleTopRight]}>✦</Text>
-                {/* Top Left Sparkle */}
-                <Text style={[styles.sparkleText, styles.sparkleTopLeft]}>✦</Text>
-                {/* Bottom Left Sparkle */}
-                <Text style={[styles.sparkleText, styles.sparkleBottomLeft]}>✦</Text>
-                {/* Bottom Right Sparkle */}
-                <Text style={[styles.sparkleText, styles.sparkleBottomRight]}>✦</Text>
-              </Animated.View>
+              />
 
-              {/* Glowing Outer Rings */}
+              {/* Ripple Ring 1 */}
               <Animated.View
                 style={[
-                  styles.outerRing2,
-                  { transform: [{ scale: outerRingScale }] },
+                  styles.rippleRing1,
+                  {
+                    transform: [{ scale: ripple1Scale }],
+                    opacity: ripple1Opacity,
+                  },
+                ]}
+              />
+
+              {/* Central Emerald Badge */}
+              <Animated.View
+                style={[
+                  styles.checkmarkCircle,
+                  {
+                    transform: [{ scale: iconScale }],
+                  },
                 ]}
               >
-                <View style={styles.outerRing1}>
-                  {/* Main Green Success Circle */}
-                  <Animated.View
-                    style={[
-                      styles.successCircle,
-                      { transform: [{ scale: iconScale }] },
-                    ]}
-                  >
-                    <Ionicons name="checkmark" size={42} color="#FFFFFF" />
-                  </Animated.View>
-                </View>
+                <Ionicons name="checkmark-sharp" size={44} color="#FFFFFF" />
               </Animated.View>
             </View>
 
-            {/* ── Main Heading ── */}
-            <Text style={styles.heading} adjustsFontSizeToFit numberOfLines={1}>
-              {isEditing ? "Job Updated Successfully!" : "Job Posted Successfully!"}
+            {/* ── Heading ── */}
+            <Text style={styles.heading}>
+              {isEditing ? "Updated Successfully!" : "Posted Successfully!"}
             </Text>
 
-            {/* ── Live Matching Status Badge ── */}
+            {/* ── Subtitle ── */}
+            <Text style={styles.subtitle}>
+              Your job request is now live on the network
+            </Text>
+
+            {/* ── Live Broadcasting Badge ── */}
             <View style={styles.liveBadge}>
               <Animated.View style={[styles.liveDot, { opacity: dotPulse }]} />
               <Text style={styles.liveBadgeText}>
-                {isEditing ? "CHANGES SAVED & LIVE" : "LIVE & MATCHING WORKERS"}
+                {isEditing ? "SAVED & BROADCASTING" : "BROADCASTING TO WORKERS"}
               </Text>
             </View>
 
-            {/* ── Job Summary Card ── */}
-            <View style={styles.summaryCard}>
-              {/* Header inside summary card */}
-              <View style={styles.cardHeader}>
-                <View style={styles.briefcaseContainer}>
-                  <Ionicons name="briefcase-outline" size={22} color="#1F2937" />
-                </View>
-
-                <View style={styles.titleColumn}>
-                  <Text style={styles.jobTitle} numberOfLines={1}>
-                    {title}
-                  </Text>
-                  <Text style={styles.jobSubtitle} numberOfLines={1}>
-                    {subtitleText}
-                  </Text>
-                </View>
-
-                {/* Price Badge */}
-                <View style={styles.priceBadge}>
-                  <Text style={styles.priceBadgeText}>{priceDisplay}</Text>
-                </View>
+            {/* ── 2-Second Smooth Progress Bar (Auto-Move Indicator) ── */}
+            <View style={styles.redirectSection}>
+              <View style={styles.progressBarTrack}>
+                <Animated.View
+                  style={[styles.progressBarFill, { width: progressWidth }]}
+                />
               </View>
-
-              <View style={styles.divider} />
-
-              {/* 2-Column x 2-Row Details Grid */}
-              <View style={styles.gridContainer}>
-                {/* Row 1 */}
-                <View style={styles.gridRow}>
-                  <View style={styles.gridCell}>
-                    <Text style={styles.gridLabel}>Location</Text>
-                    <Text style={styles.gridValue} numberOfLines={1}>
-                      {locality}
-                    </Text>
-                  </View>
-
-                  <View style={styles.gridVerticalDivider} />
-
-                  <View style={styles.gridCell}>
-                    <Text style={styles.gridLabel}>Workers</Text>
-                    <Text style={styles.gridValue} numberOfLines={1}>
-                      {workersDisplay}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.gridHorizontalDivider} />
-
-                {/* Row 2 */}
-                <View style={styles.gridRow}>
-                  <View style={styles.gridCell}>
-                    <Text style={styles.gridLabel}>Schedule</Text>
-                    <Text style={styles.gridValue} numberOfLines={1}>
-                      {scheduleDisplay}
-                    </Text>
-                  </View>
-
-                  <View style={styles.gridVerticalDivider} />
-
-                  <View style={styles.gridCell}>
-                    <Text style={styles.gridLabel}>Timing</Text>
-                    <Text style={styles.gridValue} numberOfLines={1}>
-                      {timingDisplay}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Broadcasting Status Pill */}
-              <View style={styles.broadcastPill}>
-                <Text style={styles.broadcastPillText} numberOfLines={1}>
-                  📣  Broadcasting to workers in {locality}
+              <View style={styles.redirectRow}>
+                <Text style={styles.redirectText}>
+                  Opening job application...
                 </Text>
+                <Ionicons name="arrow-forward" size={13} color="#03402D" />
               </View>
             </View>
-
-            <View style={styles.bottomDivider} />
-
-            {/* ── Action Buttons ── */}
-            <View style={styles.actionRow}>
-              {/* Home Button (Secondary) */}
-              <Pressable
-                onPress={onGoHome || onClose}
-                style={({ pressed }) => [
-                  styles.homeButton,
-                  pressed && styles.buttonPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Go to Home"
-              >
-                <Ionicons name="home" size={18} color="#18B978" />
-                <Text style={styles.homeButtonText}>Home</Text>
-              </Pressable>
-
-              {/* View Job Button (Primary) */}
-              <Pressable
-                onPress={() => (onViewJob ? onViewJob(jobDetails?.jobId) : onClose())}
-                style={({ pressed }) => [
-                  styles.viewJobButton,
-                  pressed && styles.buttonPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="View Job details"
-              >
-                <Ionicons name="document-text" size={18} color="#FFFFFF" />
-                <Text style={styles.viewJobButtonText}>View Job</Text>
-                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-              </Pressable>
-            </View>
-          </ScrollView>
-        </Animated.View>
+          </Animated.View>
+        </Pressable>
       </View>
     </Modal>
   );
@@ -397,310 +355,186 @@ export function JobPostedSuccessModal({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(10, 18, 14, 0.68)",
+    backgroundColor: "rgba(3, 24, 16, 0.72)",
   },
   centerWrapper: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 30,
+    paddingHorizontal: 24,
   },
   modalCard: {
-    width: "100%",
-    maxWidth: 400,
+    width: 320,
     backgroundColor: "#FFFFFF",
     borderRadius: 28,
-    padding: 22,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    alignItems: "center",
     position: "relative",
-    // Premium soft elevation & shadow
-    elevation: 12,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-  },
-  closeBtn: {
-    position: "absolute",
-    top: 18,
-    right: 18,
-    zIndex: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#F3F4F6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scrollContent: {
-    alignItems: "center",
-    paddingTop: 8,
-    paddingBottom: 4,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    elevation: 16,
   },
 
-  /* Success Icon & Outer Rings */
-  iconSection: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 10,
-    position: "relative",
-    width: 140,
-    height: 140,
-  },
-  sparkleWrapper: {
+  /* Sparkles Overlay */
+  sparkleContainer: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
   },
-  sparkleText: {
+  sparkleStar: {
     position: "absolute",
-    color: "#18B978",
     fontWeight: "900",
   },
-  sparkleTopRight: {
-    top: 6,
-    right: 18,
-    fontSize: 16,
+  starTopRight: {
+    top: 26,
+    right: 56,
+    fontSize: 22,
+    color: "#F59E0B",
   },
-  sparkleTopLeft: {
-    top: 22,
-    left: 14,
-    fontSize: 12,
+  starTopLeft: {
+    top: 36,
+    left: 54,
+    fontSize: 18,
+    color: "#10B981",
   },
-  sparkleBottomLeft: {
-    bottom: 12,
-    left: 20,
+  starBottomLeft: {
+    top: 110,
+    left: 48,
+    fontSize: 14,
+    color: "#F59E0B",
+  },
+  starBottomRight: {
+    top: 104,
+    right: 52,
+    fontSize: 20,
+    color: "#03402D",
+  },
+  starFarRight: {
+    top: 66,
+    right: 32,
     fontSize: 15,
+    color: "#10B981",
   },
-  sparkleBottomRight: {
-    bottom: 24,
-    right: 12,
-    fontSize: 11,
+  starFarLeft: {
+    top: 72,
+    left: 34,
+    fontSize: 16,
+    color: "#D97706",
   },
-  outerRing2: {
+
+  /* Central Ripples & Icon */
+  iconWrapper: {
+    width: 130,
+    height: 130,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    marginBottom: 16,
+  },
+  rippleRing2: {
+    position: "absolute",
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "rgba(221, 245, 233, 0.35)",
-    borderWidth: 1,
-    borderColor: "#DCFCE7",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: "#A7F3D0",
   },
-  outerRing1: {
-    width: 102,
-    height: 102,
-    borderRadius: 51,
-    backgroundColor: "rgba(221, 245, 233, 0.65)",
-    borderWidth: 1.5,
-    borderColor: "#A7F3D0",
-    alignItems: "center",
-    justifyContent: "center",
+  rippleRing1: {
+    position: "absolute",
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#6EE7B7",
   },
-  successCircle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: "#18B978",
+  checkmarkCircle: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: "#03402D",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#18B978",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowColor: "#03402D",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.38,
+    shadowRadius: 10,
+    elevation: 8,
+    borderWidth: 3.5,
+    borderColor: "#FFFFFF",
   },
 
-  /* Main Heading */
+  /* Typography */
   heading: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "900",
-    color: "#0F1F14",
+    color: "#0F172A",
     textAlign: "center",
     letterSpacing: -0.4,
-    marginTop: 6,
-    marginBottom: 8,
-    width: "100%",
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 14,
+    paddingHorizontal: 8,
   },
 
-  /* Live Matching Status Badge */
+  /* Status Badge */
   liveBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    backgroundColor: "#DDF5E9",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    marginBottom: 16,
+    gap: 6,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    marginBottom: 20,
   },
   liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#18B978",
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: "#10B981",
   },
   liveBadgeText: {
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: "800",
-    color: "#047857",
-    letterSpacing: 0.5,
+    color: "#03402D",
+    letterSpacing: 0.6,
   },
 
-  /* Job Summary Card */
-  summaryCard: {
+  /* 2-Second Progress Bar Section */
+  redirectSection: {
     width: "100%",
-    backgroundColor: "#F1F3F5",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 14,
-  },
-  cardHeader: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
   },
-  briefcaseContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "#E2E8F0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  titleColumn: {
-    flex: 1,
-  },
-  jobTitle: {
-    fontSize: 19,
-    fontWeight: "800",
-    color: "#0F1F14",
-    letterSpacing: -0.3,
-  },
-  jobSubtitle: {
-    fontSize: 12.5,
-    fontWeight: "500",
-    color: "#6B7280",
-    marginTop: 1,
-  },
-  priceBadge: {
-    backgroundColor: "#E5E7EB",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-  },
-  priceBadgeText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#0F1F14",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
-    marginVertical: 12,
-  },
-
-  /* 2x2 Grid */
-  gridContainer: {
-    gap: 10,
-  },
-  gridRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  gridCell: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 2,
-  },
-  gridLabel: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#6B7280",
-    marginBottom: 2,
-  },
-  gridValue: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#0F1F14",
-  },
-  gridVerticalDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: "#E5E7EB",
-  },
-  gridHorizontalDivider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
+  progressBarTrack: {
     width: "100%",
+    height: 4.5,
+    borderRadius: 3,
+    backgroundColor: "#F1F5F9",
+    overflow: "hidden",
   },
-
-  /* Broadcasting Pill */
-  broadcastPill: {
-    backgroundColor: "#DDF5E9",
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 14,
+  progressBarFill: {
+    height: "100%",
+    borderRadius: 3,
+    backgroundColor: "#03402D",
   },
-  broadcastPillText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#047857",
-  },
-
-  bottomDivider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
-    width: "100%",
-    marginBottom: 14,
-  },
-
-  /* Action Buttons */
-  actionRow: {
-    flexDirection: "row",
-    gap: 10,
-    width: "100%",
-  },
-  homeButton: {
-    flex: 1,
-    height: 52,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#18B978",
-    backgroundColor: "#FFFFFF",
+  redirectRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
+    gap: 4,
   },
-  homeButtonText: {
-    fontSize: 15.5,
+  redirectText: {
+    fontSize: 11.5,
     fontWeight: "700",
-    color: "#18B978",
-  },
-  viewJobButton: {
-    flex: 1,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "#18B978",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  viewJobButtonText: {
-    fontSize: 15.5,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  buttonPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
+    color: "#64748B",
   },
 });

@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, Platform } from "react-native";
+import { useEffect, useRef } from "react";
+import { Pressable, StyleSheet, Text, View, Platform, Animated, Easing, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { BlurView } from "expo-blur";
@@ -7,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { dash } from "./palette";
 
 type NavId = "bulao" | "home" | "jobs" | "job" | "post" | "activity" | "profile";
+type SeekerNavId = "findWork" | "applications" | "profile";
 
 const ITEMS: {
   id: "bulao" | "home" | "post" | "jobs" | "profile";
@@ -25,14 +27,58 @@ const ITEMS: {
 
 export function ProviderBottomNav({
   active = "home",
+  visible = true,
+  variant = "provider",
+  seekerActive = "findWork",
+  onSeekerTabChange,
 }: {
   active?: NavId;
+  visible?: boolean;
+  variant?: "provider" | "seeker";
+  seekerActive?: SeekerNavId;
+  onSeekerTabChange?: (tab: SeekerNavId) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const barWidth = Math.max(0, Math.min(width - 24, 560));
+  const slotGap = Math.max(0, Math.min(8, (width - 360) / 24));
+  const slotWidth = (barWidth - 16 - slotGap * 4) / 5;
+  const labelSize = Math.max(9, Math.min(12, width / 36));
+  const navLabel = [styles.label, { fontSize: labelSize, lineHeight: labelSize + 3 }];
   const bottomSpace = insets.bottom > 0 ? insets.bottom : 8;
+  const anim = useRef(new Animated.Value(visible ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: visible ? 0 : 1,
+      duration: 280,
+      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: Platform.OS !== "web",
+    }).start();
+  }, [visible, anim]);
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 130 + bottomSpace],
+  });
+
+  const opacity = anim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 0.95, 0],
+  });
 
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { paddingBottom: bottomSpace }]}>
+    <Animated.View
+      pointerEvents={visible ? "box-none" : "none"}
+      style={[
+        styles.wrap,
+        {
+          paddingBottom: bottomSpace,
+          transform: [{ translateY }],
+          opacity,
+        },
+      ]}
+    >
       {/* Blur overlay ONLY below the bottom of the navbar (never above) */}
       <View
         style={[
@@ -68,17 +114,88 @@ export function ProviderBottomNav({
         )}
       </View>
       
-      <View style={styles.floatingContainer}>
+      <View style={[styles.floatingContainer, { width: barWidth }]}>
         <View style={styles.bar}>
           <View style={[StyleSheet.absoluteFill, styles.webFrost]} />
-          <View style={styles.row}>
-            {ITEMS.map((item) => {
+          <View style={[styles.row, { gap: slotGap }]}>
+            {variant === "seeker" ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Bulao home"
+                  onPress={() => router.replace("/(tabs)")}
+                  style={[styles.slot, { width: slotWidth }]}
+                >
+                  <View style={styles.iconBox}>
+                    <View style={styles.bulaoIcon}>
+                      <Ionicons name="arrow-back" size={11} color={dash.primary} style={styles.bulaoArrow} />
+                      <Text style={styles.bulaoText}>B</Text>
+                    </View>
+                  </View>
+                  <Text style={navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>Bulao</Text>
+                  <View style={styles.indicatorContainer} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Notifications"
+                  onPress={() => router.push({ pathname: "/notifications", params: { role: "seeker", context: "work" } })}
+                  style={[styles.slot, { width: slotWidth }]}
+                >
+                  <View style={styles.regularIconWrap}>
+                    <Ionicons name="notifications-outline" size={22} color="#8A9699" />
+                  </View>
+                  <Text style={navLabel} numberOfLines={1}>Alerts</Text>
+                  <View style={styles.indicatorContainer} />
+                </Pressable>
+                <View key="find-work" style={[styles.slot, { width: slotWidth }]}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Find work"
+                    accessibilityState={{ selected: seekerActive === "findWork" }}
+                    onPress={() => onSeekerTabChange?.("findWork")}
+                    style={({ pressed }) => [styles.plus, pressed && { transform: [{ scale: 0.94 }] }]}
+                  >
+                    <View style={styles.plusRing}>
+                      <Ionicons name="search" size={23} color={dash.white} />
+                    </View>
+                  </Pressable>
+                  <Text style={[...navLabel, styles.plusLabel, { width: slotWidth }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>Find work</Text>
+                  <View style={styles.indicatorContainer}>{seekerActive === "findWork" ? <View style={styles.activeUnderline} /> : null}</View>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="My work"
+                  accessibilityState={{ selected: seekerActive === "applications" }}
+                  onPress={() => onSeekerTabChange?.("applications")}
+                  style={[styles.slot, { width: slotWidth }]}
+                >
+                  <View style={styles.regularIconWrap}>
+                    <Ionicons name={seekerActive === "applications" ? "reader" : "reader-outline"} size={22} color={seekerActive === "applications" ? dash.primary : "#8A9699"} />
+                  </View>
+                  <Text style={[...navLabel, seekerActive === "applications" && styles.labelActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>My work</Text>
+                  <View style={styles.indicatorContainer}>{seekerActive === "applications" ? <View style={styles.activeUnderline} /> : null}</View>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Profile"
+                  accessibilityState={{ selected: seekerActive === "profile" }}
+                  onPress={() => router.push("/seeker-profile")}
+                  style={[styles.slot, { width: slotWidth }]}
+                >
+                  <View style={styles.regularIconWrap}>
+                    <Ionicons name={seekerActive === "profile" ? "person" : "person-outline"} size={22} color={seekerActive === "profile" ? dash.primary : "#8A9699"} />
+                  </View>
+                  <Text style={[...navLabel, seekerActive === "profile" && styles.labelActive]} numberOfLines={1}>Profile</Text>
+                  <View style={styles.indicatorContainer}>{seekerActive === "profile" ? <View style={styles.activeUnderline} /> : null}</View>
+                </Pressable>
+              </>
+            ) : ITEMS.map((item) => {
               const isActive =
                 item.id === active ||
                 (item.id === "jobs" && (active === "job" || active === "activity"));
               if (item.center) {
                 return (
-                  <View key={item.id} style={styles.slot}>
+                  <View key={item.id} style={[styles.slot, { width: slotWidth }]}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Post a new job"
@@ -95,7 +212,7 @@ export function ProviderBottomNav({
                         <Ionicons name="add" size={26} color={dash.white} />
                       </View>
                     </Pressable>
-                    <Text style={[styles.label, styles.plusLabel]}>{item.label}</Text>
+                    <Text style={[...navLabel, styles.plusLabel, { width: slotWidth }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{item.label}</Text>
                     <View style={styles.indicatorContainer} />
                   </View>
                 );
@@ -131,7 +248,7 @@ export function ProviderBottomNav({
                     }
                     router.push(item.path);
                   }}
-                  style={styles.slot}
+                  style={[styles.slot, { width: slotWidth }]}
                 >
                   <View style={styles.iconBox}>
                     {item.id === "bulao" ? (
@@ -156,7 +273,7 @@ export function ProviderBottomNav({
                       </View>
                     )}
                   </View>
-                  <Text style={[styles.label, isActive && styles.labelActive]}>
+                  <Text style={[...navLabel, isActive && styles.labelActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                     {item.label}
                   </Text>
                   <View style={styles.indicatorContainer}>
@@ -168,7 +285,7 @@ export function ProviderBottomNav({
           </View>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -194,6 +311,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   bar: {
+    width: "100%",
     overflow: "visible",
     paddingVertical: 0,
     paddingHorizontal: 8,
@@ -211,16 +329,17 @@ const styles = StyleSheet.create({
     borderRadius: 32,
   },
   row: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "center",
-    gap: 8,
+    gap: 0,
   },
   slot: {
     width: 58,
     alignItems: "center",
     justifyContent: "flex-end",
-    height: 64,
+    height: 68,
     paddingBottom: 6,
   },
   iconBox: {

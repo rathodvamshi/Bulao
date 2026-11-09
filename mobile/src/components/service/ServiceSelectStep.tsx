@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import {
   Animated,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { CategoryService } from "../../api/types";
+import { AppImage as Image } from '../AppImage';
 
 // Design Tokens — same as Stage 1
 const GREEN = "#15803D";
@@ -417,13 +417,13 @@ function CategoryCard({
         <View style={styles.categoryCardIconWrap}>
           {isPlumber ? (
             <Image
-              source={require("../../../assets/images/categories/plumber.png")}
+              assetId="category-plumber"
               style={{ width: 24, height: 24 }}
               resizeMode="contain"
             />
           ) : isElectrician ? (
             <Image
-              source={require("../../../assets/images/categories/electrician.jpg")}
+              assetId="category-electrician"
               style={{ width: 24, height: 24 }}
               resizeMode="contain"
             />

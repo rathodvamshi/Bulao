@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,26 +9,58 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  Easing,
+  ActivityIndicator,
   useWindowDimensions,
+  LayoutChangeEvent,
 } from "react-native";
-import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import { verifyCustomName } from "../utils/nameVerification";
 import { usePostWorkStore } from "../features/post-work/store";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export { JobPostedSuccessModal } from "./JobPostedSuccessModal";
 export type { JobPostedDetails, JobPostedSuccessModalProps } from "./JobPostedSuccessModal";
 
+export const POST_WORK_TYPOGRAPHY = {
+  screenHeading: 20,
+  sectionHeading: 16,
+  cardTitle: 14,
+  inputLabel: 12,
+  inputValue: 15,
+  helper: 12,
+  button: 15,
+} as const;
+
+// Exactly 7 stages with short 1-word labels and matching icons
 export const STAGES = [
   { step: 1, label: "Category", icon: "apps-outline", route: "/post-work" },
-  { step: 2, label: "Role", icon: "person-outline", route: "/post-work" },
-  { step: 3, label: "Details", icon: "document-text-outline", route: "/post-work/details" },
+  { step: 2, label: "Role", icon: "briefcase-outline", route: "/post-work" },
+  { step: 3, label: "Title", icon: "document-text-outline", route: "/post-work/details" },
   { step: 4, label: "Location", icon: "location-outline", route: "/post-work/location" },
-  { step: 5, label: "Schedule", icon: "calendar-outline", route: "/post-work/schedule" },
+  { step: 5, label: "Dates", icon: "calendar-outline", route: "/post-work/schedule" },
   { step: 6, label: "Pay", icon: "wallet-outline", route: "/post-work/pay" },
   { step: 7, label: "Review", icon: "checkmark-circle-outline", route: "/post-work/review" },
 ] as const;
+
+export type StageItem = (typeof STAGES)[number];
+
+// Backward compatibility stub for existing imports
+export function transitionPostWorkContent(_direction: "forward" | "back", onNavigate: () => void) {
+  onNavigate();
+}
+
+/** Legacy wrapper kept for backward compatibility */
+export function PostWorkAnimatedContent({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: import("react-native").StyleProp<import("react-native").ViewStyle>;
+}) {
+  return <View style={[{ flex: 1 }, style]}>{children}</View>;
+}
 
 // ----------------------------------------------------
 // EXIT CONFIRMATION MODAL
@@ -53,7 +85,7 @@ export function ExitModal({
         <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
           <View style={styles.modalHeader}>
             <View style={styles.modalIconContainer}>
-              <Ionicons name="warning-outline" size={28} color="#E53E3E" />
+              <Ionicons name="warning-outline" size={26} color="#E53E3E" />
             </View>
             <Text style={styles.modalTitle}>Exit posting?</Text>
           </View>
@@ -134,7 +166,7 @@ export function CustomNameModal({
                 <Ionicons name="shield-checkmark-outline" size={24} color={colors.green} />
               </View>
               <Text style={styles.modalTitle}>{title}</Text>
-              <Pressable onPress={onClose} style={styles.modalCloseBtn}>
+              <Pressable onPress={onClose} style={styles.modalCloseBtn} hitSlop={8}>
                 <Ionicons name="close" size={22} color={colors.muted} />
               </Pressable>
             </View>
@@ -164,11 +196,11 @@ export function CustomNameModal({
                 </Text>
               ) : !verification.isValid ? (
                 <Text style={styles.mandatoryHint}>
-                  ⚠️ {verification.errorReason}
+                  {verification.errorReason}
                 </Text>
               ) : (
                 <Text style={styles.validHint}>
-                  ✓ Verified safe name ({verification.sanitizedName.length}/{maxLength} chars)
+                  Verified safe name ({verification.sanitizedName.length}/{maxLength} chars)
                 </Text>
               )}
             </View>
@@ -185,7 +217,7 @@ export function CustomNameModal({
                 ]}
                 onPress={handleDone}
               >
-                <Text style={styles.modalSaveButtonText}>Done ✓</Text>
+                <Text style={styles.modalSaveButtonText}>Done</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -196,103 +228,148 @@ export function CustomNameModal({
 }
 
 // ----------------------------------------------------
-// TOP NAVIGATION HEADER (WITH "← Exit")
+// REDESIGNED TOP HEADER (COMPACT, STATIONARY, CENTERED TITLE)
 // ----------------------------------------------------
 export function PostWorkHeader({
-  title = "Post Job",
-  currentStep = 1,
-  totalSteps = 7,
+  title = "Job Details",
   onExit,
+  onBack,
 }: {
   title?: string;
   currentStep?: number;
   totalSteps?: number;
   onExit: () => void;
+  onBack?: () => void;
 }) {
   return (
     <View style={styles.header}>
+      {/* Left side Exit button - polished rounded pill with horizontal row */}
       <Pressable
         onPress={onExit}
-        style={styles.exitNavButton}
+        android_ripple={{ color: "#A7F3D0", borderless: false }}
+        style={styles.headerExitBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel="Exit post job flow"
+        accessibilityLabel="Exit job posting"
       >
-        <Text style={styles.exitArrow}>←</Text>
-        <Text style={styles.exitNavText}>Exit</Text>
+        <View style={styles.headerExitInner}>
+          <Ionicons name="close" size={15} color="#03402D" />
+          <Text style={styles.headerExitText}>Exit</Text>
+        </View>
       </Pressable>
 
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
-
-      <View style={styles.stepBadge}>
-        <Text style={styles.stepBadgeText}>
-          {currentStep}/{totalSteps}
+      {/* Center Title - Absolutely centered so it remains exactly in horizontal center */}
+      <View style={styles.headerCenterWrap} pointerEvents="none">
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
         </Text>
       </View>
+
+      {/* Right side spacer to balance the Exit button */}
+      <View style={styles.headerRightSpacer} />
     </View>
   );
 }
 
 // ----------------------------------------------------
-// CONNECTED STAGE PROGRESS INDICATOR WITH SMOOTH ANIMATED LINE & TICK POP
+// SEVEN-STAGE PROGRESS NAVIGATION WITH SEQUENCED CONNECTOR LINE
 // ----------------------------------------------------
 export function StageProgressIndicator({
   currentStep = 1,
+  visualActiveStage,
+  lineProgress,
   onStepPress,
+  disabled = false,
 }: {
   currentStep: number;
+  visualActiveStage?: number;
+  lineProgress?: Animated.Value;
   onStepPress?: (step: number) => void;
+  disabled?: boolean;
 }) {
   const isEditing = Boolean(usePostWorkStore((s) => s.editingJobId));
   const { width } = useWindowDimensions();
-  const isCompact = width < 480;
+  const isCompact = width < 360;
 
-  // Smooth progress track animation with easing
-  const progressAnim = useRef(new Animated.Value(isEditing ? STAGES.length : currentStep)).current;
+  // Active visual stage: which icon circle is highlighted with green background & outer ring
+  const activeStage = visualActiveStage !== undefined ? visualActiveStage : currentStep;
+
+  // Track container width for mathematically precise icon center connections
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const handleLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0 && Math.abs(w - containerWidth) > 1) {
+      setContainerWidth(w);
+    }
+  };
+
+  // Fallback track width based on window width minus horizontal padding (32)
+  const effectiveWidth = containerWidth > 0 ? containerWidth : Math.max(width - 32, 280);
+  const colWidth = effectiveWidth / 7;
+  const iconCenterOffset = colWidth * 0.5;
+  const totalLineSpan = colWidth * 6;
+
+  // Fallback animated value if not provided by parent controller
+  const fallbackAnim = useRef(new Animated.Value(currentStep)).current;
+  const activeLineAnim = lineProgress || fallbackAnim;
 
   useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: isEditing ? STAGES.length : currentStep,
-      duration: 600,
-      easing: (t: number) => {
-        return t < 0.5
-          ? 4 * t * t * t
-          : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      },
-      useNativeDriver: false,
-    }).start();
-  }, [currentStep, isEditing]);
+    if (!lineProgress) {
+      fallbackAnim.setValue(currentStep);
+    }
+  }, [currentStep, lineProgress, fallbackAnim]);
 
-  // Width of the smooth active green progress line
-  const fillWidth = progressAnim.interpolate({
-    inputRange: [1, STAGES.length],
-    outputRange: ["0%", "100%"],
+  // Width of the animated active green line from icon 0 center to destination icon center
+  const activeLineWidth = activeLineAnim.interpolate({
+    inputRange: [1, 2, 3, 4, 5, 6, 7],
+    outputRange: [
+      0,
+      colWidth * 1,
+      colWidth * 2,
+      colWidth * 3,
+      colWidth * 4,
+      colWidth * 5,
+      colWidth * 6,
+    ],
     extrapolate: "clamp",
   });
 
   return (
     <View style={styles.progressContainer}>
-      <View style={styles.progressTrackWrapper}>
-        {/* Background Grey Track Line */}
-        <View style={styles.backgroundTrackLine} />
-
-        {/* Smooth Animated Green Progress Line */}
-        <Animated.View
+      <View
+        style={styles.progressTrackWrapper}
+        onLayout={handleLayout}
+      >
+        {/* Background Grey Track Line connecting first and last icon centers */}
+        <View
           style={[
-            styles.activeTrackLine,
+            styles.backgroundTrackLine,
             {
-              width: fillWidth,
+              left: iconCenterOffset,
+              width: totalLineSpan,
             },
           ]}
         />
 
-        {/* Stage Nodes */}
+        {/* Smooth Animated Green Progress Line growing from first icon center */}
+        <Animated.View
+          style={[
+            styles.activeTrackLine,
+            {
+              left: iconCenterOffset,
+              width: activeLineWidth,
+            },
+          ]}
+        />
+
+        {/* Seven Stage Nodes with labels below */}
         <View style={styles.nodesContainer}>
           {STAGES.map((stage) => {
             const stepNum = stage.step;
-            const isCompleted = isEditing ? stepNum !== currentStep : stepNum < currentStep;
-            const isActive = stepNum === currentStep;
+            const isCompleted = stepNum < activeStage;
+            const isActive = stepNum === activeStage;
+            const isUpcoming = stepNum > activeStage;
 
             return (
               <StageNodeItem
@@ -302,8 +379,10 @@ export function StageProgressIndicator({
                 currentStep={currentStep}
                 isCompleted={isCompleted}
                 isActive={isActive}
+                isUpcoming={isUpcoming}
                 isCompact={isCompact}
                 isEditing={isEditing}
+                disabled={disabled}
                 onStepPress={onStepPress}
               />
             );
@@ -320,60 +399,49 @@ function StageNodeItem({
   currentStep,
   isCompleted,
   isActive,
+  isUpcoming,
   isCompact,
   isEditing,
+  disabled,
   onStepPress,
 }: {
-  stage: (typeof STAGES)[number];
+  stage: StageItem;
   stepNum: number;
   currentStep: number;
   isCompleted: boolean;
   isActive: boolean;
+  isUpcoming: boolean;
   isCompact: boolean;
   isEditing: boolean;
+  disabled?: boolean;
   onStepPress?: (step: number) => void;
 }) {
-  // Smooth spring scale entrance animation for tick mark with better flow
-  const scaleAnim = useRef(new Animated.Value(isCompleted || isActive ? 1 : 0.7)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(isActive ? 1 : 0.96)).current;
 
   useEffect(() => {
-    if (isCompleted || isActive) {
-      // Smooth pop-in animation with rotation for checkmark
-      Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          friction: 5,
-          tension: 60,
-          useNativeDriver: true,
-        }),
-        Animated.sequence([
-          Animated.timing(rotateAnim, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]),
-      ]).start();
+    if (isActive) {
+      scaleAnim.setValue(0.88);
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 140,
+        useNativeDriver: true,
+      }).start();
     } else {
-      scaleAnim.setValue(0.7);
-      rotateAnim.setValue(0);
+      Animated.timing(scaleAnim, {
+        toValue: 0.96,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
     }
-  }, [isCompleted, isActive]);
+  }, [isActive, scaleAnim]);
 
-  const rotation = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  const canPress = isEditing || stepNum <= currentStep;
+  // User can tap completed stages or any stage when editing
+  const canPress = !disabled && (isEditing || stepNum < currentStep);
 
   const handlePress = () => {
-    if (onStepPress) {
+    if (canPress && onStepPress) {
       onStepPress(stepNum);
-    }
-    if (isEditing && stage.route) {
-      router.push(stage.route as any);
     }
   };
 
@@ -381,126 +449,239 @@ function StageNodeItem({
     <Pressable
       disabled={!canPress}
       onPress={handlePress}
-      style={styles.stageNodePressable}
+      style={styles.stageNodeCol}
       accessibilityRole="button"
-      accessibilityLabel={`Stage ${stepNum}: ${stage.label}`}
+      accessibilityLabel={`Stage ${stepNum}: ${stage.label}${
+        isActive ? " (Current stage)" : isCompleted ? " (Completed)" : ""
+      }`}
     >
-      <Animated.View
-        style={[
-          styles.stageIconCircle,
-          isCompact && styles.stageIconCircleCompact,
-          isCompleted && styles.stageCompleted,
-          isActive && styles.stageActive,
-          { 
-            transform: [
-              { scale: scaleAnim },
-              ...(isCompleted ? [{ rotate: rotation }] : [])
-            ] 
-          },
-        ]}
-      >
-        {isCompleted ? (
-          <Text style={styles.checkmarkIcon}>✓</Text>
-        ) : (
+      {/* Icon Circle Container */}
+      <View style={styles.iconCircleContainer}>
+        {/* Subtle Outer Highlight Ring for Active Stage */}
+        {isActive && <View style={[styles.activeOuterRing, isCompact && styles.activeOuterRingCompact]} />}
+
+        <Animated.View
+          style={[
+            styles.stageIconCircle,
+            isCompact && styles.stageIconCircleCompact,
+            isCompleted && styles.stageCompleted,
+            isActive && styles.stageActive,
+            isUpcoming && styles.stageUpcoming,
+            { transform: [{ scale: scaleAnim }] },
+          ]}
+        >
           <Ionicons
             name={stage.icon as keyof typeof Ionicons.glyphMap}
             size={isCompact ? 13 : 15}
-            color={
-              isActive
-                ? colors.white
-                : isCompleted
-                ? colors.white
-                : colors.muted
-            }
+            color={isCompleted || isActive ? colors.white : colors.mutedLight}
           />
-        )}
-      </Animated.View>
+        </Animated.View>
+      </View>
+
+      {/* Stage Label directly below icon */}
+      <Text
+        style={[
+          styles.stageLabelText,
+          isCompact && styles.stageLabelTextCompact,
+          isActive && styles.stageLabelActive,
+          isCompleted && styles.stageLabelCompleted,
+          isUpcoming && styles.stageLabelUpcoming,
+        ]}
+        numberOfLines={1}
+      >
+        {stage.label}
+      </Text>
     </Pressable>
   );
 }
 
 // ----------------------------------------------------
-// BOTTOM NAVIGATION BUTTONS
+// CONTENT SLIDING WINDOW (ONLY THE STAGE CONTENT SLIDES)
+// ----------------------------------------------------
+export function StageSlider({
+  currentStage,
+  transitionStage,
+  slideDirection,
+  slideAnim,
+  renderStage,
+}: {
+  currentStage: number;
+  transitionStage: number | null;
+  slideDirection: "forward" | "backward";
+  slideAnim: Animated.Value;
+  renderStage: (stage: number) => React.ReactNode;
+}) {
+  const { width } = useWindowDimensions();
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  const effectiveW = viewportWidth > 0 ? viewportWidth : width;
+
+  const handleLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0 && Math.abs(w - viewportWidth) > 1) {
+      setViewportWidth(w);
+    }
+  };
+
+  // If idle, render current stage directly
+  if (transitionStage === null) {
+    return (
+      <View style={styles.sliderViewport} onLayout={handleLayout}>
+        <View style={styles.sliderPageStatic}>
+          {renderStage(currentStage)}
+        </View>
+      </View>
+    );
+  }
+
+  // When transitioning, interpolate translateX for leaving and entering stages
+  const leavingTranslateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: slideDirection === "forward" ? [0, -effectiveW] : [0, effectiveW],
+  });
+
+  const enteringTranslateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: slideDirection === "forward" ? [effectiveW, 0] : [-effectiveW, 0],
+  });
+
+  return (
+    <View style={styles.sliderViewport} onLayout={handleLayout}>
+      {/* Exiting Stage */}
+      <Animated.View
+        style={[
+          styles.sliderPageAbsolute,
+          { transform: [{ translateX: leavingTranslateX }] },
+        ]}
+      >
+        {renderStage(currentStage)}
+      </Animated.View>
+
+      {/* Entering Destination Stage */}
+      <Animated.View
+        style={[
+          styles.sliderPageAbsolute,
+          { transform: [{ translateX: enteringTranslateX }] },
+        ]}
+      >
+        {renderStage(transitionStage)}
+      </Animated.View>
+    </View>
+  );
+}
+
+// ----------------------------------------------------
+// PERSISTENT BOTTOM NAVIGATION (BACK & NEXT)
 // ----------------------------------------------------
 export function PostWorkFooter({
+  currentStep = 1,
   onBack,
   onNext,
   onExit,
   nextDisabled = false,
   isStage1 = false,
   isFinalStage = false,
+  isTransitioning = false,
   nextLabel,
   backLabel,
   loading = false,
 }: {
+  currentStep?: number;
   onBack?: () => void;
   onNext: () => void;
   onExit?: () => void;
   nextDisabled?: boolean;
   isStage1?: boolean;
   isFinalStage?: boolean;
+  isTransitioning?: boolean;
   nextLabel?: string;
   backLabel?: string;
   loading?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
   const primaryText = isFinalStage
-    ? nextLabel || "Post"
+    ? nextLabel || "Post Work"
     : nextLabel || "Next";
 
-  return (
-    <View style={styles.footer}>
-      {/* Left Action Button */}
-      {isStage1 ? (
-        <Pressable
-          onPress={onExit || onBack}
-          style={styles.secondaryButton}
-          accessibilityRole="button"
-          accessibilityLabel="Exit posting"
-        >
-          <Text style={styles.secondaryButtonText}>{backLabel || "Exit"}</Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={onBack || (() => router.back())}
-          style={styles.secondaryButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Text style={styles.secondaryButtonText}>
-            ← {backLabel || "Back"}
-          </Text>
-        </Pressable>
-      )}
+  const isFirstStep = isStage1 || currentStep === 1;
 
-      {/* Right Action Button */}
+  const handleBackPress = () => {
+    if (isTransitioning) return;
+    if (isFirstStep && onExit) {
+      onExit();
+    } else if (onBack) {
+      onBack();
+    }
+  };
+
+  const handleNextPress = () => {
+    if (isTransitioning || nextDisabled || loading) return;
+    onNext();
+  };
+
+  return (
+    <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      {/* Left Action Button (Exit on Stage 1 / Back on Stages 2-7) - Equal width 50% */}
       <Pressable
-        onPress={onNext}
-        disabled={nextDisabled || loading}
-        style={[
-          styles.primaryButton,
-          isFinalStage && styles.postPrimaryButton,
-          (nextDisabled || loading) && styles.primaryButtonDisabled,
-        ]}
+        onPress={handleBackPress}
+        disabled={isTransitioning}
+        android_ripple={{ color: "#E2E8F0", borderless: false }}
+        style={styles.footerBtnHalf}
+        accessibilityRole="button"
+        accessibilityLabel={isFirstStep ? "Exit posting" : "Go back"}
+      >
+        <View
+          style={[
+            styles.secondaryButtonInner,
+            isTransitioning && styles.footerBtnDisabled,
+          ]}
+        >
+          <Ionicons
+            name={isFirstStep ? "close" : "arrow-back"}
+            size={18}
+            color="#03402D"
+          />
+          <Text style={styles.secondaryButtonText}>
+            {backLabel || (isFirstStep ? "Exit" : "Back")}
+          </Text>
+        </View>
+      </Pressable>
+
+      {/* Right Action Button (Next / Post Work) - Equal width 50% with Dark Green Background */}
+      <Pressable
+        onPress={handleNextPress}
+        disabled={nextDisabled || loading || isTransitioning}
+        android_ripple={{ color: "#0D3825", borderless: false }}
+        style={styles.footerBtnHalf}
         accessibilityRole="button"
         accessibilityLabel={primaryText}
       >
-        <Text
+        <View
           style={[
-            styles.primaryButtonText,
-            nextDisabled && styles.primaryButtonTextDisabled,
+            styles.primaryButtonInner,
+            (nextDisabled || loading || isTransitioning) && styles.primaryButtonInnerDisabled,
           ]}
         >
-          {loading
-            ? (primaryText.toLowerCase().includes("update") ? "Updating..." : "Posting...")
-            : primaryText}
-        </Text>
-        {!isFinalStage && !loading && (
-          <Ionicons
-            name="arrow-forward"
-            size={18}
-            color={nextDisabled ? colors.muted : colors.white}
-          />
-        )}
+          {loading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <Text style={styles.primaryButtonText}>
+                {primaryText.toLowerCase().includes("update") ? "Updating..." : "Posting..."}
+              </Text>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.primaryButtonText}>
+                {primaryText}
+              </Text>
+              <Ionicons
+                name={isFinalStage ? "checkmark-circle" : "arrow-forward"}
+                size={18}
+                color="#FFFFFF"
+              />
+            </>
+          )}
+        </View>
       </Pressable>
     </View>
   );
@@ -633,8 +814,8 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     flex: 1,
-    backgroundColor: colors.green,
-    paddingVertical: 14,
+    backgroundColor: "#03402D",
+    paddingVertical: 13,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -646,7 +827,7 @@ const styles = StyleSheet.create({
   },
   exitConfirmButton: {
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 14,
     backgroundColor: "#FFF5F5",
     borderWidth: 1,
@@ -661,7 +842,7 @@ const styles = StyleSheet.create({
   },
   modalCancelButton: {
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 14,
     backgroundColor: colors.paper,
     borderWidth: 1,
@@ -676,8 +857,8 @@ const styles = StyleSheet.create({
   },
   modalSaveButton: {
     flex: 1,
-    backgroundColor: colors.green,
-    paddingVertical: 14,
+    backgroundColor: "#03402D",
+    paddingVertical: 13,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -693,196 +874,286 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
-  // Header styles
+  // --------------------------------------------------
+  // TOP HEADER STYLES
+  // --------------------------------------------------
   header: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 16,
     backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: colors.line,
+    borderBottomColor: "#F1F5F9",
+    position: "relative",
+    zIndex: 10,
   },
-  exitNavButton: {
+  headerExitBtn: {
+    zIndex: 2,
+  },
+  headerExitInner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: colors.paper,
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
   },
-  exitArrow: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.green,
+  headerExitBtnPressed: {
+    backgroundColor: "#DCEDE3",
   },
-  exitNavText: {
-    fontSize: 15,
+  headerExitText: {
+    fontSize: 13,
     fontWeight: "700",
-    color: colors.green,
+    color: "#03402D",
+  },
+  headerCenterWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "600",
     color: colors.ink,
+    letterSpacing: -0.2,
   },
-  stepBadge: {
-    backgroundColor: colors.greenLight,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  stepBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.green,
+  headerRightSpacer: {
+    width: 60,
   },
 
-  // Progress indicator styles (Smooth Line & Animated Nodes)
+  // --------------------------------------------------
+  // SEVEN-STAGE PROGRESS INDICATOR STYLES
+  // --------------------------------------------------
   progressContainer: {
     backgroundColor: colors.white,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 6,
     borderBottomWidth: 1,
-    borderBottomColor: colors.line,
+    borderBottomColor: "#F1F5F9",
+    zIndex: 9,
   },
   progressTrackWrapper: {
     position: "relative",
     width: "100%",
-    maxWidth: 640,
+    maxWidth: 580,
     alignSelf: "center",
-    height: 32,
-    justifyContent: "center",
+    height: 52,
+    justifyContent: "flex-start",
   },
   backgroundTrackLine: {
     position: "absolute",
-    left: 15,
-    right: 15,
-    height: 3,
-    backgroundColor: colors.line,
+    top: 15,
+    height: 2.5,
+    backgroundColor: "#E2E8F0",
     borderRadius: 2,
+    zIndex: 1,
   },
   activeTrackLine: {
     position: "absolute",
-    left: 15,
-    height: 3,
-    backgroundColor: colors.green,
+    top: 15,
+    height: 2.5,
+    backgroundColor: colors.greenDark,
     borderRadius: 2,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 2,
+    zIndex: 1,
   },
   nodesContainer: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     width: "100%",
-  },
-  stageNodePressable: {
-    alignItems: "center",
-    justifyContent: "center",
     zIndex: 2,
   },
-  stageIconCircle: {
+  stageNodeCol: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  iconCircleContainer: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  activeOuterRing: {
+    position: "absolute",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.8,
+    borderColor: "#A7F3D0",
+    backgroundColor: "transparent",
+  },
+  activeOuterRingCompact: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: colors.paper,
-    borderWidth: 2,
-    borderColor: colors.line,
+  },
+  stageIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
     alignItems: "center",
     justifyContent: "center",
   },
   stageIconCircleCompact: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 25,
+    height: 25,
+    borderRadius: 12.5,
   },
   stageCompleted: {
     backgroundColor: colors.green,
     borderColor: colors.green,
   },
-  stageActive: {
-    backgroundColor: colors.green,
-    borderColor: colors.green,
-    elevation: 4,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
+  stageUpcoming: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#CBD5E1",
   },
-  checkmarkIcon: {
-    color: colors.white,
-    fontWeight: "800",
-    fontSize: 13,
+  stageActive: {
+    backgroundColor: colors.greenDark,
+    borderColor: colors.greenDark,
+    elevation: 2,
+    shadowColor: colors.greenDark,
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  stageLabelText: {
+    marginTop: 3,
+    fontSize: 8.5,
+    fontWeight: "600",
+    textAlign: "center",
+    color: "#64748B",
+    letterSpacing: -0.2,
+    lineHeight: 11,
+  },
+  stageLabelTextCompact: {
+    fontSize: 8,
+    marginTop: 2,
+    letterSpacing: -0.2,
+    lineHeight: 10,
+  },
+  stageLabelActive: {
+    fontWeight: "700",
+    color: "#03402D",
+  },
+  stageLabelCompleted: {
+    fontWeight: "600",
+    color: "#059669",
+  },
+  stageLabelUpcoming: {
+    fontWeight: "500",
+    color: "#94A3B8",
   },
 
-  // Footer styles
+  // --------------------------------------------------
+  // STAGE SLIDER (CONTENT VIEWPORT)
+  // --------------------------------------------------
+  sliderViewport: {
+    flex: 1,
+    overflow: "hidden",
+    position: "relative",
+    width: "100%",
+  },
+  sliderPageStatic: {
+    flex: 1,
+    width: "100%",
+  },
+  sliderPageAbsolute: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+  },
+
+  // --------------------------------------------------
+  // BOTTOM FOOTER STYLES (EQUAL 50/50 SCREEN WIDTH SPLIT)
+  // --------------------------------------------------
   footer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: colors.line,
+    borderTopColor: "#E2E8F0",
     gap: 12,
     width: "100%",
-    maxWidth: 640,
+    maxWidth: 580,
     alignSelf: "center",
+    zIndex: 20,
+    elevation: 4,
   },
-  secondaryButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: colors.paper,
-    borderWidth: 1,
-    borderColor: colors.line,
-    minWidth: 90,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.ink,
-  },
-  primaryButton: {
+  footerBtnHalf: {
     flex: 1,
+    minWidth: 0,
+  },
+  secondaryButtonInner: {
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: colors.green,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+    gap: 7,
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#03402D",
+  },
+  primaryButtonInner: {
+    height: 50,
     borderRadius: 14,
-    elevation: 2,
-    shadowColor: colors.green,
+    backgroundColor: "#03402D",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    shadowColor: "#03402D",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
+    elevation: 3,
   },
-  postPrimaryButton: {
-    backgroundColor: "#166534",
-    elevation: 4,
-  },
-  primaryButtonDisabled: {
-    backgroundColor: colors.line,
+  primaryButtonInnerDisabled: {
+    backgroundColor: "#03402D",
+    opacity: 0.45,
     elevation: 0,
+    shadowOpacity: 0,
   },
   primaryButtonText: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "800",
-    color: colors.white,
+    color: "#FFFFFF",
   },
-  primaryButtonTextDisabled: {
-    color: colors.muted,
+  footerBtnDisabled: {
+    opacity: 0.6,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
 
   // Summary styles
@@ -890,17 +1161,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     backgroundColor: colors.white,
-    padding: 18,
-    borderRadius: 16,
-    borderWidth: 2,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1.5,
     borderColor: colors.green,
-    alignItems: "center",
   },
-  summaryIcon: { fontSize: 28 },
-  summaryText: { fontSize: 16, fontWeight: "700", color: colors.ink },
+  summaryIcon: {
+    fontSize: 22,
+  },
+  summaryText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.ink,
+  },
   summarySubtext: {
-    fontSize: 13,
-    fontWeight: "500",
+    fontSize: 12,
     color: colors.muted,
     marginTop: 2,
   },

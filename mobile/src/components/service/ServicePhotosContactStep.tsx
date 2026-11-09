@@ -1,9 +1,9 @@
+import { AppImage as Image } from '../AppImage';
 import { uploadServicePhoto } from "../../api/servicePhotos";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -681,6 +681,7 @@ export function ServicePhotosContactStep({
           {previewUri && (
             <Image
               source={{ uri: previewUri }}
+              priority="high"
               style={styles.previewModalImage}
               resizeMode="contain"
             />

@@ -12,9 +12,11 @@ import {
   Platform,
   ScrollView,
   BackHandler,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { colors } from "./ui";
 import { api } from "../api/client";
 import { getNotificationInbox } from "../api/notifications";
@@ -22,9 +24,18 @@ import type { AppNotification } from "../api/types";
 
 export interface NotificationsScreenProps {
   onBack: () => void;
+  context?: "hire" | "service" | "work";
   role: "seeker" | "provider";
-  onSelectJob?: (jobId: string) => void;
+  initialNotificationId?: string;
+  onSelectJob?: (jobId: string, type?: string) => void;
   onSelectProfile?: (workerId: string) => void;
+  onSelectRequest?: (requestId: string, kind?: string) => void;
+  onSelectService?: (serviceId: string) => void;
+  onSelectProviderRatingQueue?: (jobId: string) => void;
+  onSelectReceivedRating?: (interactionId: string) => void;
+  onSelectAcceptedApplication?: (interactionId: string) => void;
+  onSelectCompletionPrompt?: (interactionId: string) => void;
+  onSelectProviderFeedback?: (interactionId: string) => void;
 }
 function relativeTime(timestamp: number) {
   const diff = Math.max(0, Date.now() / 1000 - timestamp);
@@ -48,6 +59,34 @@ function groupLabel(timestamp: number) {
       : "Earlier";
 }
 function notificationIcon(type: string) {
+  if (type.startsWith("SERVICE_"))
+    return {
+      name: "construct-outline" as const,
+      color: "#087653",
+      bg: "#E4F4EC",
+      label: "Service",
+    };
+  if (type === "NEW_JOB_NEARBY")
+    return {
+      name: "flash-outline" as const,
+      color: "#087653",
+      bg: "#E4F4EC",
+      label: "Jobs",
+    };
+  if (type.startsWith("APPLICATION_"))
+    return {
+      name: type === "APPLICATION_CREATED" ? "briefcase-outline" as const : "checkmark-circle-outline" as const,
+      color: type === "APPLICATION_CREATED" ? "#4765B6" : "#087653",
+      bg: type === "APPLICATION_CREATED" ? "#ECF0FF" : "#E4F4EC",
+      label: "Applications",
+    };
+  if (type.startsWith("JOB_"))
+    return {
+      name: type === "JOB_COMPLETED" ? "star-outline" as const : type.includes("COMPLET") ? "checkmark-done-circle-outline" as const : "briefcase-outline" as const,
+      color: type === "JOB_COMPLETED" ? "#A66A12" : "#087653",
+      bg: type === "JOB_COMPLETED" ? "#FFF4DE" : "#E4F4EC",
+      label: "Jobs",
+    };
   if (type === "APPLICATION_ACCEPTED")
     return {
       name: "checkmark-circle-outline" as const,
@@ -78,7 +117,7 @@ function notificationIcon(type: string) {
 }
 function notificationTarget(
   item: AppNotification,
-  key: "jobId" | "workerId",
+  key: "jobId" | "workerId" | "interactionId" | "serviceId",
 ): string | undefined {
   try {
     const data =
@@ -94,57 +133,81 @@ const jobIdFor = (item: AppNotification) => notificationTarget(item, "jobId");
 export function NotificationsScreen({
   onBack,
   role,
+  context = role === "provider" ? "hire" : "work",
   onSelectJob,
   onSelectProfile,
+  onSelectRequest,
+  onSelectService,
+  onSelectProviderRatingQueue,
+  onSelectReceivedRating,
+  onSelectAcceptedApplication,
+  onSelectCompletionPrompt,
+  onSelectProviderFeedback,
+  initialNotificationId,
 }: NotificationsScreenProps) {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [filter, setFilter] = useState("All");
+  const [searchVisible, setSearchVisible] = useState(false);
   const [selected, setSelected] = useState<AppNotification | null>(null);
+  const [inlineDeleteConfirm, setInlineDeleteConfirm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [anchor, setAnchor] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
-  const [menuHeight, setMenuHeight] = useState(0);
-  const pageRef = useRef<View>(null);
-  const optionButtons = useRef(new Map<string, View>());
+
+  // Selection & Bulk Delete state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const openOptions = (item: AppNotification) => {
-    const button = optionButtons.current.get(item.id);
-    if (!button || !pageRef.current) return;
-    pageRef.current.measureInWindow((pageX, pageY) => {
-      button.measureInWindow((x, y, width, height) => {
-        if (!width || !height) return;
-        setAnchor({ x: x - pageX, y: y - pageY, width, height });
-        setMenuHeight(0);
-        setSelected(item);
-      });
-    });
+    setInlineDeleteConfirm(false);
+    setSelected(item);
   };
   const [busy, setBusy] = useState(false);
+  const scope = context === "service" ? "service" : "work";
   const lock = useRef(false);
   const request = useRef(0);
+  const enterSelectionMode = useCallback((initialId: string) => {
+    setIsSelectionMode(true);
+    setSelectedIds(new Set([initialId]));
+    setSelected(null);
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
-    if (!selected) return;
+    if (!isSelectionMode) return;
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
-      setSelected(null);
+      exitSelectionMode();
       return true;
     });
     return () => listener.remove();
-  }, [selected]);
+  }, [isSelectionMode, exitSelectionMode]);
+
   const fetchNotifications = useCallback(async () => {
     const version = ++request.current;
     setError("");
     try {
-      const res = await getNotificationInbox(role);
+      const res = await getNotificationInbox(role, scope);
       if (version !== request.current) return;
       setNotifications(res.items || []);
       setUnreadCount(res.unreadCount || 0);
@@ -155,11 +218,13 @@ export function NotificationsScreen({
         setError("Couldn't load notifications. Pull down to try again.");
       }
     }
-  }, [role]);
+  }, [role, scope]);
   useEffect(() => {
     setQuery("");
-    setFilter("all");
+    setFilter("All");
     setSelected(null);
+    setIsSelectionMode(false);
+    setSelectedIds(new Set());
     setNotifications([]);
     setUnreadCount(0);
     setLoading(true);
@@ -181,7 +246,7 @@ export function NotificationsScreen({
   ) => {
     if (lock.current || refreshing) return false;
     lock.current = true;
-    setSelected(null);
+    if (action !== "delete") setSelected(null);
     setBusy(true);
     setError("");
     request.current++;
@@ -191,7 +256,7 @@ export function NotificationsScreen({
           ? "/notifications/read-all"
           : `/notifications/${encodeURIComponent(item!.id)}${action === "delete" ? "" : `/${action}`}`;
       await api(
-        `${path}?role=${role}`,
+        `${path}?role=${role}&scope=${scope}`,
         undefined,
         action === "delete" ? "DELETE" : "POST",
       );
@@ -204,6 +269,18 @@ export function NotificationsScreen({
                 n.id === item!.id ? { ...n, read: action === "read" } : n,
               ),
       );
+      if (action === "delete") {
+        void queryClient.invalidateQueries({
+          predicate: ({ queryKey }) =>
+            [
+              "notifications",
+              "provider-notifications",
+              "seeker-notifications",
+              "service-notifications",
+              "activity",
+            ].includes(String(queryKey[0])),
+        });
+      }
       setUnreadCount((prev) =>
         action === "read-all"
           ? 0
@@ -222,7 +299,6 @@ export function NotificationsScreen({
       setSelected(null);
       return true;
     } catch {
-      setSelected(null);
       setError("Couldn't save that change. Please try again.");
       return false;
     } finally {
@@ -230,13 +306,180 @@ export function NotificationsScreen({
       setBusy(false);
     }
   };
+
+  const executeBulkDelete = async (idsToDelete: string[], isAll: boolean) => {
+    if (lock.current || refreshing || idsToDelete.length === 0) return false;
+    lock.current = true;
+    setBusy(true);
+    setError("");
+    request.current++;
+    try {
+      try {
+        await api(
+          `/notifications/bulk-delete?role=${role}&scope=${scope}`,
+          isAll ? { all: true } : { ids: idsToDelete },
+          "POST",
+        );
+      } catch {
+        // Fallback to individual DELETEs if bulk endpoint is unavailable
+        await Promise.all(
+          idsToDelete.map((id) =>
+            api(
+              `/notifications/${encodeURIComponent(id)}?role=${role}&scope=${scope}`,
+              undefined,
+              "DELETE",
+            ),
+          ),
+        );
+      }
+
+      const toDeleteSet = new Set(idsToDelete);
+      setNotifications((prev) =>
+        isAll ? [] : prev.filter((n) => !toDeleteSet.has(n.id)),
+      );
+
+      setUnreadCount((prev) => {
+        if (isAll) return 0;
+        const deletedUnread = notifications.filter(
+          (n) => toDeleteSet.has(n.id) && !n.read,
+        ).length;
+        return Math.max(0, prev - deletedUnread);
+      });
+
+      exitSelectionMode();
+
+      void queryClient.invalidateQueries({
+        predicate: ({ queryKey }) =>
+          [
+            "notifications",
+            "provider-notifications",
+            "seeker-notifications",
+            "service-notifications",
+            "activity",
+          ].includes(String(queryKey[0])),
+      });
+
+      return true;
+    } catch {
+      setError("Couldn't delete selected notifications. Please try again.");
+      return false;
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    setShowDeleteConfirm(false);
+    const idsToDelete = Array.from(selectedIds);
+    if (idsToDelete.length === 0) return;
+    const isAll = idsToDelete.length === notifications.length;
+    await executeBulkDelete(idsToDelete, isAll);
+  };
   const openNotification = async (item: AppNotification) => {
     if (!item.read && !(await mutate("read", item))) return;
     const jobId = jobIdFor(item);
-    if (jobId && onSelectJob) {
-      setSelected(null);
-      onSelectJob(jobId);
+    const interactionId = notificationTarget(item, "interactionId");
+    const serviceId = notificationTarget(item, "serviceId");
+
+    setSelected(null);
+
+    if (item.type === "REVIEW_RECEIVED" && interactionId && onSelectReceivedRating) {
+      onSelectReceivedRating(interactionId);
+      return;
     }
+
+    if (item.type === "APPLICATION_ACCEPTED" && interactionId && onSelectAcceptedApplication) {
+      onSelectAcceptedApplication(interactionId);
+      return;
+    }
+
+    // 1. Nearby job alert -> open the job details page
+    if (item.type === "NEW_JOB_NEARBY" && jobId && onSelectJob) {
+      onSelectJob(jobId, item.type);
+      return;
+    }
+
+    // 2. Applicant created -> provider views applicants for this specific job posting
+    if (item.type === "APPLICATION_CREATED" && role === "provider" && jobId && onSelectJob) {
+      onSelectJob(jobId, item.type);
+      return;
+    }
+
+    // 3. Completion confirmation or completed
+    if (item.type === "JOB_COMPLETION_CONFIRMATION" || item.type === "JOB_COMPLETED") {
+      if (item.type === "JOB_COMPLETED" && role === "provider" && interactionId && onSelectProviderFeedback) {
+        onSelectProviderFeedback(interactionId);
+        return;
+      }
+      if (role === "provider" && jobId && onSelectProviderRatingQueue) {
+        onSelectProviderRatingQueue(jobId);
+        return;
+      }
+      if (interactionId && onSelectCompletionPrompt) {
+        onSelectCompletionPrompt(interactionId);
+        return;
+      }
+      if (interactionId && onSelectRequest) {
+        onSelectRequest(interactionId, "job");
+        return;
+      }
+    }
+
+    // 4. Seeker application status updates (accepted, rejected, cancelled)
+    if (
+      (item.type === "APPLICATION_ACCEPTED" ||
+        item.type === "APPLICATION_REJECTED" ||
+        item.type.includes("CANCELLED")) &&
+      interactionId &&
+      onSelectRequest
+    ) {
+      onSelectRequest(interactionId, "job");
+      return;
+    }
+
+    // 5. Worksite location updated
+    if (item.type === "JOB_LOCATION_UPDATED") {
+      if (interactionId && onSelectRequest) {
+        onSelectRequest(interactionId, "job");
+        return;
+      }
+      if (jobId && onSelectJob) {
+        onSelectJob(jobId, item.type);
+        return;
+      }
+    }
+
+    // 6. Service requests & updates
+    if (item.type.startsWith("SERVICE_")) {
+      if (interactionId && onSelectRequest) {
+        onSelectRequest(interactionId, "service");
+        return;
+      }
+      if (serviceId && onSelectService) {
+        onSelectService(serviceId);
+        return;
+      }
+    }
+
+    // Fallbacks
+    if (role === "provider" && jobId && onSelectJob) {
+      onSelectJob(jobId, item.type);
+      return;
+    }
+    if (interactionId && onSelectRequest) {
+      onSelectRequest(interactionId, item.type.startsWith("SERVICE_") ? "service" : "job");
+      return;
+    }
+    if (jobId && onSelectJob) {
+      onSelectJob(jobId, item.type);
+      return;
+    }
+    if (serviceId && onSelectService) {
+      onSelectService(serviceId);
+      return;
+    }
+    setExpandedId((prev) => (prev === item.id ? null : item.id));
   };
   const openProfile = async (item: AppNotification) => {
     const workerId = notificationTarget(item, "workerId");
@@ -252,142 +495,215 @@ export function NotificationsScreen({
     onSelectProfile(workerId);
   };
   const search = query.trim().toLocaleLowerCase();
+  const tabs = context === "service"
+    ? ["All", "Unread", "System", "Services"]
+    : ["All", "Unread", "System", "Jobs", "Applications"];
   const filtered = notifications.filter(
     (n) =>
-      (filter === "all" || !n.read) &&
+      (filter === "All" || (filter === "Unread" && !n.read) ||
+        (filter === "System" && !n.type.startsWith("JOB_") && n.type !== "NEW_JOB_NEARBY" && !n.type.startsWith("APPLICATION_") && !n.type.startsWith("SERVICE_")) ||
+        (filter === "Jobs" && (n.type.startsWith("JOB_") || n.type === "NEW_JOB_NEARBY")) ||
+        (filter === "Applications" && n.type.startsWith("APPLICATION_")) ||
+        (filter === "Services" && n.type.startsWith("SERVICE_"))) &&
       `${n.title} ${n.message} ${notificationIcon(n.type).label}`
         .toLocaleLowerCase()
         .includes(search),
   );
-  const canOpen = selected && jobIdFor(selected) && onSelectJob;
+
+  const isAllSelected =
+    filtered.length > 0 && filtered.every((item) => selectedIds.has(item.id));
+
+  const handleToggleSelectAll = useCallback(() => {
+    if (isAllSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const item of filtered) {
+          next.delete(item.id);
+        }
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const item of filtered) {
+          next.add(item.id);
+        }
+        return next;
+      });
+    }
+  }, [isAllSelected, filtered]);
+  const canOpen =
+    selected &&
+    Boolean(
+      (jobIdFor(selected) && onSelectJob) ||
+        (notificationTarget(selected, "interactionId") && onSelectRequest) ||
+        (notificationTarget(selected, "serviceId") && onSelectService),
+    );
   const canOpenProfile =
     selected &&
     role === "provider" &&
     selected.type === "APPLICATION_CREATED" &&
     notificationTarget(selected, "workerId") &&
     onSelectProfile;
-  const menuWidth = Math.min(244, Math.max(0, pageSize.width - 24));
-  const spaceBelow = anchor
-    ? Math.max(0, pageSize.height - anchor.y - anchor.height - 20)
-    : 0;
-  const spaceAbove = anchor ? Math.max(0, anchor.y - insets.top - 20) : 0;
-  const openAbove =
-    spaceBelow < (menuHeight || (canOpenProfile ? 300 : 248)) &&
-    spaceAbove > spaceBelow;
-  const menuLeft = anchor
-    ? Math.max(
-        12,
-        Math.min(
-          anchor.x + anchor.width - menuWidth,
-          pageSize.width - menuWidth - 12,
-        ),
-      )
-    : 12;
-  const menuTop = anchor
-    ? openAbove
-      ? anchor.y - menuHeight - 8
-      : anchor.y + anchor.height + 8
-    : 0;
+  const detailActionLabel = selected?.type.startsWith("SERVICE_")
+    ? "View service request"
+    : role === "provider" && selected?.type === "JOB_COMPLETED"
+      ? "Share your feedback"
+      : selected?.type === "JOB_COMPLETION_CONFIRMATION"
+        ? "Confirm completed work"
+      : selected && notificationTarget(selected, "interactionId")
+        ? "View request"
+        : "View job";
+  const modeLabel = context === "service" ? "Find a service" : role === "provider" ? "Hire someone" : "Find work";
+  const pageTitle = context === "service" ? "Service notifications" : role === "provider" ? "Hire notifications" : "Work notifications";
   return (
     <KeyboardAvoidingView
       style={styles.overlay}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View
-        ref={pageRef}
-        collapsable={false}
-        onLayout={({ nativeEvent: { layout } }) => {
-          setPageSize({ width: layout.width, height: layout.height });
-          setSelected(null);
-        }}
         style={[
           styles.sheet,
           { paddingTop: insets.top + 20, paddingBottom: 16 },
         ]}
       >
-        <View style={styles.header}>
-          <Pressable
-            style={styles.iconButton}
-            onPress={onBack}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-          >
-            <Ionicons name="arrow-back" size={22} color={colors.ink} />
-          </Pressable>
-          <View style={styles.flex}>
-            <Text style={styles.eyebrow}>
-              {role === "provider" ? "PROVIDER UPDATES" : "SEEKER UPDATES"}
-            </Text>
-            <Text style={styles.title}>Notifications</Text>
+        {isSelectionMode ? (
+          <View style={styles.selectionToolbar}>
+            <View style={styles.selectionLeft}>
+              <Pressable
+                style={styles.iconButton}
+                onPress={exitSelectionMode}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel selection"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={22} color={colors.ink} />
+              </Pressable>
+              <Text style={styles.selectionCount}>
+                {selectedIds.size} Selected
+              </Text>
+            </View>
+
+            <View style={styles.selectionRight}>
+              <Pressable
+                onPress={handleToggleSelectAll}
+                accessibilityRole="button"
+                style={styles.selectAllButton}
+                hitSlop={8}
+              >
+                <Text style={styles.selectAllText}>
+                  {isAllSelected ? "Deselect All" : "Select All"}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                disabled={selectedIds.size === 0 || busy}
+                onPress={() => setShowDeleteConfirm(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Delete selected notifications"
+                style={[
+                  styles.deleteIconButton,
+                  (selectedIds.size === 0 || busy) && styles.disabled,
+                ]}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name="trash-outline"
+                  size={20}
+                  color={selectedIds.size === 0 ? "#9CA3AF" : "#DC2626"}
+                />
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.header}>
+            <Pressable
+              style={styles.iconButton}
+              onPress={onBack}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Ionicons name="arrow-back" size={22} color={colors.ink} />
+            </Pressable>
+            <Text style={styles.modeLabel} numberOfLines={1}>{modeLabel}</Text>
+            <Pressable
+              style={styles.headerSearchButton}
+              onPress={() => {
+                if (searchVisible) {
+                  setQuery("");
+                  setSearchVisible(false);
+                } else {
+                  setSearchVisible(true);
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={searchVisible ? "Close search" : "Search notifications"}
+            >
+              <Ionicons name={searchVisible ? "close" : "search-outline"} size={21} color={colors.ink} />
+            </Pressable>
+          </View>
+        )}
+        <View style={styles.heading}>
+          <Text style={styles.title}>{pageTitle}</Text>
+          <View style={styles.statusRow}>
+            <View style={styles.statusText}>
+              <View style={[styles.statusDot, !unreadCount && styles.quietDot]} />
+              <Text style={styles.statusLabel}>
+                {loading ? "Loading your updates" : "You're all caught up"}
+              </Text>
+            </View>
+            <Pressable
+              disabled={!unreadCount || busy || loading || refreshing}
+              onPress={() => void mutate("read-all")}
+              accessibilityRole="button"
+              accessibilityLabel="Mark all notifications as read"
+              style={[styles.readAll, (!unreadCount || busy || loading || refreshing) && styles.disabled]}
+            >
+              <Ionicons name="checkmark-done-outline" size={15} color={colors.green} />
+              <Text style={styles.readAllText}>Read all</Text>
+            </Pressable>
           </View>
         </View>
-        <Text style={styles.subtitle}>
-          {role === "provider"
-            ? "Stay on top of applicants and your posted jobs."
-            : "Your next opportunity starts with an update."}
-        </Text>
-        <View style={styles.search}>
-          <Ionicons name="search-outline" size={20} color={colors.muted} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search recent notifications"
-            placeholderTextColor="#7A8882"
-            accessibilityLabel="Search notifications"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-          {!!query && (
-            <Pressable
-              onPress={() => setQuery("")}
-              style={styles.clear}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-            >
-              <Ionicons name="close-circle" size={19} color={colors.muted} />
-            </Pressable>
-          )}
-        </View>
-        <View style={styles.toolbar}>
-          <View style={styles.filters}>
-            {(["all", "unread"] as const).map((value) => (
+        {searchVisible && (
+          <View style={styles.search}>
+            <Ionicons name="search-outline" size={18} color={colors.muted} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search notifications"
+              placeholderTextColor="#7A8882"
+              accessibilityLabel="Search notifications"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {!!query && (
+              <Pressable onPress={() => setQuery("")} style={styles.clear} accessibilityRole="button" accessibilityLabel="Clear search">
+                <Ionicons name="close-circle" size={19} color={colors.muted} />
+              </Pressable>
+            )}
+          </View>
+        )}
+        <ScrollView style={styles.tabsViewport} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+            {tabs.map((value) => (
               <Pressable
                 key={value}
                 onPress={() => setFilter(value)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: filter === value }}
-                style={[styles.chip, filter === value && styles.activeChip]}
+                style={[styles.tab, filter === value && styles.activeTab]}
               >
                 <Text
                   style={[
-                    styles.chipText,
-                    filter === value && styles.activeChipText,
+                    styles.tabText,
+                    filter === value && styles.activeTabText,
                   ]}
                 >
-                  {value === "all"
-                    ? "All"
-                    : `Unread${unreadCount ? ` (${unreadCount})` : ""}`}
+                  {value === "Unread" && unreadCount ? `Unread (${unreadCount})` : value}
                 </Text>
               </Pressable>
             ))}
-          </View>
-          <Pressable
-            disabled={!unreadCount || busy || loading || refreshing}
-            onPress={() => void mutate("read-all")}
-            accessibilityRole="button"
-            style={styles.markAll}
-          >
-            <Text
-              style={[
-                styles.markAllText,
-                (!unreadCount || busy) && styles.disabled,
-              ]}
-            >
-              Mark all read
-            </Text>
-          </Pressable>
-        </View>
+        </ScrollView>
         {!!error && (
           <View style={styles.error} accessibilityRole="alert">
             <Ionicons name="alert-circle-outline" size={18} color="#9D422F" />
@@ -411,7 +727,7 @@ export function NotificationsScreen({
           </View>
         ) : (
           <FlatList
-            extraData={{ selectedId: selected?.id, expandedId }}
+            extraData={{ selectedId: selected?.id, expandedId, isSelectionMode, selectedIdsCount: selectedIds.size, selectedIds }}
             onScrollBeginDrag={() => setSelected(null)}
             onMomentumScrollBegin={() => setSelected(null)}
             data={filtered}
@@ -443,25 +759,25 @@ export function NotificationsScreen({
                 <Text style={styles.emptyTitle}>
                   {search
                     ? "No matching updates"
-                    : filter === "unread"
+                    : filter === "Unread"
                       ? "You're all caught up"
                       : "A little quiet here"}
                 </Text>
                 <Text style={styles.emptyText}>
                   {search
                     ? "Try a different name, job or keyword."
-                    : filter === "unread"
+                    : filter === "Unread"
                       ? "You've read all your recent notifications."
                       : role === "provider"
                         ? "New applications and job updates will appear here."
                         : "Application responses and job updates will appear here."}
                 </Text>
-                {(!!query || filter !== "all") && (
+                {(!!query || filter !== "All") && (
                   <Pressable
                     style={styles.reset}
                     onPress={() => {
                       setQuery("");
-                      setFilter("all");
+                      setFilter("All");
                     }}
                     accessibilityRole="button"
                   >
@@ -475,34 +791,60 @@ export function NotificationsScreen({
             renderItem={({ item, index }) => {
               const icon = notificationIcon(item.type);
               const group = groupLabel(item.createdAt);
-              const newApplicant =
-                role === "provider" && item.type === "APPLICATION_CREATED";
-              const showJob =
-                !!onSelectJob &&
-                !!jobIdFor(item) &&
-                (newApplicant ||
-                  (role === "seeker" && item.type === "APPLICATION_ACCEPTED"));
-              const showProfile =
-                newApplicant &&
-                !!onSelectProfile &&
-                !!notificationTarget(item, "workerId");
+              const isSelected = selectedIds.has(item.id);
               return (
                 <View>
                   {(index === 0 ||
                     groupLabel(filtered[index - 1]!.createdAt) !== group) && (
                     <Text style={styles.group}>{group}</Text>
                   )}
-                  <View style={[styles.card, !item.read && styles.unreadCard]}>
+                  <View style={[
+                    styles.card,
+                    !item.read && styles.unreadCard,
+                    isSelectionMode && isSelected && styles.selectedCard,
+                  ]}>
                     <View style={styles.cardMain}>
+                      {isSelectionMode && (
+                        <Pressable
+                          hitSlop={6}
+                          onPress={() => toggleSelect(item.id)}
+                          style={styles.checkboxWrapper}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: isSelected }}
+                        >
+                          <Ionicons
+                            name={
+                              isSelected
+                                ? "checkmark-circle"
+                                : "ellipse-outline"
+                            }
+                            size={22}
+                            color={isSelected ? colors.green : "#9CA3AF"}
+                          />
+                        </Pressable>
+                      )}
                       <Pressable
                         disabled={busy || refreshing}
-                        onPress={() =>
-                          setExpandedId(expandedId === item.id ? null : item.id)
-                        }
+                        delayLongPress={220}
+                        onLongPress={() => {
+                          if (isSelectionMode) {
+                            toggleSelect(item.id);
+                          } else {
+                            enterSelectionMode(item.id);
+                          }
+                        }}
+                        onPress={() => {
+                          if (isSelectionMode) {
+                            toggleSelect(item.id);
+                          } else {
+                            void openNotification(item);
+                          }
+                        }}
                         style={styles.cardBody}
                         accessibilityRole="button"
                         accessibilityState={{
-                          expanded: expandedId === item.id,
+                          expanded: !isSelectionMode && expandedId === item.id,
+                          selected: isSelectionMode && isSelected,
                         }}
                         accessibilityLabel={`${item.read ? "" : "Unread: "}${item.title}. ${item.message}`}
                       >
@@ -518,301 +860,234 @@ export function NotificationsScreen({
                             color={icon.color}
                           />
                         </View>
-                        <View style={styles.flex}>
-                          <View style={styles.meta}>
-                            <Text style={styles.category}>{icon.label}</Text>
+                        <View style={styles.cardCopy}>
+                          <View style={styles.cardTitleRow}>
+                            <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
                             {!item.read && <View style={styles.dot} />}
                           </View>
-                          <Text style={styles.cardTitle}>{item.title}</Text>
                           <Text
                             style={styles.message}
                             numberOfLines={
-                              expandedId === item.id ? undefined : 3
+                              expandedId === item.id ? undefined : 2
                             }
                           >
                             {item.message}
                           </Text>
-                          <Text style={styles.time}>
-                            {relativeTime(item.createdAt)}
-                          </Text>
                         </View>
                       </Pressable>
-                      <Pressable
-                        ref={(button) => {
-                          if (button)
-                            optionButtons.current.set(item.id, button);
-                          else optionButtons.current.delete(item.id);
-                        }}
-                        disabled={busy || refreshing}
-                        style={[
-                          styles.more,
-                          selected?.id === item.id && styles.moreActive,
-                        ]}
-                        onPress={() => openOptions(item)}
-                        accessibilityRole="button"
-                        accessibilityState={{
-                          expanded: selected?.id === item.id,
-                        }}
-                        accessibilityLabel={`Options for ${item.title}`}
-                      >
-                        <Ionicons
-                          name="ellipsis-vertical"
-                          size={21}
-                          color={colors.muted}
-                        />
-                      </Pressable>
-                    </View>
-                    {(showJob || showProfile) && (
-                      <View style={styles.cardActions}>
-                        {showProfile && (
-                          <Pressable
-                            disabled={busy || refreshing}
-                            onPress={() => void openProfile(item)}
-                            accessibilityRole="button"
-                            accessibilityLabel={`View applicant profile for ${item.title}`}
-                            style={({ pressed }) => [
-                              styles.cardAction,
-                              styles.primaryAction,
-                              pressed && styles.actionPressed,
-                              (busy || refreshing) && styles.disabled,
-                            ]}
-                          >
-                            <Ionicons
-                              name="person-outline"
-                              size={16}
-                              color="#FFF"
-                            />
-                            <Text style={styles.primaryActionText}>
-                              View profile
-                            </Text>
-                            <Ionicons
-                              name="arrow-forward"
-                              size={15}
-                              color="#FFF"
-                            />
-                          </Pressable>
-                        )}
-                        {showJob && (
-                          <Pressable
-                            disabled={busy || refreshing}
-                            onPress={() => void openNotification(item)}
-                            accessibilityRole="button"
-                            accessibilityLabel={`View job for ${item.title}`}
-                            style={({ pressed }) => [
-                              styles.cardAction,
-                              showProfile
-                                ? styles.secondaryAction
-                                : styles.primaryAction,
-                              pressed && styles.actionPressed,
-                              (busy || refreshing) && styles.disabled,
-                            ]}
-                          >
-                            <Ionicons
-                              name="briefcase-outline"
-                              size={16}
-                              color={showProfile ? colors.green : "#FFF"}
-                            />
-                            <Text
-                              style={
-                                showProfile
-                                  ? styles.secondaryActionText
-                                  : styles.primaryActionText
-                              }
-                            >
-                              View job
-                            </Text>
-                            <Ionicons
-                              name="arrow-forward"
-                              size={15}
-                              color={showProfile ? colors.green : "#FFF"}
-                            />
-                          </Pressable>
-                        )}
+                      <View style={styles.cardEnd}>
+                        <Text style={styles.compactTime}>{relativeTime(item.createdAt).replace(" ago", "")}</Text>
+                        <Pressable
+                          disabled={busy || refreshing}
+                          style={[
+                            styles.more,
+                            selected?.id === item.id && styles.moreActive,
+                          ]}
+                          onPress={() => {
+                            if (isSelectionMode) {
+                              toggleSelect(item.id);
+                            } else {
+                              openOptions(item);
+                            }
+                          }}
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            expanded: selected?.id === item.id,
+                          }}
+                          accessibilityLabel={`Options for ${item.title}`}
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={21} color={colors.green} />
+                        </Pressable>
                       </View>
-                    )}
+                    </View>
                   </View>
                 </View>
               );
             }}
           />
         )}
-        {selected && anchor && (
-          <View style={styles.menuOverlay} accessibilityViewIsModal>
+        <Modal
+          visible={!!selected}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => { if (!busy) setSelected(null); }}
+        >
+          <View style={styles.actionSheetOverlay}>
             <Pressable
               style={StyleSheet.absoluteFill}
-              onPress={() => setSelected(null)}
+              onPress={() => { if (!busy) setSelected(null); }}
               accessibilityRole="button"
               accessibilityLabel="Dismiss notification options"
             />
             <View
-              style={[
-                styles.menu,
-                {
-                  left: menuLeft,
-                  top: menuTop,
-                  width: menuWidth,
-                  opacity: menuHeight ? 1 : 0,
-                },
-              ]}
-              onLayout={({ nativeEvent: { layout } }) =>
-                setMenuHeight(layout.height)
-              }
+              style={[styles.actionSheet, { paddingBottom: Math.max(insets.bottom, 14) }]}
+              accessibilityViewIsModal
             >
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.menuPointer,
-                  {
-                    left: Math.max(
-                      16,
-                      Math.min(
-                        menuWidth - 26,
-                        anchor.x + anchor.width / 2 - menuLeft - 5,
-                      ),
-                    ),
-                  },
-                  openAbove ? { bottom: -5 } : { top: -5 },
-                ]}
-              />
-              <ScrollView
-                style={{
-                  maxHeight: Math.max(
-                    44,
-                    (openAbove ? spaceAbove : spaceBelow) - 14,
-                  ),
-                }}
-                bounces={false}
-                keyboardShouldPersistTaps="handled"
-              >
-                <View style={styles.menuHeader}>
-                  <Text style={styles.menuHeading}>QUICK ACTIONS</Text>
-                  <View
-                    style={[
-                      styles.menuStatusDot,
-                      selected.read && styles.menuStatusRead,
-                    ]}
-                  />
-                  <Text style={styles.menuStatusText}>
-                    {selected.read ? "Read" : "Unread"}
-                  </Text>
+              <View style={styles.actionSheetHandle} />
+              <View style={styles.actionSheetHeader}>
+                <View style={styles.actionSheetHeadingCopy}>
+                  <Text style={styles.actionSheetTitle}>Notification options</Text>
+                  {!!selected && <Text numberOfLines={1} style={styles.actionSheetSubtitle}>{selected.title}</Text>}
                 </View>
-                {!!canOpenProfile && (
+                <Pressable
+                  onPress={() => setSelected(null)}
+                  disabled={busy}
+                  style={styles.actionSheetClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close notification options"
+                >
+                  <Ionicons name="close" size={20} color="#596A60" />
+                </Pressable>
+              </View>
+              {selected && (
+                <ScrollView
+                  style={styles.actionSheetOptions}
+                  contentContainerStyle={styles.actionSheetContent}
+                  bounces={false}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  {!!canOpen && (
+                    <Pressable
+                      style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+                      disabled={busy}
+                      onPress={() => void openNotification(selected)}
+                      accessibilityRole="button"
+                    >
+                      <View style={styles.sheetOptionMain}>
+                        <View style={styles.sheetOptionIcon}><Ionicons name={selected.type.startsWith("SERVICE_") ? "construct-outline" : "briefcase-outline"} size={18} color={colors.green} /></View>
+                        <Text style={styles.sheetOptionText}>{detailActionLabel}</Text>
+                      </View>
+                    </Pressable>
+                  )}
+                  {!!canOpenProfile && (
+                    <Pressable
+                      style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+                      disabled={busy}
+                      onPress={() => void openProfile(selected)}
+                      accessibilityRole="button"
+                    >
+                      <View style={styles.sheetOptionMain}>
+                        <View style={styles.sheetOptionIcon}><Ionicons name="person-outline" size={18} color={colors.green} /></View>
+                        <Text style={styles.sheetOptionText}>View profile</Text>
+                      </View>
+                    </Pressable>
+                  )}
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.menuAction,
-                      pressed && styles.menuActionPressed,
-                    ]}
-                    disabled={busy}
-                    onPress={() => void openProfile(selected)}
+                    style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+                    onPress={() => {
+                      setExpandedId(selected.id);
+                      setSelected(null);
+                    }}
                     accessibilityRole="button"
                   >
-                    <View style={styles.menuIcon}>
-                      <Ionicons
-                        name="person-outline"
-                        size={17}
-                        color={colors.green}
-                      />
+                    <View style={styles.sheetOptionMain}>
+                      <View style={styles.sheetOptionIcon}><Ionicons name="reader-outline" size={18} color={colors.green} /></View>
+                      <Text style={styles.sheetOptionText}>View details</Text>
                     </View>
-                    <Text style={styles.menuText}>View profile</Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={14}
-                      color="#91A096"
-                    />
                   </Pressable>
-                )}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.menuAction,
-                    pressed && styles.menuActionPressed,
-                  ]}
-                  onPress={() => {
-                    setExpandedId(selected.id);
-                    setSelected(null);
-                  }}
-                  accessibilityRole="button"
-                >
-                  <View style={styles.menuIcon}>
-                    <Ionicons
-                      name="reader-outline"
-                      size={17}
-                      color={colors.green}
-                    />
-                  </View>
-                  <Text style={styles.menuText}>View details</Text>
-                </Pressable>
-                {!!canOpen && (
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.menuAction,
-                      pressed && styles.menuActionPressed,
-                    ]}
+                    style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
                     disabled={busy}
-                    onPress={() => void openNotification(selected)}
+                    onPress={() => void mutate(selected.read ? "unread" : "read", selected)}
                     accessibilityRole="button"
                   >
-                    <View style={styles.menuIcon}>
-                      <Ionicons
-                        name="briefcase-outline"
-                        size={17}
-                        color={colors.green}
-                      />
+                    <View style={styles.sheetOptionMain}>
+                      <View style={styles.sheetOptionIcon}>
+                        <Ionicons name={selected.read ? "mail-unread-outline" : "checkmark-done-outline"} size={18} color={colors.green} />
+                      </View>
+                      <Text style={styles.sheetOptionText}>Mark as {selected.read ? "unread" : "read"}</Text>
                     </View>
-                    <Text style={styles.menuText}>View job</Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={14}
-                      color="#91A096"
-                    />
                   </Pressable>
-                )}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.menuAction,
-                    pressed && styles.menuActionPressed,
-                  ]}
-                  disabled={busy}
-                  onPress={() =>
-                    void mutate(selected.read ? "unread" : "read", selected)
-                  }
-                  accessibilityRole="button"
-                >
-                  <View style={styles.menuIcon}>
-                    <Ionicons
-                      name={
-                        selected.read
-                          ? "mail-unread-outline"
-                          : "checkmark-done-outline"
-                      }
-                      size={17}
-                      color={colors.green}
-                    />
-                  </View>
-                  <Text style={styles.menuText}>
-                    Mark as {selected.read ? "unread" : "read"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.menuAction,
-                    styles.deleteAction,
-                    pressed && styles.menuActionPressed,
-                  ]}
-                  disabled={busy}
-                  onPress={() => void mutate("delete", selected)}
-                  accessibilityRole="button"
-                >
-                  <View style={[styles.menuIcon, styles.deleteIcon]}>
-                    <Ionicons name="trash-outline" size={17} color="#BB4439" />
-                  </View>
-                  <Text style={[styles.menuText, { color: "#BB4439" }]}>
-                    Delete notification
-                  </Text>
-                </Pressable>
-              </ScrollView>
+                  <View style={styles.sheetOptionDivider} />
+                  {!inlineDeleteConfirm ? (
+                    <Pressable
+                      style={({ pressed }) => [styles.sheetOption, styles.sheetDeleteOption, pressed && styles.sheetOptionPressed]}
+                      disabled={busy}
+                      onPress={() => setInlineDeleteConfirm(true)}
+                      accessibilityRole="button"
+                    >
+                      <View style={styles.sheetOptionMain}>
+                        <View style={[styles.sheetOptionIcon, styles.sheetDeleteIcon]}><Ionicons name="trash-outline" size={18} color="#BB4439" /></View>
+                        <Text style={[styles.sheetOptionText, styles.sheetDeleteText]}>Delete notification</Text>
+                      </View>
+                    </Pressable>
+                  ) : (
+                    <View style={styles.inlineDeleteConfirm}>
+                      <Text style={styles.inlineDeletePrompt}>Delete this notification?</Text>
+                      {!!error && <Text style={styles.inlineDeleteError}>{error}</Text>}
+                      <View style={styles.inlineDeleteActions}>
+                        <Pressable
+                          style={styles.inlineCancelButton}
+                          disabled={busy}
+                          onPress={() => setInlineDeleteConfirm(false)}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.inlineCancelText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.inlineDeleteButton}
+                          disabled={busy}
+                          onPress={() => void mutate("delete", selected)}
+                          accessibilityRole="button"
+                        >
+                          {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.inlineDeleteText}>Delete</Text>}
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+                </ScrollView>
+              )}
             </View>
           </View>
-        )}
+        </Modal>
+
+        <Modal
+          visible={showDeleteConfirm}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowDeleteConfirm(false)}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setShowDeleteConfirm(false)}
+          >
+            <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.modalIconCircle}>
+                <Ionicons name="trash-outline" size={22} color="#DC2626" />
+              </View>
+              <Text style={styles.modalTitle}>
+                {selectedIds.size === notifications.length
+                  ? "Delete all notifications?"
+                  : `Delete ${selectedIds.size} notification${selectedIds.size === 1 ? "" : "s"}?`}
+              </Text>
+              <Text style={styles.modalMessage}>
+                {selectedIds.size === notifications.length
+                  ? "Are you sure you want to remove all notifications?"
+                  : "These notifications will be removed from your notification list."}
+              </Text>
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setShowDeleteConfirm(false)}
+                  hitSlop={6}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalDeleteBtn}
+                  onPress={() => void confirmBulkDelete()}
+                  hitSlop={6}
+                >
+                  <Text style={styles.modalDeleteText}>
+                    {selectedIds.size === notifications.length ? "Delete all" : "Delete"}
+                  </Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -821,59 +1096,75 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   overlay: {
     flex: 1,
-    backgroundColor: "#FAFCFA",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
   },
   sheet: {
     width: "100%",
     maxWidth: 640,
     flex: 1,
-    backgroundColor: "#FAFCFA",
+    backgroundColor: "#FFFFFF",
     overflow: "hidden",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 22,
+    gap: 8,
+    paddingHorizontal: 16,
   },
-  eyebrow: {
-    color: colors.green,
-    fontSize: 10,
-    letterSpacing: 1.8,
-    fontWeight: "700",
-    marginBottom: 3,
+  modeLabel: {
+    flex: 1,
+    color: "#596A60",
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
   },
   title: {
-    fontSize: 25,
+    fontSize: 27,
+    lineHeight: 34,
     fontWeight: "800",
-    color: "#193C2E",
-    letterSpacing: -0.7,
+    color: "#111827",
+    letterSpacing: -0.8,
   },
   iconButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#EDF2EE",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  subtitle: {
-    color: "#758279",
-    fontSize: 13,
-    lineHeight: 20,
-    marginHorizontal: 22,
-    marginTop: 12,
-    marginBottom: 20,
+  headerSearchButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
   },
+  heading: { paddingHorizontal: 22, paddingTop: 17, paddingBottom: 7 },
+  statusRow: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 3,
+  },
+  statusText: { flexDirection: "row", alignItems: "center", gap: 8 },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#199467" },
+  quietDot: { backgroundColor: "#A7B2AA" },
+  statusLabel: { color: "#758279", fontSize: 12 },
+  readAll: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 4 },
+  readAllText: { color: colors.green, fontSize: 12, fontWeight: "600" },
   search: {
     marginHorizontal: 22,
-    paddingLeft: 14,
+    marginTop: 4,
+    marginBottom: 7,
+    paddingLeft: 13,
     paddingRight: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderRadius: 15,
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: "#E0E8E2",
     backgroundColor: "#FFF",
@@ -881,37 +1172,38 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     minWidth: 0,
-    minHeight: 48,
-    fontSize: 14,
+    minHeight: 42,
+    fontSize: 13,
     color: colors.ink,
   },
   clear: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
   },
-  toolbar: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    alignItems: "center",
-    justifyContent: "space-between",
+  tabsViewport: {
+    height: 48,
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E8EEE9",
+  },
+  tabs: {
     paddingHorizontal: 22,
-    paddingVertical: 16,
+    gap: 25,
+    minHeight: 47,
+    alignItems: "stretch",
   },
-  filters: { flexDirection: "row", gap: 7 },
-  chip: {
-    minHeight: 44,
-    paddingHorizontal: 15,
+  tab: {
+    minHeight: 47,
     justifyContent: "center",
-    borderRadius: 22,
-    backgroundColor: "#EDF2EE",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
   },
-  activeChip: { backgroundColor: "#075B43" },
-  chipText: { fontSize: 13, fontWeight: "600", color: "#64756B" },
-  activeChipText: { color: "#FFF" },
-  markAll: { minHeight: 44, justifyContent: "center" },
+  activeTab: { borderBottomColor: "#087653" },
+  tabText: { fontSize: 13, fontWeight: "600", color: "#728078" },
+  activeTabText: { color: "#087653", fontWeight: "700" },
   markAllText: { color: colors.green, fontSize: 12, fontWeight: "700" },
   disabled: { opacity: 0.4 },
   list: { paddingHorizontal: 18, paddingBottom: 20, flexGrow: 1 },
@@ -919,93 +1211,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#758279",
-    marginTop: 8,
+    marginTop: 20,
     marginBottom: 12,
-    marginLeft: 4,
+    marginLeft: 2,
     letterSpacing: 0.6,
   },
   card: {
-    backgroundColor: "#FFF",
-    borderWidth: 1,
-    borderColor: "#E8EDE9",
-    borderRadius: 18,
-    marginBottom: 10,
-    overflow: "hidden",
+    backgroundColor: "transparent",
+    borderRadius: 14,
+    marginBottom: 16,
   },
   cardMain: { flexDirection: "row" },
-  cardActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#E2EDE6",
-  },
-  cardAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    minHeight: 44,
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderRadius: 12,
-    flexGrow: 1,
-  },
-  primaryAction: {
-    backgroundColor: "#075B43",
-    borderWidth: 1,
-    borderColor: "#075B43",
-  },
-  secondaryAction: {
-    backgroundColor: "#FFF",
-    borderWidth: 1,
-    borderColor: "#C9DFD1",
-  },
-  primaryActionText: { fontSize: 12, fontWeight: "700", color: "#FFF" },
-  secondaryActionText: { fontSize: 12, fontWeight: "700", color: "#075B43" },
-  actionPressed: { opacity: 0.75 },
-  unreadCard: { backgroundColor: "#F0F8F3", borderColor: "#D5E8DD" },
+  unreadCard: { backgroundColor: "#F7FBF8" },
   cardBody: {
     flex: 1,
     flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: 16,
-    paddingLeft: 14,
+    alignItems: "center",
+    paddingVertical: 9,
+    paddingLeft: 5,
     gap: 12,
   },
   cardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  meta: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 5 },
-  category: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#728278",
-    flexShrink: 1,
-  },
+  cardCopy: { flex: 1, minWidth: 0 },
+  cardTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#199467" },
   cardTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#203D30",
     lineHeight: 20,
+    flex: 1,
   },
-  message: { fontSize: 12, color: "#6A796F", lineHeight: 19, marginTop: 4 },
-  time: { fontSize: 10, fontWeight: "500", color: "#87948B", marginTop: 9 },
+  message: { fontSize: 12, color: "#6A796F", lineHeight: 18, marginTop: 3 },
+  cardEnd: { width: 47, alignItems: "center", justifyContent: "space-between", alignSelf: "stretch", paddingTop: 5, paddingBottom: 1 },
+  compactTime: { fontSize: 9, color: "#7A8980" },
   more: {
-    width: 44,
-    height: 44,
+    width: 32,
+    height: 32,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
-    borderRadius: 14,
+    marginTop: 5,
+    borderRadius: 12,
+    backgroundColor: "#EFF4F0",
   },
   moreActive: { backgroundColor: "#DDEEE3" },
   empty: {
@@ -1050,79 +1303,217 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   errorText: { flex: 1, fontSize: 12, lineHeight: 18, color: "#9D422F" },
-  menuOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 10,
-  },
-  menu: {
-    position: "absolute",
-    borderRadius: 18,
-    padding: 7,
-    backgroundColor: "#FFF",
-    borderWidth: 1,
-    borderColor: "#DCE7E0",
-    shadowColor: "#163D2C",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    elevation: 12,
-  },
-  menuPointer: {
-    position: "absolute",
-    width: 10,
-    height: 10,
-    backgroundColor: "#FFF",
-    transform: [{ rotate: "45deg" }],
-  },
-  menuAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 10,
-  },
-  menuActionPressed: { backgroundColor: "#F0F6F2" },
-  menuHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 11,
-    marginBottom: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF3EF",
-  },
-  menuHeading: {
+  actionSheetOverlay: {
     flex: 1,
-    fontSize: 9,
-    letterSpacing: 1.1,
-    fontWeight: "700",
-    color: "#7B8B80",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    backgroundColor: "rgba(15, 33, 25, 0.38)",
   },
-  menuStatusDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#199467",
+  actionSheet: {
+    width: "100%",
+    maxWidth: 640,
+    maxHeight: "52%",
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 9,
+    paddingHorizontal: 20,
+    shadowColor: "#193D2E",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 16,
   },
-  menuStatusRead: { backgroundColor: "#A1ADA5" },
-  menuStatusText: { fontSize: 10, color: "#7B8B80" },
-  menuIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+  actionSheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#DCE4DF",
+    alignSelf: "center",
+    marginBottom: 10,
+  },
+  actionSheetHeader: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2EF",
+  },
+  actionSheetHeadingCopy: { flex: 1, minWidth: 0 },
+  actionSheetTitle: { color: "#193C2E", fontSize: 16, fontWeight: "700" },
+  actionSheetSubtitle: { color: "#7B8980", fontSize: 11, marginTop: 2 },
+  actionSheetClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: "#F1F5F2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionSheetOptions: { flexShrink: 1 },
+  actionSheetContent: { paddingTop: 7, paddingBottom: 4 },
+  sheetOption: {
+    width: "100%",
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 11,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    marginVertical: 3,
+    backgroundColor: "#FAFCFA",
+    borderWidth: 1,
+    borderColor: "#E8EEE9",
+  },
+  sheetOptionMain: { flex: 1, minWidth: 0, minHeight: 50, flexDirection: "row", alignItems: "center", gap: 13 },
+  sheetOptionPressed: { backgroundColor: "#F3F7F4" },
+  sheetOptionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
     backgroundColor: "#EDF5F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetOptionText: { flex: 1, color: "#203D30", fontSize: 14, fontWeight: "600" },
+  sheetOptionDivider: { height: 1, backgroundColor: "#EDF1EE", marginVertical: 7, marginLeft: 51 },
+  sheetDeleteOption: { marginTop: 3, backgroundColor: "#FFF8F7", borderColor: "#F4E4E1" },
+  sheetDeleteIcon: { backgroundColor: "#FFF0ED" },
+  sheetDeleteText: { color: "#BB4439" },
+  inlineDeleteConfirm: { marginTop: 3, padding: 12, borderRadius: 14, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#F4E4E1", gap: 10 },
+  inlineDeletePrompt: { color: "#7A302B", fontSize: 13, fontWeight: "600" },
+  inlineDeleteError: { color: "#A73B32", fontSize: 11, lineHeight: 15 },
+  inlineDeleteActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
+  inlineCancelButton: { minWidth: 76, minHeight: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#F2F4F2", paddingHorizontal: 12 },
+  inlineCancelText: { color: "#53645A", fontSize: 12, fontWeight: "700" },
+  inlineDeleteButton: { minWidth: 76, minHeight: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#C9443A", paddingHorizontal: 12 },
+  inlineDeleteText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  selectionToolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    minHeight: 44,
+  },
+  selectionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  selectionCount: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#203D30",
+    letterSpacing: -0.3,
+  },
+  selectionRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  selectAllButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.green,
+  },
+  deleteIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxWrapper: {
+    paddingLeft: 8,
+    paddingRight: 4,
     justifyContent: "center",
     alignItems: "center",
   },
-  deleteIcon: { backgroundColor: "#FFF0ED" },
-  deleteAction: {
-    borderTopWidth: 1,
-    borderTopColor: "#EDF2EE",
-    marginTop: 4,
+  selectedCard: {
+    backgroundColor: "#EBF5F0",
+    borderRadius: 14,
   },
-  menuText: { flex: 1, fontSize: 13, fontWeight: "600", color: "#203D30" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 320,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1F2937",
+    textAlign: "center",
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  modalMessage: {
+    fontSize: 13,
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+  modalDeleteBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalDeleteText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
 });

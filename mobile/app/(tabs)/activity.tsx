@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../src/api/client";
 import type { Connection } from "../../src/api/types";
-import { useSession } from "../../src/store/session";
+import { useAuth } from "../../src/auth";
 import {
   Screen,
   Copy,
@@ -16,6 +16,7 @@ import {
   colors,
 } from "../../src/components/ui";
 import { t } from "../../src/i18n/en";
+import { formatJobTitle } from "../../src/utils/jobTitle";
 const statusKeys = {
   PENDING: "pending",
   ACCEPTED: "accepted",
@@ -137,20 +138,29 @@ function ConnectionCard({ row, userId }: { row: Connection; userId: string }) {
   );
 }
 export default function Activity() {
-  const token = useSession((x) => x.token);
+  const auth = useAuth();
+  const token = auth.session?.token || null;
+  const userId = auth.user?.id || auth.session?.userId || null;
   const me = useQuery({
-    queryKey: ["me", token],
+    queryKey: ["me", userId || token],
     enabled: !!token,
     queryFn: () => api<{ id: string }>("/users/me"),
   });
   const activity = useQuery({
-    queryKey: ["activity", token],
-    enabled: !!token,
-    queryFn: () =>
-      api<{
-        interactions: Connection[];
-        jobs: { id: string; title: string; status: string }[];
-      }>("/activity"),
+    queryKey: ["activity", userId],
+    enabled: !!token && !!userId,
+    queryFn: async () => {
+      try {
+        const res = await api<{
+          interactions: Connection[];
+          jobs: { id: string; title: string; status: string }[];
+        }>("/activity");
+        if (res && Array.isArray(res.interactions)) return res;
+      } catch (err) {
+        console.warn("[activity] /activity failed, using fallback:", err);
+      }
+      return { interactions: [], jobs: [] };
+    },
     refetchInterval: 60000,
   });
   return (
@@ -190,7 +200,7 @@ export default function Activity() {
               {!!activity.data.jobs.length && <Copy>{t("yourJobs")}</Copy>}
               {activity.data.jobs.map((job) => (
                 <Card key={job.id}>
-                  <Text style={s.label}>{job.title}</Text>
+                  <Text style={s.label}>{formatJobTitle(job.title)}</Text>
                   <Button
                     label={t("view")}
                     secondary

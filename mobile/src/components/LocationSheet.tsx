@@ -14,13 +14,14 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  ScrollView,
   StyleSheet,
   Dimensions,
   Easing,
   PanResponder,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 import * as Location from "expo-location";
 import { useLocation } from "../store/location";
 import { locationApi } from "../api/locationApi";
@@ -41,7 +42,9 @@ export function LocationSheet() {
 
   const [isLocating, setIsLocating] = useState(false);
   const [mounted, setMounted] = useState(isLocationSheetVisible);
+  const [locationHydrated, setLocationHydrated] = useState(useLocation.persist.hasHydrated());
   const { status, session } = useAuth();
+  const pathname = usePathname();
 
   // Animation values for smooth in-and-out flow
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
@@ -114,15 +117,23 @@ export function LocationSheet() {
   // Because the location is persisted in secure storage via zustand, if they previously
   // chose a location it will be restored and this will NOT trigger.
   const locationFromStore = useLocation((s) => s.location);
+  const locationRequired = status === "authenticated" && locationHydrated && !locationFromStore;
+
   useEffect(() => {
-    if (status === "authenticated" && !locationFromStore) {
-      // Small delay so the home screen fully renders first
+    const unsubscribe = useLocation.persist.onFinishHydration(() => setLocationHydrated(true));
+    if (useLocation.persist.hasHydrated()) setLocationHydrated(true);
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (status === "authenticated" && locationHydrated && !locationFromStore && pathname !== "/location-search") {
+      // Let the home screen render before requiring an area selection.
       const timer = setTimeout(() => {
         setLocationSheetVisible(true);
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [status, locationFromStore, setLocationSheetVisible]);
+  }, [status, locationHydrated, locationFromStore, pathname, setLocationSheetVisible]);
 
   // Fetch saved locations after authentication
   useEffect(() => {
@@ -136,10 +147,11 @@ export function LocationSheet() {
   }, [status, session?.token, setSavedLocations]);
 
   const dismiss = useCallback(
-    (onComplete?: () => void) => {
+    (onComplete?: () => void, allowRequiredFlow = false) => {
+      if (locationRequired && !allowRequiredFlow) return;
       animateOut(onComplete);
     },
-    [animateOut]
+    [animateOut, locationRequired]
   );
 
   // PanResponder to allow dragging down to dismiss smoothly
@@ -215,7 +227,7 @@ export function LocationSheet() {
         longitude: pos.coords.longitude,
       });
 
-      dismiss();
+      dismiss(undefined, true);
     } catch {
       Alert.alert(
         "Error",
@@ -247,15 +259,16 @@ export function LocationSheet() {
       <Animated.View
         style={[styles.sheet, { transform: [{ translateY }] }]}
       >
-        {/* Drag handle area with pan responder for fluid swipe-down dismissal */}
-        <View {...panResponder.panHandlers} style={styles.dragHandleArea}>
+        {/* The required first-time location prompt cannot be dismissed accidentally. */}
+        <View {...(!locationRequired ? panResponder.panHandlers : {})} style={styles.dragHandleArea}>
           <View style={styles.handle} />
         </View>
 
-        {/* Title row with close icon at right corner beside the title */}
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>Choose your work location</Text>
-          <Pressable
+        <View style={styles.intro}>
+          {locationRequired ? <Text style={styles.requiredLabel}>ONE QUICK STEP</Text> : null}
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{locationRequired ? "Where should we look?" : "Choose your work location"}</Text>
+            {!locationRequired ? <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close"
             onPress={() => dismiss()}
@@ -266,9 +279,14 @@ export function LocationSheet() {
             ]}
           >
             <Ionicons name="close" size={16} color="#000000" />
-          </Pressable>
+            </Pressable> : null}
+          </View>
+          {locationRequired ? (
+            <Text style={styles.helperText}>Choose an area to see nearby jobs and services. You can search manually; GPS access is optional.</Text>
+          ) : null}
         </View>
 
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.optionsContent}>
         {/* Use current location */}
         <Pressable
           onPress={handleUseCurrentLocation}
@@ -299,7 +317,7 @@ export function LocationSheet() {
           onPress={() => {
             dismiss(() => {
               router.push("/location-search");
-            });
+            }, true);
           }}
           style={({ pressed }) => ({
             opacity: pressed ? 0.7 : 1,
@@ -326,7 +344,7 @@ export function LocationSheet() {
                 key={loc.id}
                 onPress={() => {
                   setLocation(loc);
-                  dismiss();
+                  dismiss(undefined, true);
                 }}
                 style={({ pressed }) => ({
                   opacity: pressed ? 0.7 : 1,
@@ -364,8 +382,7 @@ export function LocationSheet() {
           {/* Add new location shortcut */}
           <Pressable
             onPress={() => {
-              dismiss();
-              router.push("/location-search");
+              dismiss(() => router.push("/location-search"), true);
             }}
             style={({ pressed }) => ({
               opacity: pressed ? 0.7 : 1,
@@ -382,6 +399,7 @@ export function LocationSheet() {
             </View>
           </Pressable>
         </View>
+        </ScrollView>
       </Animated.View>
     </Modal>
   );
@@ -435,6 +453,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 16,
   },
+  intro: { marginBottom: 12 },
+  requiredLabel: { color: colors.green, fontSize: 10, fontWeight: "800", letterSpacing: 1.1, marginBottom: 7 },
+  helperText: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: -7 },
+  optionsContent: { paddingBottom: 12 },
   title: {
     fontSize: 20,
     fontWeight: "700",

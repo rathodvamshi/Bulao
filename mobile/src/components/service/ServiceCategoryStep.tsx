@@ -1,8 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import {
+  ActivityIndicator,
   Animated,
-  Image,
-  ImageSourcePropType,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Category } from "../../api/types";
+import { AppImage as Image } from '../AppImage';
+import { useAppAsset } from '../../api/assets';
 
 // Design Tokens
 const GREEN = "#15803D";
@@ -22,14 +23,14 @@ const TEXT_SECONDARY = "#64748B";
 const BORDER = "#E5E7EB";
 const WHITE = "#FFFFFF";
 
-const PLUMBER_IMG = require("../../../assets/images/categories/plumber.png");
-const ELECTRICIAN_IMG = require("../../../assets/images/categories/electrician.jpg");
+const PLUMBER_IMG = 'category-plumber';
+const ELECTRICIAN_IMG = 'category-electrician';
 
 // Category Visuals
 type CategoryVisual = {
   match?: RegExp;
   icon?: keyof typeof Ionicons.glyphMap;
-  image?: ImageSourcePropType;
+  image?: string;
   color: string;
   background: string;
   hint: string;
@@ -39,18 +40,18 @@ type CategoryVisual = {
 
 const visuals: CategoryVisual[] = [
   { match: /mechanic|auto|vehicle/, icon: "car-sport", color: "#E11D48", background: "#FFF0F3", hint: "Vehicle Care & Fix", isPopular: true, group: "repairs" },
-  { match: /plumb/, image: PLUMBER_IMG, color: "#2563EB", background: "#EFF6FF", hint: "Pipes & Drainage", isPopular: true, group: "repairs" },
-  { match: /electric/, image: ELECTRICIAN_IMG, color: "#D97706", background: "#FEFCE8", hint: "Wiring & Power", isPopular: true, group: "repairs" },
-  { match: /carpent/, icon: "hammer", color: "#C2410C", background: "#FFF7ED", hint: "Woodwork & Furniture", group: "repairs" },
-  { match: /paint/, icon: "color-palette", color: "#7C3AED", background: "#F5F3FF", hint: "Walls & Painting", isPopular: true, group: "repairs" },
-  { match: /mobile|phone/, icon: "phone-portrait", color: "#DB2777", background: "#FDF2F8", hint: "Screens & Batteries", group: "tech" },
-  { match: /computer|laptop/, icon: "laptop", color: "#0284C7", background: "#F0F9FF", hint: "Hardware & Software", group: "tech" },
-  { match: /tutor|teach|education|school/, icon: "school", color: "#9333EA", background: "#F5F3FF", hint: "Lessons & Classes", group: "personal" },
-  { match: /beauty|salon|hair|cut/, icon: "cut", color: "#C026D3", background: "#FDF2F8", hint: "Hair & Grooming", group: "personal" },
-  { match: /clean|housekeeping|maid/, icon: "sparkles", color: "#16A34A", background: "#F0FDF4", hint: "Home & Deep Clean", isPopular: true, group: "home" },
-  { match: /food|cater|cook|restaurant/, icon: "restaurant", color: "#EA580C", background: "#FFF7ED", hint: "Catering & Cooking", group: "home" },
+  { match: /plumb/, image: PLUMBER_IMG, icon: "water", color: "#2563EB", background: "#EFF6FF", hint: "Pipes & Drainage", isPopular: true, group: "repairs" },
+  { match: /electric/, image: ELECTRICIAN_IMG, icon: "flash", color: "#D97706", background: "#FEFCE8", hint: "Wiring & Power", isPopular: true, group: "repairs" },
   { match: /\bac\b|air.condition|cool|snow/, icon: "snow", color: "#0891B2", background: "#ECFEFF", hint: "AC Repair & Cooling", isPopular: true, group: "repairs" },
-  { match: /appliance|washing|machine/, icon: "construct", color: "#475569", background: "#F8FAFC", hint: "Appliance Repairs", group: "repairs" },
+  { match: /appliance|washing|machine/, icon: "construct", color: "#4F46E5", background: "#EEF2FF", hint: "Appliance Repairs", isPopular: true, group: "repairs" },
+  { match: /clean|housekeeping|maid/, icon: "sparkles", color: "#16A34A", background: "#F0FDF4", hint: "Home & Deep Clean", isPopular: true, group: "home" },
+  { match: /paint/, icon: "color-palette", color: "#7C3AED", background: "#F5F3FF", hint: "Walls & Painting", isPopular: true, group: "repairs" },
+  { match: /carpent/, icon: "hammer", color: "#C2410C", background: "#FFF7ED", hint: "Woodwork & Furniture", group: "repairs" },
+  { match: /beauty|salon|hair|cut/, icon: "cut", color: "#C026D3", background: "#FDF2F8", hint: "Hair & Grooming", isPopular: true, group: "personal" },
+  { match: /mobile|phone/, icon: "phone-portrait", color: "#DB2777", background: "#FDF2F8", hint: "Screens & Batteries", isPopular: true, group: "tech" },
+  { match: /computer|laptop/, icon: "laptop", color: "#0284C7", background: "#F0F9FF", hint: "Hardware & Software", group: "tech" },
+  { match: /tutor|teach|education|school/, icon: "school", color: "#9333EA", background: "#F5F3FF", hint: "Lessons & Classes", isPopular: true, group: "personal" },
+  { match: /food|cater|cook|restaurant/, icon: "restaurant", color: "#EA580C", background: "#FFF7ED", hint: "Catering & Cooking", group: "home" },
   { match: /garden|plant|leaf/, icon: "leaf", color: "#16A34A", background: "#F0FDF4", hint: "Lawn & Gardening", group: "home" },
   { match: /driv|transport/, icon: "car", color: "#2563EB", background: "#EFF6FF", hint: "Driver & Transit", group: "repairs" },
   { match: /construction|labour|build/, icon: "build", color: "#D97706", background: "#FEF3C7", hint: "Civil & Masonry", group: "repairs" },
@@ -60,18 +61,29 @@ const visuals: CategoryVisual[] = [
   { match: /health|med|nurse|care/, icon: "medkit", color: "#DC2626", background: "#FEE2E2", hint: "Caregiving & Health", group: "personal" },
   { match: /promo|market|ad/, icon: "megaphone", color: "#CA8A04", background: "#FEF9C3", hint: "Marketing & Ads", group: "personal" },
   { match: /office|admin|desk/, icon: "briefcase", color: "#475569", background: "#F1F5F9", hint: "Office & Admin", group: "personal" },
+  { match: /other/, icon: "build", color: "#64748B", background: "#F8FAFC", hint: "Custom Services", group: "repairs" },
 ];
 
 function getVisual(category: Category): CategoryVisual {
   const key = `${category.id} ${category.name.toLowerCase()}`;
-  return (
-    visuals.find((v) => v.match?.test(key)) ?? {
-      icon: "grid" as const,
-      color: "#475569",
-      background: "#F1F5F9",
-      hint: "Specialist Skill",
-    }
-  );
+  const matched = visuals.find((v) => v.match?.test(key));
+  const rawDbIcon = category.icon?.replace(/-outline$/, "") as keyof typeof Ionicons.glyphMap | undefined;
+  const dbIcon = rawDbIcon && rawDbIcon in Ionicons.glyphMap ? rawDbIcon : undefined;
+
+  if (matched) {
+    return {
+      ...matched,
+      icon: matched.icon ?? dbIcon ?? "grid",
+    };
+  }
+
+  return {
+    icon: dbIcon ?? "grid",
+    color: "#16A34A",
+    background: "#F0FDF4",
+    hint: `${category.name} Services`,
+    group: "repairs",
+  };
 }
 
 // Skeleton Card
@@ -110,6 +122,7 @@ function CategoryCard({
   cardWidth: number;
   onPress: () => void;
 }) {
+  const asset = useAppAsset(visual.image);
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
@@ -153,7 +166,8 @@ function CategoryCard({
       >
         {visual.isPopular && !selected && (
           <View style={styles.hotBadge}>
-            <Text style={styles.hotBadgeText}>HOT</Text>
+            <Ionicons name="flame" size={10} color="#DC2626" style={{ marginRight: 2 }} />
+            <Text style={styles.hotBadgeText}>TOP</Text>
           </View>
         )}
         {selected && (
@@ -162,14 +176,18 @@ function CategoryCard({
           </View>
         )}
         <View style={[styles.iconWrapper, { backgroundColor: selected ? GREEN_SOFT : WHITE }]}>
-          {visual.image ? (
+          {visual.image && asset?.url ? (
             <Image
-              source={visual.image}
+              assetId={visual.image}
               style={styles.categoryImage}
               resizeMode="contain"
             />
           ) : (
-            <Ionicons name={visual.icon ?? "grid"} size={24} color={selected ? GREEN : visual.color} />
+            <Ionicons
+              name={visual.icon ?? (category.icon ? (category.icon.replace(/-outline$/, "") as any) : "grid")}
+              size={24}
+              color={selected ? GREEN : visual.color}
+            />
           )}
         </View>
         <Text
@@ -178,6 +196,14 @@ function CategoryCard({
         >
           {category.name}
         </Text>
+        {visual.hint ? (
+          <Text
+            style={[styles.cardHint, selected && { color: "#166534" }]}
+            numberOfLines={1}
+          >
+            {visual.hint}
+          </Text>
+        ) : null}
       </Animated.View>
     </Pressable>
   );
@@ -209,10 +235,11 @@ export function ServiceCategoryStep({
   onSelect: (id: string) => void;
   loading: boolean;
   failed: boolean;
-  onRetry: () => void;
+  onRetry: () => Promise<unknown> | unknown;
 }) {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [isRetrying, setIsRetrying] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const { width } = useWindowDimensions();
 
@@ -223,15 +250,33 @@ export function ServiceCategoryStep({
 
   const selectedCategory = categories.find((c) => c.id === selectedId);
 
+  const retryCatalog = async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return categories.filter((cat) => {
-      if (q && !cat.name.toLowerCase().includes(q)) return false;
-      if (activeTab === "all") return true;
-      const v = getVisual(cat);
-      if (activeTab === "popular") return Boolean(v.isPopular);
-      return v.group === activeTab;
-    });
+    return categories
+      .filter((cat) => {
+        if (q && !cat.name.toLowerCase().includes(q)) return false;
+        if (activeTab === "all") return true;
+        const v = getVisual(cat);
+        if (activeTab === "popular") return Boolean(v.isPopular);
+        return v.group === activeTab;
+      })
+      .sort((a, b) => {
+        if (a.id === "other") return 1;
+        if (b.id === "other") return -1;
+        const popDiff = Number(getVisual(b).isPopular) - Number(getVisual(a).isPopular);
+        if (popDiff !== 0) return popDiff;
+        return a.name.localeCompare(b.name);
+      });
   }, [categories, search, activeTab]);
 
   if (loading) {
@@ -262,9 +307,9 @@ export function ServiceCategoryStep({
           </View>
           <Text style={styles.emptyTitle}>Could not load categories</Text>
           <Text style={styles.emptyText}>Please check your connection and try again.</Text>
-          <Pressable accessibilityRole="button" onPress={onRetry} style={styles.retryButton}>
-            <Ionicons name="refresh-outline" size={16} color={WHITE} />
-            <Text style={styles.retryText}>Try Again</Text>
+          <Pressable accessibilityRole="button" onPress={() => void retryCatalog()} style={styles.retryButton} disabled={isRetrying}>
+            {isRetrying ? <ActivityIndicator size="small" color={WHITE} /> : <Ionicons name="refresh-outline" size={16} color={WHITE} />}
+            <Text style={styles.retryText}>{isRetrying ? "Loading…" : "Try Again"}</Text>
           </Pressable>
         </View>
       </View>
@@ -275,12 +320,12 @@ export function ServiceCategoryStep({
     <View style={styles.content} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
 
       <View style={styles.heroSection}>
-        <Text style={styles.stageTag}>SELECT CATEGORY</Text>
+        <Text style={styles.stageTag}>STEP 1 OF 7 · CATEGORY</Text>
         <Text accessibilityRole="header" style={styles.heading}>
           What <Text style={{ color: GREEN }}>service</Text> do you provide?
         </Text>
         <Text style={styles.subtitle}>
-          Pick the category that best describes your expertise.
+          Choose from all service categories. Popular choices appear first.
         </Text>
       </View>
 
@@ -354,13 +399,19 @@ export function ServiceCategoryStep({
         <View style={styles.emptyState}>
           <Ionicons name="search-outline" size={32} color="#94A3B8" />
           <Text style={styles.emptyTitle}>
-            {categories.length ? "No matching categories" : "No categories yet"}
+            {categories.length ? "No matching categories" : "Service categories aren’t available yet"}
           </Text>
           <Text style={styles.emptyText}>
             {categories.length
               ? "Try a different search or select All Services."
-              : "Please check back shortly."}
+              : "The service catalog hasn’t been set up on the server yet. Reload after it’s updated."}
           </Text>
+          {!categories.length && (
+            <Pressable accessibilityRole="button" onPress={() => void retryCatalog()} style={styles.retryButton} disabled={isRetrying}>
+              {isRetrying ? <ActivityIndicator size="small" color={WHITE} /> : <Ionicons name="refresh-outline" size={16} color={WHITE} />}
+              <Text style={styles.retryText}>{isRetrying ? "Loading…" : "Reload categories"}</Text>
+            </Pressable>
+          )}
         </View>
       ) : (
         <View style={[styles.grid, { gap: gridGap }]}>
@@ -543,6 +594,14 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 6,
   },
+  cardHint: {
+    fontSize: 10,
+    fontWeight: "500",
+    lineHeight: 13,
+    textAlign: "center",
+    color: TEXT_SECONDARY,
+    paddingHorizontal: 2,
+  },
   cardTitle: {
     width: "100%",
     fontSize: 12,
@@ -560,6 +619,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
   },
   hotBadgeText: {
     fontSize: 8,

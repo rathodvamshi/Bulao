@@ -1,8 +1,8 @@
+import { AppImage as Image } from '../AppImage';
 import React, { useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -13,7 +13,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import { UniversalMap } from "../map/UniversalMap";
 import { useAuth } from "../../auth";
 import type { ServiceMode } from "./ServicePhotosContactStep";
 
@@ -427,27 +427,13 @@ export function ServiceReviewStep({
                 accessibilityLabel="View location on Google Map"
               >
                 {Platform.OS !== "web" && location ? (
-                  <MapView
+                  <UniversalMap
                     style={StyleSheet.absoluteFillObject}
-                    provider={PROVIDER_GOOGLE}
-                    initialRegion={{
-                      latitude,
-                      longitude,
-                      latitudeDelta: 0.03,
-                      longitudeDelta: 0.03,
-                    }}
-                    scrollEnabled={false}
-                    zoomEnabled={false}
-                    pitchEnabled={false}
-                    rotateEnabled={false}
-                    pointerEvents="none"
-                  >
-                    <Marker coordinate={{ latitude, longitude }}>
-                      <View style={styles.miniMapPin}>
-                        <Ionicons name="location" size={18} color="#DC2626" />
-                      </View>
-                    </Marker>
-                  </MapView>
+                    latitude={latitude}
+                    longitude={longitude}
+                    showMarker={true}
+                    interactive={false}
+                  />
                 ) : (
                   <View style={styles.webMapFallback}>
                     <Ionicons name="map" size={24} color={GREEN} />
@@ -949,6 +935,7 @@ export function ServiceReviewStep({
           {selectedPhotoPreview && (
             <Image
               source={{ uri: selectedPhotoPreview }}
+              priority="high"
               style={styles.photoPreviewImage}
               resizeMode="contain"
             />

@@ -141,52 +141,28 @@ function AuthContent({ fontsReady }: { fontsReady: boolean }) {
     console.log("[Bulao Auth] Starting OTP dispatch for:", fullPhone);
 
     try {
-      // Primary route: Send OTP via MSG91 Widget (runs without requiring custom SMS DLT template)
-      console.log("[Bulao Auth] Sending OTP via MSG91 Widget SDK...");
-      const identifier = "91" + phone;
-      const response = await OTPWidget.sendOTP({ identifier });
-      if (!mounted.current) return;
-      if (!response) {
-        throw new Error("No response received from OTP service. Please check your network.");
-      }
+      // Primary & direct route: Cloudflare Worker backend with MSG91 SMS dispatch
+      const res = await api<{
+        requestId: string;
+        expiresIn: number;
+        resendAfter: number;
+        otpLength: number;
+      }>("/auth/send-otp", { phone: fullPhone });
 
-      const requestId = response.reqId || response.requestId || response.message;
-      if (requestId && response.type === "success") {
-        console.log("[Bulao Auth] MSG91 Widget OTP sent successfully! Request ID:", requestId);
-        const widgetChallenge: OtpChallenge = {
-          requestId: requestId,
-          expiresIn: 300,
-          resendAfter: 60,
-          otpLength: OTP_LENGTH,
-          provider: "widget",
-        };
-        setChallenge(widgetChallenge);
-        transitionToOtp();
-        return;
-      } else {
-        const errorMsg = response.message || (response.code ? `Error code: ${response.code}` : "Failed to send OTP via widget");
-        console.warn("[Bulao Auth] Widget returned error, attempting backend fallback:", errorMsg);
-        // Fallback to backend send-otp
-        const res = await api<{
-          requestId: string;
-          expiresIn: number;
-          resendAfter: number;
-          otpLength: number;
-        }>("/auth/send-otp", { phone: fullPhone });
-        if (!mounted.current) return;
-        const backendChallenge: OtpChallenge = {
-          requestId: res.requestId,
-          expiresIn: res.expiresIn || 300,
-          resendAfter: res.resendAfter || 60,
-          otpLength: res.otpLength || OTP_LENGTH,
-          provider: "backend",
-        };
-        setChallenge(backendChallenge);
-        transitionToOtp();
-      }
+      if (!mounted.current) return;
+      console.log("[Bulao Auth] Backend OTP sent successfully! Request ID:", res.requestId);
+      const backendChallenge: OtpChallenge = {
+        requestId: res.requestId,
+        expiresIn: res.expiresIn || 300,
+        resendAfter: res.resendAfter || 60,
+        otpLength: res.otpLength || OTP_LENGTH,
+        provider: "backend",
+      };
+      setChallenge(backendChallenge);
+      transitionToOtp();
     } catch (failure) {
       if (!mounted.current) return;
-      console.error("[Bulao Auth] All OTP dispatch routes failed:", failure);
+      console.error("[Bulao Auth] OTP dispatch failed:", failure);
       setError(loginError(failure));
     } finally {
       sending.current = false;

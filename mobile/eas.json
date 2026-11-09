@@ -1,1 +1,51 @@
-{"cli":{"version":">=16.0.0","appVersionSource":"remote"},"build":{"development":{"developmentClient":true,"distribution":"internal"},"preview":{"distribution":"internal","android":{"buildType":"apk"}},"production":{"autoIncrement":true}},"submit":{"production":{}}}
+{
+  "cli": {
+    "version": ">=16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache --parallel"
+      },
+      "cache": {
+        "key": "bulao-gradle-v1",
+        "paths": [
+          "~/.gradle/caches",
+          "~/.gradle/wrapper"
+        ]
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://bulao-api-staging.codecheck369.workers.dev/api/v1",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "a50c7b67-2355-4fc9-bc4b-0e4eb8b948ac",
+        "EAS_SKIP_AUTO_FINGERPRINT": "1"
+      }
+    },
+    "preview-universal": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://bulao-api-staging.codecheck369.workers.dev/api/v1",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "a50c7b67-2355-4fc9-bc4b-0e4eb8b948ac"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://bulao-api-staging.codecheck369.workers.dev/api/v1",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "a50c7b67-2355-4fc9-bc4b-0e4eb8b948ac"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

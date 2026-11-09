@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, View, Platform, Modal, useWindowDimensions } from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { Pressable, StyleSheet, Text, View, Platform, Modal, useWindowDimensions, Animated, Easing } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { BlurView } from "expo-blur";
@@ -26,15 +26,43 @@ const ITEMS: {
 
 export function ServiceBottomNav({
   active = "home",
+  visible = true,
 }: {
   active?: NavId;
+  visible?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const slotWidth = Math.min(58, Math.max(0, (width - 48) / 5));
+  const barWidth = Math.max(0, Math.min(width - 24, 560));
+  const slotGap = Math.max(0, Math.min(8, (width - 360) / 24));
+  const slotWidth = (barWidth - 16 - slotGap * 4) / 5;
+  const labelSize = Math.max(9, Math.min(12, width / 36));
+  const navLabel = [styles.label, { fontSize: labelSize, lineHeight: labelSize + 3 }];
   const bottomSpace = insets.bottom > 0 ? insets.bottom : 8;
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const [comingSoonTitle, setComingSoonTitle] = useState("Feature");
+  const anim = useRef(new Animated.Value(visible ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.spring(anim, {
+      toValue: visible ? 0 : 1,
+      damping: 22,
+      mass: 0.9,
+      stiffness: 130,
+      overshootClamping: true,
+      useNativeDriver: Platform.OS !== "web",
+    }).start();
+  }, [visible, anim]);
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 130 + bottomSpace],
+  });
+
+  const opacity = anim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 0.95, 0],
+  });
 
   const showComingSoon = (name: string) => {
     setComingSoonTitle(name);
@@ -42,7 +70,18 @@ export function ServiceBottomNav({
   };
 
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { paddingBottom: bottomSpace }]}>
+    <>
+      <Animated.View
+        pointerEvents={visible ? "box-none" : "none"}
+      style={[
+        styles.wrap,
+        {
+          paddingBottom: bottomSpace,
+          transform: [{ translateY }],
+          opacity,
+        },
+      ]}
+    >
       {/* Blur overlay ONLY below the bottom of the navbar (never above) */}
       <View
         style={[
@@ -78,17 +117,19 @@ export function ServiceBottomNav({
         )}
       </View>
       
-      <View style={styles.floatingContainer}>
+      <View style={[styles.floatingContainer, { width: barWidth }]}>
         <View style={styles.bar}>
           <View style={[StyleSheet.absoluteFill, styles.webFrost]} />
-          <View style={styles.row}>
+          <View style={[styles.row, { gap: slotGap }]}>
             {ITEMS.map((item) => {
               const isActive =
                 item.id === active ||
                 (item.id === "requests" && (active === "job" || active === "jobs" || active === "activity" || active === "requests"));
               if (item.center) {
+                const stackedCenterLabel = slotWidth < 76;
+                const centerLabelFontSize = stackedCenterLabel ? Math.min(labelSize, 10) : labelSize;
                 return (
-                  <View key={item.id} style={[styles.slot, { width: slotWidth }]}>
+                  <View key={item.id} style={[styles.slot, { width: slotWidth, height: stackedCenterLabel ? 76 : 68 }]}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Create Service"
@@ -105,12 +146,21 @@ export function ServiceBottomNav({
                       </View>
                     </Pressable>
                     <Text
-                      style={[styles.label, styles.plusLabel]}
-                      numberOfLines={1}
+                      style={[
+                        ...navLabel,
+                        styles.plusLabel,
+                        {
+                          width: slotWidth,
+                          height: stackedCenterLabel ? 22 : 14,
+                          fontSize: centerLabelFontSize,
+                          lineHeight: stackedCenterLabel ? centerLabelFontSize + 1 : centerLabelFontSize + 3,
+                        },
+                      ]}
+                      numberOfLines={stackedCenterLabel ? 2 : 1}
                       adjustsFontSizeToFit
-                      minimumFontScale={0.8}
+                      minimumFontScale={0.85}
                     >
-                      {item.label}
+                      {stackedCenterLabel ? "Create\nService" : item.label}
                     </Text>
                     <View style={styles.indicatorContainer} />
                   </View>
@@ -172,7 +222,7 @@ export function ServiceBottomNav({
                       </View>
                     )}
                   </View>
-                  <Text style={[styles.label, isActive && styles.labelActive]}>
+                  <Text style={[...navLabel, isActive && styles.labelActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                     {item.label}
                   </Text>
                   <View style={styles.indicatorContainer}>
@@ -184,14 +234,15 @@ export function ServiceBottomNav({
           </View>
         </View>
       </View>
+    </Animated.View>
 
-      <ComingSoonModal
-        visible={comingSoonVisible}
-        title={comingSoonTitle}
-        onClose={() => setComingSoonVisible(false)}
-      />
-    </View>
-  );
+    <ComingSoonModal
+      visible={comingSoonVisible}
+      title={comingSoonTitle}
+      onClose={() => setComingSoonVisible(false)}
+    />
+  </>
+);
 }
 
 function ComingSoonModal({
@@ -265,13 +316,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "center",
-    gap: 4,
+    gap: 0,
   },
   slot: {
     width: 58,
     alignItems: "center",
     justifyContent: "flex-end",
-    height: 64,
+    height: 68,
     paddingBottom: 6,
   },
   iconBox: {
@@ -337,6 +388,9 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: dash.primary,
     fontWeight: "700",
+    textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   bulaoIcon: {
     minWidth: 32,

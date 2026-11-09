@@ -1,23 +1,27 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
-  Image,
   Pressable,
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Modal,
+  Alert,
   useWindowDimensions,
   Platform,
+  RefreshControl,
+  AppState,
+  Vibration,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api/client";
+import { invalidateJobLifecycleQueries } from "../../api/jobLifecycleCache";
 import { getNotificationInbox } from "../../api/notifications";
 import { useAuth } from "../../auth";
 import { useLocation } from "../../store/location";
@@ -27,6 +31,7 @@ import { dash, radii } from "./palette";
 
 import { ProviderStoryHero } from "./ProviderStoryHero";
 import { BulaoWordmark } from "../BulaoWordmark";
+import { JobCompletionConfirmationSheet, CompletionInteraction } from "../JobCompletionConfirmationSheet";
 
 type Period = "week" | "month" | "all";
 
@@ -35,6 +40,7 @@ type ProviderStats = {
   active: number;
   interested: number;
   hired: number;
+  currentHires?: number;
   completed: number;
   pendingResponses?: number;
   trends?: {
@@ -59,19 +65,31 @@ type RecentJob = {
   status: string;
   createdAt?: string | number;
   applicantCount: number;
+  completedCount?: number;
+  workers?: number;
+  remainingWorkers?: number;
 };
 
-function initials(name?: string | null) {
-  return (name || "U")
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+function isCompletedJob(job: RecentJob): boolean {
+  const status = (job.status || "").toUpperCase();
+  if (status === "COMPLETED" || status === "DELETED") return true;
+  const completed = Number(job.completedCount || 0);
+  const workers = Number(job.workers || 0);
+  if (completed > 0 && workers > 0 && completed >= workers) {
+    return true;
+  }
+  return false;
+}
+
+function formatCompletionPay(paise?: number | null, unit?: string | null) {
+  if (!paise || paise < 0) return null;
+  const amount = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(paise / 100);
+  const suffix = unit ? ` / ${unit.toLowerCase()}` : "";
+  return `₹${amount}${suffix}`;
 }
 
 function pagePad(width: number) {
+  if (width < 300) return 12;
   if (width < 360) return 16;
   if (width > 420) return 22;
   return 20;
@@ -79,10 +97,12 @@ function pagePad(width: number) {
 
 function jobPriority(job: RecentJob) {
   const status = (job.status || "").toUpperCase();
-  if (status === "PAUSED") return 0;
-  if ((job.applicantCount || 0) > 0 && status === "PUBLISHED") return 1;
-  if (status === "PUBLISHED") return 2;
-  if (status === "FILLED") return 3;
+  // Keep recently hired jobs at the top of the small home preview so they
+  // remain easy to find for completion and review follow-up.
+  if (status === "FILLED") return 0;
+  if (status === "PAUSED") return 1;
+  if ((job.applicantCount || 0) > 0 && status === "PUBLISHED") return 2;
+  if (status === "PUBLISHED") return 3;
   return 4;
 }
 
@@ -103,6 +123,9 @@ function statusMeta(job: RecentJob) {
   if (status === "COMPLETED") {
     return { label: "Done", color: dash.muted, bg: "#F1F4F2" };
   }
+  if (status === "EXPIRED") {
+    return { label: "Expired", color: dash.muted, bg: "#F1F4F2" };
+  }
   return { label: status || "Open", color: dash.muted, bg: "#F1F4F2" };
 }
 
@@ -121,6 +144,19 @@ function jobThumb(job: RecentJob) {
     return { bg: "#F5F3FF", icon: "book-outline" as const, color: "#6D28D9" };
   }
   return { bg: dash.softGreen, icon: "briefcase-outline" as const, color: dash.primary };
+}
+
+function formatJobDate(timestamp?: string | number) {
+  if (!timestamp) return "Recent";
+  const time =
+    typeof timestamp === "string"
+      ? new Date(timestamp).getTime()
+      : timestamp > 1e11
+      ? timestamp
+      : timestamp * 1000;
+  if (!time || isNaN(time)) return "Recent";
+  const d = new Date(time);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
 function SparkWave({ trend }: { trend: number }) {
@@ -218,8 +254,11 @@ function computeStatTrend(
 
 export default function ProviderDashboard() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const pad = pagePad(width);
+  const compactText = fontScale > 1.25 || width < 300;
+  const twoColumnStats = width < 300 || compactText;
+  const brandSize = width < 320 ? 20 : 23;
 
   const headerHeight = insets.top + 56;
   const heroH = headerHeight + Math.min(width, 440) * 0.63 + 64;
@@ -230,61 +269,200 @@ export default function ProviderDashboard() {
   const [periodOpen, setPeriodOpen] = useState(false);
   const [menuJob, setMenuJob] = useState<RecentJob | null>(null);
   const [headerTint, setHeaderTint] = useState(0);
+  const [navVisible, setNavVisible] = useState(true);
+  const [completionPrompt, setCompletionPrompt] = useState<CompletionInteraction | null>(null);
+  const [completionBusy, setCompletionBusy] = useState(false);
+  const lastScrollY = useRef(0);
+  const scrollAccumulator = useRef(0);
+  const lastDirection = useRef<"up" | "down">("up");
+  const dismissedCompletionIds = useRef(new Set<string>());
 
   const token = auth.session?.token || null;
+  const userId = auth.user?.id || auth.session?.userId || null;
   const client = useQueryClient();
 
+  useEffect(() => {
+    dismissedCompletionIds.current.clear();
+    setCompletionPrompt(null);
+  }, [userId]);
+
+  // AppState awareness: Pause background intervals when app is hidden; immediately sync when resuming
+  const [appActive, setAppActive] = useState(AppState.currentState === "active");
+
   const me = useQuery({
-    queryKey: ["me", token],
+    queryKey: ["me", userId || token],
     enabled: !!token,
     queryFn: () =>
       api<{ id: string; name: string; area: string; photoUrl: string | null }>("/users/me"),
   });
 
   const statsQuery = useQuery<ProviderStats>({
-    queryKey: ["provider-stats", period],
+    queryKey: ["provider-stats", userId, period],
     queryFn: () => api<ProviderStats>(`/jobs/provider/stats?period=${period}`),
-    enabled: !!token,
+    enabled: !!token && !!userId,
+    staleTime: 30000,
   });
 
   const jobsQuery = useQuery<RecentJob[]>({
-    queryKey: ["provider-recent-jobs"],
+    queryKey: ["provider-recent-jobs", userId],
     queryFn: () => api<RecentJob[]>("/jobs/provider/recent"),
-    enabled: !!token,
+    enabled: !!token && !!userId,
+    staleTime: 30000,
   });
 
   const action = useMutation({
-    mutationFn: ({ id, next }: { id: string; next: "pause" | "publish" | "cancel" }) =>
-      api(`/jobs/${id}/action`, { action: next }),
+    mutationFn: ({ id, next }: { id: string; next: "pause" | "publish" | "cancel" | "delete" }) => {
+      if (next === "delete") {
+        return api(`/jobs/${id}`, undefined, "DELETE");
+      }
+      return api(`/jobs/${id}/action`, { action: next });
+    },
     onSuccess: () => {
       setMenuJob(null);
-      void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
-      void client.invalidateQueries({ queryKey: ["provider-stats"] });
-      void client.invalidateQueries({ queryKey: ["activity"] });
+      void invalidateJobLifecycleQueries(client);
     },
   });
 
   const notificationsQuery = useQuery({
-    queryKey: ["provider-notifications", token],
-    queryFn: () => getNotificationInbox("provider"),
-    enabled: !!token,
-    refetchInterval: 30000,
+    queryKey: ["provider-notifications", userId],
+    queryFn: () => getNotificationInbox("provider", "work"),
+    enabled: !!token && !!userId,
+    staleTime: 30000,
   });
-  const { refetch: refreshNotifications } = notificationsQuery;
-  useFocusEffect(useCallback(() => { void refreshNotifications(); }, [refreshNotifications]));
-  const photoUrl = me.data?.photoUrl;
+
+  // The interaction row is authoritative, so stale notification history cannot
+  // reopen a completion or review prompt after its state has changed.
+  const completionActivityQuery = useQuery({
+    queryKey: ["provider-completion-activity", userId],
+    queryFn: () => api<{ interactions: CompletionInteraction[] }>("/applications/completion-pending?role=provider"),
+    enabled: !!token && !!userId,
+    staleTime: 30000,
+  });
+
+  // Auto-sync when app resumes from background
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      const isActive = state === "active";
+      setAppActive(isActive);
+      if (isActive && token && userId) {
+        dismissedCompletionIds.current.clear();
+        void Promise.allSettled([
+          client.invalidateQueries({ queryKey: ["provider-recent-jobs", userId] }),
+          client.invalidateQueries({ queryKey: ["provider-stats", userId] }),
+          client.invalidateQueries({ queryKey: ["provider-notifications", userId] }),
+          client.invalidateQueries({ queryKey: ["provider-completion-activity", userId] }),
+          client.invalidateQueries({ queryKey: ["me"] }),
+        ]);
+      }
+    });
+    return () => sub.remove();
+  }, [token, userId, client]);
+
+  // Auto-refresh queries only once when screen comes into tab focus
+  useFocusEffect(
+    useCallback(() => {
+      if (!token || !userId) return;
+      dismissedCompletionIds.current.clear();
+      void Promise.allSettled([
+        client.invalidateQueries({ queryKey: ["provider-recent-jobs", userId] }),
+        client.invalidateQueries({ queryKey: ["provider-stats", userId] }),
+        client.invalidateQueries({ queryKey: ["provider-notifications", userId] }),
+        client.invalidateQueries({ queryKey: ["provider-completion-activity", userId] }),
+        client.invalidateQueries({ queryKey: ["me"] }),
+      ]);
+    }, [token, userId, client])
+  );
+
+  // Manual pull-to-refresh state and handler (with throttle & haptics)
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    if (refreshing || !token || !userId) return;
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([
+        client.refetchQueries({ queryKey: ["provider-recent-jobs", userId] }),
+        client.refetchQueries({ queryKey: ["provider-stats", userId] }),
+        client.refetchQueries({ queryKey: ["provider-notifications", userId] }),
+        client.refetchQueries({ queryKey: ["provider-completion-activity", userId] }),
+        client.refetchQueries({ queryKey: ["me"] }),
+      ]);
+      dismissedCompletionIds.current.clear();
+      if (Platform.OS === "android") {
+        Vibration.vibrate(20);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, token, userId, client]);
+
+  const pendingCompletionPrompts = useMemo(() => {
+    const unique = new Map<string, CompletionInteraction>();
+    for (const item of completionActivityQuery.data?.interactions || []) {
+      if (item.kind !== "job" || item.ownerId !== userId) continue;
+      const needsConfirmation = item.status === "IN_PROGRESS" && item.workerConfirmedAt != null && item.ownerConfirmedAt == null;
+      const needsReview = item.status === "COMPLETED" && !item.reviewed;
+      if ((needsConfirmation || needsReview) && !unique.has(item.id)) unique.set(item.id, item);
+    }
+    return Array.from(unique.values());
+  }, [completionActivityQuery.data?.interactions, userId]);
+
+  useEffect(() => {
+    if (completionPrompt || completionActivityQuery.isFetching) return;
+    const next = pendingCompletionPrompts.find((item) => !dismissedCompletionIds.current.has(item.id));
+    if (next) setCompletionPrompt(next);
+  }, [completionPrompt, pendingCompletionPrompts, completionActivityQuery.isFetching]);
+
+  const dismissCompletionPrompt = useCallback(() => {
+    if (completionPrompt) dismissedCompletionIds.current.add(completionPrompt.id);
+    setCompletionPrompt(null);
+  }, [completionPrompt]);
+
+  const handleConfirmCompletion = useCallback(async (interaction: CompletionInteraction) => {
+    try {
+      const result = await api<{ status: string }>(`/applications/${encodeURIComponent(interaction.id)}/action`, { action: "confirm" });
+      dismissedCompletionIds.current.add(interaction.id);
+      await Promise.allSettled([
+        invalidateJobLifecycleQueries(client),
+        client.invalidateQueries({ queryKey: ["provider-completion-activity"] }),
+        client.invalidateQueries({ queryKey: ["provider-notifications"] }),
+        client.invalidateQueries({ queryKey: ["connection", interaction.id] }),
+      ]);
+      return result;
+    } catch (error) {
+      const latest = await completionActivityQuery.refetch();
+      const current = latest.data?.interactions.find((item) => item.id === interaction.id);
+      if (current && (current.ownerConfirmedAt != null || current.status === "COMPLETED")) {
+        dismissedCompletionIds.current.add(interaction.id);
+        void client.invalidateQueries({ queryKey: ["provider-notifications"] });
+        return { status: current.status };
+      }
+      throw error;
+    }
+  }, [client, completionActivityQuery]);
+
+
   const unread = !notificationsQuery.isError && (notificationsQuery.data?.unreadCount ?? 0) > 0;
   const jobsPosted = statsQuery.data?.jobsPosted ?? 0;
   const isNewProvider = !jobsQuery.isLoading && (jobsQuery.data?.length ?? 0) === 0 && jobsPosted === 0;
 
   const rankedJobs = useMemo(() => {
-    const list = [...(jobsQuery.data || [])];
+    const list = (jobsQuery.data || []).filter((job) => !isCompletedJob(job));
     list.sort((a, b) => jobPriority(a) - jobPriority(b));
     return list.slice(0, 3);
   }, [jobsQuery.data]);
 
   const contentWidth = Math.min(width, 560);
   const sidePad = Math.max(pad, (width - contentWidth) / 2);
+  const locationLabel = location?.area || "Choose area";
+  const headerRowWidth = width - 2 * sidePad;
+  const locationStart = Math.round(brandSize * 3.4) + 8;
+  const locationEnd = headerRowWidth - 48;
+  const availableLocationWidth = Math.max(84, locationEnd - locationStart);
+  const locationPillWidth = Math.min(
+    availableLocationWidth,
+    Math.min(210, Math.max(96, 84 + Array.from(locationLabel).length * 7)),
+  );
+  const locationPillLeft = locationStart + Math.max(0, (availableLocationWidth - locationPillWidth) / 2);
 
   return (
     <View style={styles.screen}>
@@ -293,10 +471,48 @@ export default function ProviderDashboard() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[dash.primary, dash.secondary]}
+            tintColor={dash.primary}
+            progressBackgroundColor={dash.white}
+            progressViewOffset={headerHeight + 10}
+          />
+        }
         onScroll={(e) => {
           const y = e.nativeEvent.contentOffset.y;
           setHeaderTint(Math.min(1, Math.max(0, y / 90)));
           setHeroVisible(y < heroH - headerHeight);
+
+          // Auto-hide bottom navbar when scrolling down, smooth reveal when scrolling up
+          const clampedY = Math.max(0, y);
+          const delta = clampedY - lastScrollY.current;
+          lastScrollY.current = clampedY;
+
+          if (clampedY < 60) {
+            setNavVisible(true);
+            scrollAccumulator.current = 0;
+          } else if (delta > 0) {
+            if (lastDirection.current !== "down") {
+              lastDirection.current = "down";
+              scrollAccumulator.current = 0;
+            }
+            scrollAccumulator.current += delta;
+            if (scrollAccumulator.current > 38) {
+              setNavVisible(false);
+            }
+          } else if (delta < 0) {
+            if (lastDirection.current !== "up") {
+              lastDirection.current = "up";
+              scrollAccumulator.current = 0;
+            }
+            scrollAccumulator.current += Math.abs(delta);
+            if (scrollAccumulator.current > 22) {
+              setNavVisible(true);
+            }
+          }
         }}
         contentContainerStyle={{
           paddingBottom: 118 + Math.max(insets.bottom, 8),
@@ -315,16 +531,19 @@ export default function ProviderDashboard() {
             error={statsQuery.isError}
             period={period}
             onOpenPeriod={() => setPeriodOpen(true)}
+            compactText={compactText}
+            twoColumnStats={twoColumnStats}
           />
         </View>
 
-        <View style={{ paddingHorizontal: sidePad, marginTop: 26 }}>
+        <View style={[styles.recentJobsSection, { paddingHorizontal: sidePad }]}>
           <RecentJobs
             loading={jobsQuery.isLoading}
             error={jobsQuery.isError}
             jobs={rankedJobs}
             isNewProvider={isNewProvider}
             onOpenMenu={setMenuJob}
+            compactText={compactText}
           />
         </View>
       </ScrollView>
@@ -339,69 +558,39 @@ export default function ProviderDashboard() {
           />
         ) : null}
 
-        <View style={[styles.headerRow, { paddingHorizontal: sidePad }]}>
-          {/* Logo — left side */}
-          <BulaoWordmark
-            size={26}
-            color="#03402D"
-            align="flex-start"
-          />
+        <View style={[styles.headerRow, { marginHorizontal: sidePad }]}>
+          <View style={styles.headerLeft}>
+          <BulaoWordmark size={brandSize} color="#03402D" align="flex-start" />
+          </View>
 
-          {/* Location pill — liquid glass capsule */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Choose service area: ${location?.area || "Choose area"}`}
+            accessibilityHint="Opens the work area selector"
             onPress={() => useLocation.getState().setLocationSheetVisible(true)}
             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-            android_ripple={{ color: "rgba(7, 91, 67, 0.12)", borderless: false }}
-            style={styles.locationPill}
+            android_ripple={{ color: "rgba(7, 91, 67, 0.12)" }}
+            style={[styles.providerLocationPill, { width: locationPillWidth, left: locationPillLeft }]}
           >
-            {/* Liquid Glass: Sheer Backdrop Blur */}
             <BlurView
-              intensity={Platform.OS === "android" ? 25 : 45}
+              intensity={Platform.OS === "android" ? 10 : 20}
               tint="light"
-              style={StyleSheet.absoluteFill}
+              style={styles.providerLocationBlur}
               pointerEvents="none"
             />
-
-            {/* Liquid Glass: Completely Transparent Glass Sheen */}
-            <LinearGradient
-              colors={[
-                "rgba(255, 255, 255, 0.22)",
-                "rgba(255, 255, 255, 0.04)",
-                "rgba(255, 255, 255, 0.08)",
-              ]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
-
-            {/* Liquid Glass: Specular Top Rim Glint */}
-            <LinearGradient
-              colors={["rgba(255, 255, 255, 0.65)", "rgba(255, 255, 255, 0)"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.liquidGlint}
-              pointerEvents="none"
-            />
-
-            <Ionicons name="location-sharp" size={14} color={dash.primary} style={styles.locationPin} />
-            <View style={styles.locationTextContainer}>
-              <Text
-                style={styles.headerLocationText}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {location?.area || "Choose area"}
-              </Text>
+            <View pointerEvents="none" style={styles.providerLocationGlassTint} />
+            <View style={styles.providerLocationPinBadge}>
+              <Ionicons name="location-sharp" size={14} color={dash.primary} />
             </View>
-            <View style={styles.chevronWrapper}>
-              <Ionicons name="chevron-down" size={11} color={dash.primary} style={styles.locationChevron} />
+            <Text style={styles.providerLocationText} numberOfLines={1} ellipsizeMode="tail">
+              {locationLabel}
+            </Text>
+            <View style={styles.providerLocationChevronBadge}>
+              <Ionicons name="chevron-down" size={11} color={dash.primary} />
             </View>
           </Pressable>
 
-          {/* Notification + Profile — pinned to the right corner */}
+          {/* Notifications stay at the right edge; profile lives in the bottom nav. */}
           <View style={styles.headerRight}>
             <Pressable
               accessibilityRole="button"
@@ -412,24 +601,22 @@ export default function ProviderDashboard() {
               <Ionicons name="notifications-outline" size={20} color={dash.ink} />
               {unread ? <View style={styles.unreadDot} /> : null}
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Profile"
-              onPress={() => router.push("/provider-profile")}
-            >
-              {photoUrl ? (
-                <Image source={{ uri: photoUrl }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarText}>{initials(me.data?.name || auth.user?.name)}</Text>
-                </View>
-              )}
-            </Pressable>
           </View>
         </View>
       </View>
 
-      <ProviderBottomNav active="home" />
+      <ProviderBottomNav active="home" visible={navVisible} />
+
+      <JobCompletionConfirmationSheet
+        visible={!!completionPrompt}
+        interaction={completionPrompt}
+        isOwner={true}
+        onClose={dismissCompletionPrompt}
+        onReviewJob={(item) => {
+          if (item.id) router.push(`/requests/${item.id}`);
+        }}
+        onConfirm={handleConfirmCompletion}
+      />
 
       <PeriodSheet
         visible={periodOpen}
@@ -457,32 +644,51 @@ export default function ProviderDashboard() {
         onPause={() => menuJob && action.mutate({ id: menuJob.id, next: "pause" })}
         onResume={() => menuJob && action.mutate({ id: menuJob.id, next: "publish" })}
         onCloseJob={() => menuJob && action.mutate({ id: menuJob.id, next: "cancel" })}
+        onDeleteJob={() => {
+          if (!menuJob) return;
+          const target = menuJob;
+          Alert.alert(
+            "Delete Job?",
+            "This closes the listing and cancels outstanding applications. Completed work, reviews, and lifetime totals stay in your history.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: () => action.mutate({ id: target.id, next: "delete" }),
+              },
+            ]
+          );
+        }}
       />
     </View>
   );
 }
 
 function PostJobCTA() {
+  const compact = useWindowDimensions().width < 360;
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Post a new job"
+      accessibilityHint="Opens the job posting form"
       onPress={() => router.push("/post-work")}
       style={({ pressed }) => [
         styles.ctaOuter,
-        { transform: [{ scale: pressed ? 0.97 : 1 }] },
+        { transform: [{ scale: pressed ? 0.985 : 1 }] },
       ]}
     >
-      <View style={styles.cta}>
-        <View style={styles.ctaIcon}>
-          <Ionicons name="paper-plane-outline" size={24} color="#FFFFFF" />
+      <View style={[styles.cta, compact && styles.ctaCompact]}>
+        <View style={[styles.ctaIcon, compact && styles.ctaIconCompact]}>
+          <Ionicons name="paper-plane-outline" size={compact ? 21 : 23} color="#FFFFFF" />
         </View>
-        <View style={styles.ctaTextWrap}>
-          <Text style={styles.ctaTitle}>Post a New Job</Text>
-          <Text style={styles.ctaSub}>It takes less than 2 minutes</Text>
+        <View style={[styles.ctaTextWrap, compact && styles.ctaTextWrapCompact]}>
+          <Text style={styles.ctaTitle} adjustsFontSizeToFit minimumFontScale={0.85}>Post a New Job</Text>
+          <Text style={styles.ctaSub} adjustsFontSizeToFit minimumFontScale={0.8}>It takes less than 2 minutes</Text>
         </View>
-        <View style={styles.ctaArrow}>
-          <Ionicons name="arrow-forward" size={20} color="#03402D" />
+        <View style={[styles.ctaArrow, compact && styles.ctaArrowCompact]}>
+          <Ionicons name="arrow-forward" size={19} color="#03402D" />
         </View>
       </View>
     </Pressable>
@@ -495,12 +701,16 @@ function OverviewSection({
   error,
   period,
   onOpenPeriod,
+  compactText,
+  twoColumnStats,
 }: {
   stats?: ProviderStats;
   loading: boolean;
   error: boolean;
   period: Period;
   onOpenPeriod: () => void;
+  compactText: boolean;
+  twoColumnStats: boolean;
 }) {
   const periodLabel = period === "week" ? "This Week" : period === "all" ? "All time" : "This Month";
   const cards = [
@@ -508,67 +718,67 @@ function OverviewSection({
       key: "posted" as const,
       label: "Active Jobs",
       value: stats?.active ?? 0,
-      bg: "#F2FDF5",
-      borderColor: "#DCFCE7",
+      bg: "#F0F7F2",
+      borderColor: "#DCEBE0",
       iconBg: "#FFFFFF",
-      haloColor: "#10B981",
+      haloColor: "#087653",
       icon: "document-text" as const,
-      iconColor: "#059669",
+      iconColor: "#087653",
       filter: "active",
     },
     {
       key: "responses" as const,
       label: "Responses",
       value: stats?.interested ?? 0,
-      bg: "#F0F6FF",
-      borderColor: "#DBEAFE",
+      bg: "#F0F7F2",
+      borderColor: "#DCEBE0",
       iconBg: "#FFFFFF",
-      haloColor: "#3B82F6",
+      haloColor: "#087653",
       icon: "people" as const,
-      iconColor: "#2563EB",
+      iconColor: "#087653",
       filter: "interested",
     },
     {
       key: "hired" as const,
       label: "Hired",
       value: stats?.hired ?? 0,
-      bg: "#FFFDF0",
-      borderColor: "#FEF3C7",
+      bg: "#F0F7F2",
+      borderColor: "#DCEBE0",
       iconBg: "#FFFFFF",
-      haloColor: "#F59E0B",
+      haloColor: "#087653",
       icon: "person" as const,
-      iconColor: "#D97706",
+      iconColor: "#087653",
       filter: "hired",
     },
     {
       key: "completed" as const,
       label: "Completed",
       value: stats?.completed ?? 0,
-      bg: "#FFF1F2",
-      borderColor: "#FFE4E6",
-      iconBg: "#EF4444",
-      haloColor: "#EF4444",
+      bg: "#F0F7F2",
+      borderColor: "#DCEBE0",
+      iconBg: "#FFFFFF",
+      haloColor: "#087653",
       icon: "checkmark" as const,
-      iconColor: "#FFFFFF",
+      iconColor: "#087653",
       filter: "completed",
     },
   ];
 
   return (
     <View>
-      <View style={styles.sectionHead}>
-        <View>
-          <View style={styles.titleRow}>
-            <Text style={styles.sectionTitle}>Overview</Text>
-            <View style={styles.sparkleIcon}>
-              <Ionicons name="sparkles" size={15} color="#10B981" />
-            </View>
-          </View>
-          <Text style={styles.sectionSubtitle}>Your activity at a glance</Text>
+      <View style={[styles.sectionHead, compactText && styles.sectionHeadCompact]}>
+        <View style={styles.titleRow}>
+          <Text style={styles.sectionTitle}>Overview</Text>
         </View>
-        <Pressable onPress={onOpenPeriod} style={styles.periodBtn} accessibilityRole="button">
+        <Pressable
+          onPress={onOpenPeriod}
+          style={styles.periodBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`Overview period: ${periodLabel}`}
+          accessibilityHint="Choose which period to show"
+        >
           <Text style={styles.periodText}>{periodLabel}</Text>
-          <Ionicons name="chevron-down" size={14} color={dash.muted} />
+          <Ionicons name="chevron-down" size={13} color={dash.muted} />
         </Pressable>
       </View>
 
@@ -578,9 +788,9 @@ function OverviewSection({
           <Text style={styles.errorText}>Couldn't load overview</Text>
         </View>
       ) : loading ? (
-        <View style={styles.statsRow}>
+        <View style={[styles.statsRow, twoColumnStats && styles.statsRowAccessible]}>
           {[0, 1, 2, 3].map((i) => (
-            <View key={i} style={[styles.statCard, { backgroundColor: dash.white, borderColor: dash.border }]}>
+            <View key={i} style={[styles.statCard, twoColumnStats && styles.statCardAccessible, { backgroundColor: dash.white, borderColor: dash.border }]}>
               <View style={[styles.iconBadge, { backgroundColor: "#F3F4F6", borderColor: "#FFFFFF" }]}>
                 <Skeleton width={16} height={16} borderRadius={8} />
               </View>
@@ -590,13 +800,14 @@ function OverviewSection({
           ))}
         </View>
       ) : (
-        <View style={styles.statsRow}>
+        <View style={[styles.statsRow, twoColumnStats && styles.statsRowAccessible]}>
           {cards.map((card) => {
             return (
               <View
                 key={card.key}
                 style={[
                   styles.statCard,
+                  twoColumnStats && styles.statCardAccessible,
                   {
                     backgroundColor: card.bg,
                     borderColor: card.borderColor,
@@ -609,7 +820,7 @@ function OverviewSection({
                     styles.iconBadge,
                     {
                       backgroundColor: card.iconBg,
-                      borderColor: card.iconBg === "#EF4444" ? "#FFE4E6" : "#FFFFFF",
+                      borderColor: "#FFFFFF",
                       shadowColor: card.haloColor,
                     },
                   ]}
@@ -619,6 +830,7 @@ function OverviewSection({
 
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel={`${card.value} ${card.label}`}
                   onPress={() => router.push(`/activity?filter=${card.filter}`)}
                   style={({ pressed }) => [
                     styles.statCardInner,
@@ -629,7 +841,7 @@ function OverviewSection({
                   <Text style={styles.statValue}>{card.value}</Text>
 
                   {/* Label */}
-                  <Text style={styles.statLabel} numberOfLines={1}>
+                  <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
                     {card.label}
                   </Text>
                 </Pressable>
@@ -648,34 +860,47 @@ function RecentJobs({
   jobs,
   isNewProvider,
   onOpenMenu,
+  compactText,
 }: {
   loading: boolean;
   error: boolean;
   jobs: RecentJob[];
   isNewProvider: boolean;
   onOpenMenu: (job: RecentJob) => void;
+  compactText: boolean;
 }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 360;
+  const wrapMeta = compact || compactText;
+  const titleFontSize = Math.max(13, Math.min(15, width / 28));
+
   return (
-    <View>
-      <View style={styles.sectionHead}>
+    <View style={styles.recentJobsContainer}>
+      <View style={[styles.sectionHead, compactText && styles.sectionHeadCompact]}>
         <Text style={styles.sectionTitle}>Recent Jobs</Text>
-        <Pressable onPress={() => router.push({ pathname: "/activity", params: { type: "job" } })} style={styles.seeAll} accessibilityRole="button">
+        <Pressable onPress={() => router.push({ pathname: "/activity", params: { type: "job" } })} style={styles.seeAll} accessibilityRole="button" hitSlop={8}>
           <Text style={styles.seeAllText}>See all</Text>
           <Ionicons name="arrow-forward" size={14} color={dash.primary} />
         </Pressable>
       </View>
 
       {loading ? (
-        <View style={{ gap: 10 }}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={styles.jobCard}>
-              <View style={styles.jobCardInner}>
-                <Skeleton width={44} height={44} borderRadius={12} />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <Skeleton width="75%" height={14} borderRadius={4} />
-                  <Skeleton width="55%" height={11} borderRadius={4} />
+        <View style={styles.jobList}>
+          {[0, 1].map((i) => (
+            <View key={i} style={[styles.jobCard, compact && styles.jobCardCompact]}>
+              <View style={styles.jobHeaderRow}>
+                <View style={[styles.jobIdentity, compact && styles.jobIdentityCompact]}>
+                  <Skeleton width={48} height={48} borderRadius={15} />
                 </View>
-                <Skeleton width={32} height={32} borderRadius={8} />
+                <View style={styles.centerDetails}>
+                  <Skeleton width="94%" height={36} borderRadius={5} />
+                </View>
+                <Skeleton width={20} height={20} borderRadius={10} />
+              </View>
+              <View style={styles.jobMetaGrid}>
+                <Skeleton width="40%" height={24} borderRadius={9} />
+                <Skeleton width="22%" height={24} borderRadius={9} />
+                <Skeleton width="32%" height={24} borderRadius={9} />
               </View>
             </View>
           ))}
@@ -691,10 +916,12 @@ function RecentJobs({
             <Ionicons name="leaf-outline" size={26} color={dash.primary} />
           </View>
           <Text style={styles.emptyTitle}>
-            {isNewProvider ? "Your work starts here." : "No jobs to show yet."}
+            {isNewProvider ? "Your work starts here." : "No active jobs."}
           </Text>
           <Text style={styles.emptyCopy}>
-            Post your first job and{"\n"}find trusted people nearby.
+            {isNewProvider
+              ? "Post your first job and find trusted people nearby."
+              : "All previous jobs are completed. Post a new job whenever you need help."}
           </Text>
           <Pressable onPress={() => router.push("/post-work")} style={styles.emptyCta}>
             <Ionicons name="add" size={18} color={dash.white} />
@@ -702,9 +929,9 @@ function RecentJobs({
           </Pressable>
         </View>
       ) : (
-        <View style={{ gap: 10 }}>
+        <View style={styles.jobList}>
           {jobs.map((job) => (
-            <JobRow key={job.id} job={job} onMenu={() => onOpenMenu(job)} />
+            <JobRow key={job.id} job={job} compact={compact} wrapMeta={wrapMeta} titleFontSize={titleFontSize} onMenu={() => onOpenMenu(job)} />
           ))}
         </View>
       )}
@@ -712,79 +939,65 @@ function RecentJobs({
   );
 }
 
-function JobRow({ job, onMenu }: { job: RecentJob; onMenu: () => void }) {
-  const meta = statusMeta(job);
+function JobRow({ job, compact, wrapMeta, titleFontSize, onMenu }: { job: RecentJob; compact: boolean; wrapMeta: boolean; titleFontSize: number; onMenu: () => void }) {
   const thumb = jobThumb(job);
-  const area = (job.area || "Nearby").split(",")[0];
+  const area = (job.area || "Himayathnagar").split(",")[0]?.trim() || "Himayathnagar";
   const applications = job.applicantCount ?? 0;
+  const dateStr = formatJobDate(job.createdAt);
+  const categoryTitle = job.categoryName || "General";
 
   // Smart icon selection: Role icon > Category icon > Fallback
-  const displayIcon = job.roleIcon || job.categoryIcon || "💼";
+  const displayIcon = job.roleIcon || job.categoryIcon || "🏫";
+
+  const status = statusMeta(job);
+  const isActive = (job.status || "").toUpperCase() === "PUBLISHED";
 
   return (
     <Pressable
       accessibilityRole="button"
       onPress={() => router.push(`/jobs/${job.id}`)}
-      style={({ pressed }) => [
-        styles.jobCard,
-        { 
-          opacity: pressed ? 0.7 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
-        }
-      ]}
+      onLongPress={onMenu}
+      accessibilityLabel={`${job.title}, ${categoryTitle}, ${area}, posted ${dateStr}, ${applications} ${applications === 1 ? "application" : "applications"}`}
+      style={styles.jobPressable}
     >
-      <View style={styles.jobCardInner}>
-        {/* Icon + Content */}
-        <View style={styles.jobRow}>
-          {/* Role/Category Icon */}
-          <View style={[styles.jobIcon, { backgroundColor: thumb.bg }]}>
-            <Text style={styles.jobIconEmoji}>{displayIcon}</Text>
-          </View>
-          
-          <View style={styles.jobContent}>
-            {/* Title + Status */}
-            <View style={styles.jobHeader}>
-              <Text style={styles.jobTitleNew} numberOfLines={1}>
-                {job.title}
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: meta.bg, borderColor: meta.color }]}>
-                <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
-              </View>
+      <View style={[styles.jobCard, compact && styles.jobCardCompact]}>
+        <View style={styles.jobHeaderRow}>
+          <View style={[styles.jobIdentity, compact && styles.jobIdentityCompact]}>
+            <View style={[styles.iconBox, { backgroundColor: thumb.bg }]}>
+              {job.roleIcon || job.categoryIcon ? (
+                <Text style={styles.iconEmoji}>{displayIcon}</Text>
+              ) : (
+                <Ionicons name={thumb.icon} size={24} color={thumb.color} />
+              )}
             </View>
+          </View>
 
-            {/* Location + Applications */}
-            <View style={styles.jobFooter}>
-              <View style={styles.locationTag}>
-                <Ionicons name="location" size={11} color={dash.secondary} />
-                <Text style={styles.locationText} numberOfLines={1}>{area}</Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.applicationsTag}>
-                <Ionicons 
-                  name={applications > 0 ? "people" : "people-outline"} 
-                  size={11} 
-                  color={applications > 0 ? dash.primary : dash.muted} 
-                />
-                <Text style={[styles.applicationsText, applications > 0 && { color: dash.primary, fontWeight: "700" }]}>
-                  {applications}
-                </Text>
-              </View>
+          <View style={styles.centerDetails}>
+            <View style={styles.jobTitleRow}>
+              <Text style={[styles.jobTitle, { fontSize: titleFontSize, lineHeight: Math.round(titleFontSize * 1.35) }]}>{job.title}</Text>
             </View>
           </View>
+
+          <Ionicons name="arrow-forward" size={20} color="#10563F" style={styles.jobArrow} />
         </View>
 
-        {/* Vertical Menu Button */}
-        <Pressable
-          accessibilityRole="button"
-          onPress={(e) => {
-            e.stopPropagation();
-            onMenu();
-          }}
-          style={styles.menuBtnNew}
-          hitSlop={8}
-        >
-          <Ionicons name="ellipsis-vertical" size={16} color={dash.muted} />
-        </Pressable>
+        <View style={[styles.jobMetaGrid, wrapMeta && styles.jobMetaGridCompact]}>
+          <View style={[styles.metaCell, styles.metaLocation, wrapMeta && styles.metaLocationCompact]}>
+            <Ionicons name="location-sharp" size={14} color="#737D76" />
+            <Text style={[styles.metaAreaText, compact && styles.metaTextCompact]} numberOfLines={1} ellipsizeMode="tail" adjustsFontSizeToFit minimumFontScale={0.8}>{area}</Text>
+          </View>
+          <View style={[styles.metaCell, styles.metaDate]}>
+            <Ionicons name="calendar-outline" size={14} color="#737D76" />
+            <Text style={[styles.metaDateText, compact && styles.metaTextCompact]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{dateStr}</Text>
+          </View>
+
+          <View style={[styles.metaCell, styles.applicationMeta, compact && styles.applicationMetaCompact]}>
+            <Ionicons name="people-outline" size={14} color="#10563F" />
+            <Text style={[styles.applicationMetaText, compact && styles.applicationMetaTextCompact]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+              {applications} {applications === 1 ? "Application" : "Applications"}
+            </Text>
+          </View>
+        </View>
       </View>
     </Pressable>
   );
@@ -802,7 +1015,7 @@ function PeriodSheet({
   onSelect: (period: Period) => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <Text style={styles.sheetTitle}>Overview period</Text>
@@ -839,6 +1052,7 @@ function JobMenu({
   onPause,
   onResume,
   onCloseJob,
+  onDeleteJob,
 }: {
   job: RecentJob | null;
   busy: boolean;
@@ -848,10 +1062,11 @@ function JobMenu({
   onPause: () => void;
   onResume: () => void;
   onCloseJob: () => void;
+  onDeleteJob: () => void;
 }) {
   const status = (job?.status || "").toUpperCase();
   return (
-    <Modal visible={!!job} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={!!job} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <Text style={styles.sheetTitle} numberOfLines={1}>
@@ -866,8 +1081,9 @@ function JobMenu({
             <MenuRow icon="play-circle-outline" label="Resume Job" onPress={onResume} disabled={busy} />
           ) : null}
           {status === "PUBLISHED" || status === "PAUSED" || status === "FILLED" ? (
-            <MenuRow icon="close-circle-outline" label="Close Job" onPress={onCloseJob} danger disabled={busy} />
+            <MenuRow icon="close-circle-outline" label="Close Job" onPress={onCloseJob} disabled={busy} />
           ) : null}
+          <MenuRow icon="trash-outline" label="Delete Job" onPress={onDeleteJob} danger disabled={busy} />
         </Pressable>
       </Pressable>
     </Modal>
@@ -916,9 +1132,57 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   headerRow: {
-    flexDirection: "row",
+    position: "relative",
+    height: 44,
     alignItems: "center",
-    gap: 10,
+  },
+  headerLeft: { position: "absolute", left: 0, top: 0, bottom: 0, justifyContent: "center", zIndex: 2 },
+  providerLocationPill: {
+    position: "absolute",
+    left: "50%",
+    top: 2,
+    zIndex: 1,
+    height: 40,
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    paddingHorizontal: 11,
+    gap: 7,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1.35,
+    borderColor: "rgba(255, 255, 255, 0.42)",
+  },
+  providerLocationBlur: { ...StyleSheet.absoluteFillObject, borderRadius: 20 },
+  providerLocationGlassTint: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+  },
+  providerLocationPinBadge: {
+    width: 24,
+    height: 24,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  providerLocationText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12.5,
+    lineHeight: 16,
+    fontWeight: "800",
+    color: "#123A2B",
+    includeFontPadding: false,
+  },
+  providerLocationChevronBadge: {
+    width: 21,
+    height: 21,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 11,
   },
   logo: {
     fontSize: 28,
@@ -934,66 +1198,15 @@ const styles = StyleSheet.create({
     color: "#03402D",
     letterSpacing: 0.2,
   },
-  locationPill: {
-    flex: 1,
-    maxWidth: 195,
-    minWidth: 0,
-    height: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingLeft: 12,
-    paddingRight: 10,
-    borderRadius: radii.pill,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1.2,
-    borderColor: "rgba(255, 255, 255, 0.55)",
-    borderTopColor: "rgba(255, 255, 255, 0.8)",
-    borderBottomColor: "rgba(255, 255, 255, 0.3)",
-    overflow: "hidden",
-  },
-  liquidGlint: {
+  headerRight: {
     position: "absolute",
     top: 0,
-    left: 10,
-    right: 10,
-    height: 1.5,
-    borderRadius: 1,
-  },
-  locationPin: {
-    flexShrink: 0,
-  },
-  locationTextContainer: {
-    flex: 1,
-    minWidth: 0,
-    justifyContent: "center",
-    marginHorizontal: 6,
-  },
-  headerLocationText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#0F2E23",
-    letterSpacing: -0.2,
-    includeFontPadding: false,
-    textAlignVertical: "center",
-  },
-  chevronWrapper: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(7, 91, 67, 0.06)",
-    flexShrink: 0,
-  },
-  locationChevron: {
-    flexShrink: 0,
-  },
-  headerRight: {
+    right: 0,
+    bottom: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginLeft: "auto", // always pinned to the far right corner
+    zIndex: 2,
   },
   iconBtn: {
     width: 40,
@@ -1016,30 +1229,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#fff",
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.9)",
-  },
-  avatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: dash.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.9)",
-  },
-  avatarText: {
-    color: dash.white,
-    fontWeight: "800",
-    fontSize: 13,
-  },
   ctaOuter: {
     alignSelf: "center",
+    maxWidth: "100%",
     borderRadius: 999,
     padding: 3.5,
     backgroundColor: "rgba(255, 255, 255, 0.45)",
@@ -1068,20 +1260,38 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  ctaCompact: {
+    paddingVertical: 6,
+    paddingHorizontal: 7,
+  },
+  ctaIconCompact: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+  },
   ctaTextWrap: {
+    minWidth: 0,
+    flexShrink: 1,
     marginHorizontal: 14,
+  },
+  ctaTextWrapCompact: {
+    marginHorizontal: 10,
   },
   ctaTitle: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: "800",
-    letterSpacing: -0.3,
+    letterSpacing: -0.25,
+    flexShrink: 1,
   },
   ctaSub: {
-    marginTop: 2,
-    color: "rgba(255, 255, 255, 0.85)",
-    fontSize: 12,
-    fontWeight: "400",
+    marginTop: 1,
+    color: "rgba(255, 255, 255, 0.82)",
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "500",
+    flexShrink: 1,
   },
   ctaArrow: {
     width: 42,
@@ -1092,11 +1302,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: 4,
   },
+  ctaArrowCompact: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
   sectionHead: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  sectionHeadCompact: {
+    flexWrap: "wrap",
+    rowGap: 8,
   },
   titleRow: {
     flexDirection: "row",
@@ -1104,58 +1323,63 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   sectionTitle: {
-    fontSize: 22,
-    fontWeight: "900",
+    fontSize: 20,
+    fontWeight: "700",
     color: "#0B3524",
-    letterSpacing: -0.4,
-  },
-  sparkleIcon: {
-    transform: [{ rotate: "12deg" }],
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#64748B",
-    marginTop: 2,
+    letterSpacing: -0.35,
+    lineHeight: 26,
+    includeFontPadding: false,
   },
   periodBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: radii.pill,
-    backgroundColor: dash.white,
+    backgroundColor: "#F4F8F5",
     borderWidth: 1,
-    borderColor: dash.border,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    borderColor: "#DFEAE2",
   },
   periodText: {
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: "700",
-    color: dash.ink,
+    color: "#234536",
   },
   statsRow: {
     flexDirection: "row",
     gap: 8,
-    marginTop: 14,
+    marginTop: 8,
     overflow: "visible",
+  },
+  statsRowAccessible: {
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 12,
   },
   statCard: {
     flex: 1,
     minWidth: 0,
-    borderRadius: 18,
-    borderWidth: 1.5,
+    borderRadius: 17,
+    borderWidth: 1,
     overflow: "visible",
     paddingTop: 22,
-    paddingBottom: 12,
-    paddingHorizontal: 8,
+    paddingBottom: 11,
+    paddingHorizontal: 9,
     minHeight: 88,
     justifyContent: "center",
+    shadowColor: "#123D2D",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.045,
+    shadowRadius: 5,
+    elevation: 1,
+  },
+  statCardAccessible: {
+    flexBasis: "47%",
+    flexGrow: 0,
+    minHeight: 96,
+    paddingHorizontal: 12,
   },
   statCardInner: {
     flex: 1,
@@ -1178,18 +1402,20 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   statValue: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#111827",
-    letterSpacing: -0.5,
-    lineHeight: 26,
+    fontSize: 23,
+    fontWeight: "800",
+    color: "#10291F",
+    letterSpacing: -0.55,
+    lineHeight: 27,
+    includeFontPadding: false,
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     color: "#4B5563",
-    marginTop: 2,
-    lineHeight: 14,
+    marginTop: 3,
+    lineHeight: 13,
+    includeFontPadding: false,
   },
   seeAll: {
     flexDirection: "row",
@@ -1198,125 +1424,178 @@ const styles = StyleSheet.create({
   },
   seeAllText: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
     color: dash.primary,
   },
-  jobCard: {
-    borderRadius: 16,
-    backgroundColor: dash.white,
-    borderWidth: 2,
-    borderColor: "#E8F5F0",
-    shadowColor: dash.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-    overflow: "hidden",
+  recentJobsSection: {
+    marginTop: 20,
+    marginBottom: 20,
   },
-  jobCardInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
+  recentJobsContainer: {
+    width: "100%",
+  },
+  jobList: {
     gap: 12,
   },
-  jobRow: {
-    flex: 1,
+  jobPressable: {
+    width: "100%",
+    alignSelf: "stretch",
+  },
+  jobCard: {
+    width: "100%",
+    alignSelf: "stretch",
+    minHeight: 96,
+    flexDirection: "column",
+    alignItems: "stretch",
+    justifyContent: "center",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E4EBE6",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 9,
+    shadowColor: "#173D2D",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.045,
+    shadowRadius: 7,
+    elevation: 1,
+  },
+  jobCardCompact: {
+    paddingHorizontal: 8,
+    gap: 4,
+  },
+  jobHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
-    minWidth: 0,
-  },
-  jobIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.8)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  jobIconEmoji: {
-    fontSize: 22,
-    lineHeight: 28,
-  },
-  jobContent: {
-    flex: 1,
     minWidth: 0,
     gap: 6,
   },
-  jobHeader: {
-    flexDirection: "row",
+  jobIdentity: {
+    width: 56,
+    flexShrink: 0,
     alignItems: "center",
-    gap: 7,
+    justifyContent: "center",
+    gap: 0,
   },
-  jobTitleNew: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "700",
-    color: dash.ink,
-    letterSpacing: -0.15,
+  jobIdentityCompact: {
+    width: 52,
   },
-  statusBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2.5,
-    borderRadius: 6,
-    borderWidth: 0.5,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
-  },
-  jobFooter: {
-    flexDirection: "row",
+  iconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
-    gap: 7,
+    justifyContent: "center",
+    flexShrink: 0,
   },
-  locationTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
+  iconEmoji: {
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  centerDetails: {
     flex: 1,
     minWidth: 0,
+    justifyContent: "center",
+    gap: 5,
   },
-  locationText: {
-    flex: 1,
-    fontSize: 11,
-    lineHeight: 15,
-    color: dash.muted,
-    fontWeight: "500",
+  jobTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 5,
+    minWidth: 0,
   },
-  divider: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: dash.border,
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 6,
+    flexShrink: 0,
   },
-  applicationsTag: {
+  jobMetaGrid: {
+    width: "100%",
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
   },
-  applicationsText: {
-    fontSize: 11,
-    lineHeight: 15,
-    color: dash.muted,
-    fontWeight: "600",
+  jobMetaGridCompact: {
+    flexWrap: "wrap",
+    justifyContent: "space-between",
   },
-  menuBtnNew: {
-    width: 32,
-    height: 32,
+  metaCell: {
+    minHeight: 26,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    backgroundColor: "rgba(0,0,0,0.03)",
+    minWidth: 0,
+    gap: 5,
+    borderWidth: 1,
+    borderColor: "#E8EEE9",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 6,
+  },
+  metaLocation: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metaLocationCompact: {
+    flexBasis: "100%",
+  },
+  metaDate: {
+    flexShrink: 0,
+  },
+  applicationMeta: {
+    flexShrink: 0,
+    backgroundColor: "#EAF4EE",
+    borderColor: "#D9E9DF",
+  },
+  applicationMetaCompact: {
+    gap: 3,
+    paddingHorizontal: 4,
+  },
+  applicationMetaText: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "600",
+    color: "#10563F",
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  applicationMetaTextCompact: {
+    fontSize: 9.5,
+  },
+  jobArrow: {
+    flexShrink: 0,
+    alignSelf: "center",
+  },
+  metaAreaText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#737D76",
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  metaDateText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#737D76",
+    flexShrink: 0,
+  },
+  metaTextCompact: {
+    fontSize: 10,
+  },
+  jobTitle: {
+    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    width: 0,
+    minWidth: 0,
+    fontWeight: "700",
+    color: "#1D3028",
+    letterSpacing: -0.15,
+    includeFontPadding: false,
   },
   emptyCard: {
     backgroundColor: dash.white,
@@ -1348,6 +1627,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: dash.muted,
     textAlign: "center",
+    maxWidth: 260,
   },
   emptyCta: {
     marginTop: 16,
@@ -1390,6 +1670,11 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 28,
     gap: 4,
+    shadowColor: "#173A2D",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 18,
   },
   sheetTitle: {
     fontSize: 16,

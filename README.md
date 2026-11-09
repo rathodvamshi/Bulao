@@ -227,18 +227,19 @@ wrangler d1 create bulao-dev
 pnpm db:migrate
 ```
 
-### Generate New Migration
+### Add a New D1 Migration
 
 ```bash
 cd backend
 
-# 1. Update schema in src/db/schema.ts
-# 2. Generate migration
-pnpm db:generate
-
-# 3. Apply migration
+# 1. Update src/db/schema.ts for query typing
+# 2. Add the next numbered, reviewed SQL migration under migrations/
+# 3. Replay the migration set against an in-memory SQLite database before deployment
+# 4. Apply pending migrations to staging
 pnpm db:migrate
 ```
+
+The D1 migration history is maintained as ordered SQL files. Do not generate migrations from the stale Drizzle snapshot journal; it does not represent the full D1 history.
 
 ### Query Database
 

@@ -1,15 +1,15 @@
-import { useMemo, useRef } from "react";
+import { AppImage as Image } from '../src/components/AppImage';
+import { useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   ScrollView,
   RefreshControl,
   Pressable,
   Animated,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -34,6 +34,9 @@ type ProviderStatsResponse = {
   interested: number;
   hired: number;
   completed: number;
+  acceptedJobs?: number;
+  currentHires?: number;
+  activeJobsPosted?: number;
 };
 
 type ProfileDetailResponse = {
@@ -52,6 +55,10 @@ type ProfileDetailResponse = {
   stars2?: number;
   stars1?: number;
   completed: number;
+  jobsPosted?: number;
+  activeJobsPosted?: number;
+  acceptedJobs?: number;
+  currentHires?: number;
   reviews: {
     id?: string;
     stars: number;
@@ -77,6 +84,7 @@ export default function ProviderProfileScreen() {
   const auth = useAuth();
   const insets = useSafeAreaInsets();
   const token = auth.session?.token || null;
+  const userId = auth.user?.id || auth.session?.userId || null;
   const client = useQueryClient();
   const scrollViewRef = useRef<any>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -119,30 +127,32 @@ export default function ProviderProfileScreen() {
 
   // 1. User Identity Query
   const meQuery = useQuery<CommonProfileData>({
-    queryKey: ["me", token],
+    queryKey: ["me", userId || token],
     enabled: !!token,
-    staleTime: 60 * 1000,
-    placeholderData: (prev) => prev,
     queryFn: () => api<CommonProfileData>("/users/me"),
   });
 
   // 2. Provider Stats Query
   const statsQuery = useQuery<ProviderStatsResponse>({
-    queryKey: ["provider-stats", "all"],
-    enabled: !!token,
-    staleTime: 60 * 1000,
-    placeholderData: (prev) => prev,
+    queryKey: ["provider-stats", userId, "all"],
+    enabled: !!token && !!userId,
     queryFn: () => api<ProviderStatsResponse>("/jobs/provider/stats?period=all"),
   });
 
   // 3. User Reputation & Reviews Query
   const profileDetailQuery = useQuery<ProfileDetailResponse>({
-    queryKey: ["profiles", meQuery.data?.id],
-    enabled: !!token && !!meQuery.data?.id,
-    staleTime: 60 * 1000,
-    placeholderData: (prev) => prev,
-    queryFn: () => api<ProfileDetailResponse>(`/profiles/${meQuery.data!.id}`),
+    queryKey: ["profiles", userId || meQuery.data?.id, "provider"],
+    enabled: !!token && !!(userId || meQuery.data?.id),
+    queryFn: () => api<ProfileDetailResponse>(`/profiles/${userId || meQuery.data!.id}?role=provider`),
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      if (meQuery.data?.id) {
+        void client.invalidateQueries({ queryKey: ["profiles", meQuery.data.id, "provider"] });
+      }
+    }, [meQuery.data?.id, client]),
+  );
 
   const isRefreshing = meQuery.isRefetching || statsQuery.isRefetching;
   const onRefresh = () => {
@@ -168,8 +178,11 @@ export default function ProviderProfileScreen() {
     const isPhoneVerified = Boolean(
       detail?.phoneVerified ?? meQuery.data?.phoneVerified,
     );
-    const completedCount = stats?.completed ?? detail?.completed ?? 0;
-    const ratingValue = detail?.rating ?? 5.0;
+    const jobsPosted = detail?.jobsPosted ?? stats?.jobsPosted ?? 0;
+    const active = detail?.activeJobsPosted ?? stats?.active ?? 0;
+    const hired = detail?.acceptedJobs ?? stats?.acceptedJobs ?? stats?.hired ?? 0;
+    const completedCount = detail?.completed ?? stats?.completed ?? 0;
+    const ratingValue = detail?.rating ?? null;
 
     const badges = [];
     if (isPhoneVerified) {
@@ -188,7 +201,7 @@ export default function ProviderProfileScreen() {
         icon: "⚡",
       });
     }
-    if (ratingValue && ratingValue >= 4.5) {
+    if (totalRev > 0 && ratingValue !== null && ratingValue >= 4.5) {
       badges.push({
         id: "b3",
         title: "Top Employer",
@@ -206,10 +219,11 @@ export default function ProviderProfileScreen() {
     }
 
     return {
-      jobsPosted: stats?.jobsPosted ?? 0,
-      active: stats?.active ?? 0,
+      jobsPosted,
+      active,
       interested: stats?.interested ?? 0,
-      hired: stats?.hired ?? 0,
+      hired,
+      currentHires: detail?.currentHires ?? stats?.currentHires ?? 0,
       completed: completedCount,
       rating: ratingValue,
       totalReviews: totalRev,
@@ -220,15 +234,7 @@ export default function ProviderProfileScreen() {
         stars2: detail?.stars2 ?? 0,
         stars1: detail?.stars1 ?? 0,
       },
-      feedbackTags:
-        totalRev > 0
-          ? [
-              { id: "1", label: "Prompt Payer", icon: "⚡", percentage: 99 },
-              { id: "2", label: "Safe Worksite", icon: "🛡️", percentage: 98 },
-              { id: "3", label: "Clear Tasks", icon: "📋", percentage: 97 },
-              { id: "4", label: "Respectful", icon: "🤝", percentage: 96 },
-            ]
-          : [],
+      feedbackTags: [],
       badges,
       reviews: revs,
     };
@@ -289,7 +295,7 @@ export default function ProviderProfileScreen() {
     phoneVerified: meQuery.data?.phoneVerified ?? profileDetailQuery.data?.phoneVerified ?? 1,
     photoUrl: meQuery.data?.photoUrl || null,
     createdAt: meQuery.data?.createdAt,
-    rating: profileDetailQuery.data?.rating ?? 5.0,
+    rating: profileDetailQuery.data?.rating ?? null,
   };
 
   return (
@@ -365,7 +371,7 @@ export default function ProviderProfileScreen() {
                       <Text style={styles.roleTagDot}>·</Text>
                       <Ionicons name="star" size={11} color="#F5B928" />
                       <Text style={styles.ratingTagText}>
-                        {(profileData.rating ?? 5.0).toFixed(1)}
+                        {profileData.rating != null ? profileData.rating.toFixed(1) : "New"}
                       </Text>
                     </View>
                   </View>
@@ -413,23 +419,6 @@ export default function ProviderProfileScreen() {
           {/* 2. Focused Provider Role Profile (Reputation, Ratings, Active Postings & Feedback) */}
           <ProviderProfileView data={providerData} isOwner={true} />
 
-          {/* Settings Entry Card */}
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push("/settings")}
-            style={styles.settingsEntryCard}
-          >
-            <View style={styles.settingsIconCircle}>
-              <Ionicons name="settings-outline" size={20} color="#075B43" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingsEntryTitle}>Settings &amp; Preferences</Text>
-              <Text style={styles.settingsEntrySub}>
-                Saved places, payment methods, helpline &amp; sign out
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.mutedLight} />
-          </Pressable>
         </Animated.ScrollView>
       </PageTransition>
 
@@ -598,39 +587,5 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: "900",
     color: colors.ink,
-  },
-  settingsEntryCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E6ECE8",
-    shadowColor: "#0D2318",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-    marginVertical: 4,
-  },
-  settingsIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#E9F8EF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  settingsEntryTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  settingsEntrySub: {
-    fontSize: 12,
-    color: colors.mutedLight,
-    marginTop: 2,
   },
 });

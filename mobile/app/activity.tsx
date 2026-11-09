@@ -1,11 +1,10 @@
+import { AppPressable as Pressable } from "../src/components/AppPressable";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
-  Pressable,
   ScrollView,
   ActivityIndicator,
-  Image,
   RefreshControl,
   StyleSheet,
   Modal,
@@ -14,7 +13,6 @@ import {
   Platform,
   Animated,
   LayoutAnimation,
-  UIManager,
   Easing,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -22,12 +20,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../src/api/client";
+import { useAuth } from "../src/auth";
+import { invalidateJobLifecycleQueries } from "../src/api/jobLifecycleCache";
 import { getExactRoleIcon } from "../src/utils/nameVerification";
 import { ProviderBottomNav } from "../src/components/provider/ProviderBottomNav";
 import { dash } from "../src/components/provider/palette";
 import { ActivityJobSkeleton } from "../src/components/SkeletonLoader";
 import { useJobsNotification } from "../src/store/jobsNotification";
 import { JobApplicationsModal } from "../src/components/JobApplicationsModal";
+import { JobCompletionConfirmationSheet, type CompletionInteraction } from "../src/components/JobCompletionConfirmationSheet";
 
 type Applicant = {
   id: string;
@@ -49,11 +50,103 @@ type Job = {
   payUnit: string;
   status: string;
   workers?: number;
+  experience?: string;
+  duration?: string;
+  hours?: string;
+  extras?: string[] | string;
+  details?: string;
   applicantCount: number;
   createdAt?: number | string;
   startsAt?: number;
   applicants?: Applicant[];
+  workAwaitingProviderCount?: number;
+  workAwaitingSeekerCount?: number;
+  completedCount?: number;
+  acceptedCount?: number;
+  remainingWorkers?: number;
+  lastCompletedAt?: number;
 };
+
+
+
+export function isJobCompleted(job: {
+  status?: string;
+  completedCount?: number;
+  remainingWorkers?: number;
+  workers?: number;
+}): boolean {
+  const status = (job.status || "").toUpperCase();
+  if (status === "COMPLETED" || status === "EXPIRED" || status === "DELETED") return true;
+  const completed = Number(job.completedCount || 0);
+  if (completed > 0) {
+    const remaining = Number(
+      job.remainingWorkers ?? Math.max(0, Number(job.workers || 1) - completed),
+    );
+    if (remaining === 0 || completed >= Number(job.workers || 1)) return true;
+  }
+  return false;
+}
+
+function hasCompletedWork(job: Job): boolean {
+  return isJobCompleted(job);
+}
+
+function getJobAttributeTags(job: Job): { label: string; icon: keyof typeof Ionicons.glyphMap }[] {
+  const tags: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [];
+  const genderMatch = job.details?.match(/gender preference:\s*(male|female|any gender)/i);
+  const gender = genderMatch?.[1]?.toLowerCase();
+  tags.push(
+    {
+      label:
+        gender === "male"
+          ? "Male"
+          : gender === "female"
+          ? "Female"
+          : gender === "any gender"
+          ? "Any gender"
+          : "Gender not set",
+      icon: "person-outline",
+    },
+  );
+
+  if ((job.workers || 0) > 0) {
+    tags.push({
+      label: `${job.workers} ${job.workers === 1 ? "worker" : "workers"}`,
+      icon: "people-outline",
+    });
+  }
+  const experience = (job.experience || "").toLowerCase();
+  if (experience === "some") tags.push({ label: "Some experience", icon: "ribbon-outline" });
+  else if (experience === "expert") tags.push({ label: "Experienced", icon: "ribbon-outline" });
+
+  let extras: string[] = [];
+  if (Array.isArray(job.extras)) extras = job.extras;
+  else if (typeof job.extras === "string") {
+    try {
+      const parsed = JSON.parse(job.extras);
+      if (Array.isArray(parsed)) extras = parsed.filter((item) => typeof item === "string");
+    } catch {
+      extras = [];
+    }
+  }
+  for (const extra of extras) {
+    if (tags.length >= 3) break;
+    const label = extra.trim();
+    if (label && !tags.some((tag) => tag.label.toLowerCase() === label.toLowerCase())) {
+      tags.push({ label, icon: "sparkles-outline" });
+    }
+  }
+
+  return tags.slice(0, 3);
+}
+
+function getJobTypeLabel(job: Job): string {
+  const duration = (job.duration || "").toLowerCase();
+  if (duration === "ongoing") return "Ongoing";
+  if (duration === "few") return "Fixed term";
+  if ((job.hours || "").toLowerCase() === "custom") return "Flexible hours";
+  return "One-time";
+}
 
 const AVATAR_PALETTES = [
   { bg: "#E0F2FE", text: "#0369A1", border: "#BAE6FD" },
@@ -63,16 +156,6 @@ const AVATAR_PALETTES = [
   { bg: "#EDE9FE", text: "#6D28D9", border: "#DDD6FE" },
   { bg: "#FFEDD5", text: "#C2410C", border: "#FED7AA" },
 ];
-
-function getAvatarPalette(key: string): { bg: string; text: string; border: string } {
-  let hash = 0;
-  for (let i = 0; i < (key || "").length; i++) {
-    hash = (hash << 5) - hash + key.charCodeAt(i);
-    hash |= 0;
-  }
-  const idx = Math.abs(hash) % AVATAR_PALETTES.length;
-  return AVATAR_PALETTES[idx] ?? AVATAR_PALETTES[0]!;
-}
 
 function formatPayUnit(unit?: string): string {
   if (!unit) return "fixed";
@@ -90,23 +173,17 @@ function formatPayUnit(unit?: string): string {
   }
 }
 
-function formatRelativeTime(timestamp?: string | number): string {
+function formatPostedDate(timestamp?: string | number): string {
   if (!timestamp) return "";
   const time =
     typeof timestamp === "string"
       ? new Date(timestamp).getTime()
       : timestamp * (timestamp < 1e11 ? 1000 : 1);
   if (isNaN(time)) return "";
-  const diffSec = Math.floor((Date.now() - time) / 1000);
-  if (diffSec < 60) return "Just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return new Date(time).toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+  return new Date(time).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
 }
 
 function getRoleTheme(roleId?: string, roleName?: string, categoryId?: string) {
@@ -114,31 +191,68 @@ function getRoleTheme(roleId?: string, roleName?: string, categoryId?: string) {
   const cat = (categoryId || "").toLowerCase();
   const rId = (roleId || "").toLowerCase();
 
-  if (name.includes("electr") || name.includes("wire") || rId.includes("electr")) {
+  if (
+    name.includes("electr") ||
+    name.includes("wire") ||
+    rId.includes("electr")
+  ) {
     return { bg: "#FEF3C7", border: "#FDE68A", icon: "⚡" };
   }
-  if (name.includes("plumb") || name.includes("pipe") || rId.includes("plumb")) {
+  if (
+    name.includes("plumb") ||
+    name.includes("pipe") ||
+    rId.includes("plumb")
+  ) {
     return { bg: "#E0F2FE", border: "#BAE6FD", icon: "🔧" };
   }
-  if (name.includes("carpent") || name.includes("wood") || rId.includes("carpent")) {
+  if (
+    name.includes("carpent") ||
+    name.includes("wood") ||
+    rId.includes("carpent")
+  ) {
     return { bg: "#FFEDD5", border: "#FED7AA", icon: "🪚" };
   }
-  if (name.includes("cook") || name.includes("chef") || cat.includes("food") || rId.includes("cook")) {
+  if (
+    name.includes("cook") ||
+    name.includes("chef") ||
+    cat.includes("food") ||
+    rId.includes("cook")
+  ) {
     return { bg: "#FFF7ED", border: "#FFEDD5", icon: "🍳" };
   }
   if (name.includes("paint") || rId.includes("paint")) {
     return { bg: "#FCE7F3", border: "#FBCFE8", icon: "🎨" };
   }
-  if (name.includes("clean") || name.includes("maid") || name.includes("housekeep") || rId.includes("clean")) {
+  if (
+    name.includes("clean") ||
+    name.includes("maid") ||
+    name.includes("housekeep") ||
+    rId.includes("clean")
+  ) {
     return { bg: "#E8F5EE", border: "#C8E87A", icon: "🧹" };
   }
-  if (name.includes("mason") || name.includes("brick") || cat.includes("construction") || rId.includes("mason")) {
+  if (
+    name.includes("mason") ||
+    name.includes("brick") ||
+    cat.includes("construction") ||
+    rId.includes("mason")
+  ) {
     return { bg: "#F5F5F4", border: "#E7E5E4", icon: "🏗️" };
   }
-  if (name.includes("driv") || name.includes("cab") || name.includes("ride") || cat.includes("transport") || rId.includes("driver")) {
+  if (
+    name.includes("driv") ||
+    name.includes("cab") ||
+    name.includes("ride") ||
+    cat.includes("transport") ||
+    rId.includes("driver")
+  ) {
     return { bg: "#CFFAFE", border: "#A5F3FC", icon: "🚗" };
   }
-  if (name.includes("guard") || name.includes("secur") || rId.includes("guard")) {
+  if (
+    name.includes("guard") ||
+    name.includes("secur") ||
+    rId.includes("guard")
+  ) {
     return { bg: "#EDE9FE", border: "#DDD6FE", icon: "🛡️" };
   }
   return {
@@ -146,138 +260,6 @@ function getRoleTheme(roleId?: string, roleName?: string, categoryId?: string) {
     border: "#C8E87A",
     icon: getExactRoleIcon(roleId || "", roleName || "", categoryId),
   };
-}
-
-function getJobStatusMeta(status: string) {
-  switch (status?.toUpperCase()) {
-    case "PUBLISHED":
-      return {
-        label: "Active",
-        dotColor: "#10B981",
-        textColor: "#059669",
-        bgColor: "#ECFDF5",
-        borderColor: "#A7F3D0",
-      };
-    case "PAUSED":
-      return {
-        label: "Paused",
-        dotColor: "#F59E0B",
-        textColor: "#D97706",
-        bgColor: "#FFFBEB",
-        borderColor: "#FDE68A",
-      };
-    case "FILLED":
-      return {
-        label: "Hired",
-        dotColor: "#3B82F6",
-        textColor: "#2563EB",
-        bgColor: "#EFF6FF",
-        borderColor: "#BFDBFE",
-      };
-    case "COMPLETED":
-      return {
-        label: "Done",
-        dotColor: "#8B5CF6",
-        textColor: "#7C3AED",
-        bgColor: "#F5F3FF",
-        borderColor: "#DDD6FE",
-      };
-    default:
-      return {
-        label: status || "Open",
-        dotColor: "#6B7280",
-        textColor: "#374151",
-        bgColor: "#F3F4F6",
-        borderColor: "#E5E7EB",
-      };
-  }
-}
-
-function ApplicantAvatarStack({
-  applicants = [],
-  totalCount = 0,
-}: {
-  applicants?: Applicant[];
-  totalCount: number;
-}) {
-  const displayApplicants = applicants.slice(0, 3);
-  const remaining = Math.max(0, totalCount - displayApplicants.length);
-
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center" }}>
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        {displayApplicants.map((app, index) => {
-          const palette = getAvatarPalette(app.id || app.name || `${index}`);
-          const initial = (app.name || "W").trim().charAt(0).toUpperCase();
-
-          return (
-            <View
-              key={app.id || index}
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 13,
-                backgroundColor: palette.bg,
-                borderWidth: 2,
-                borderColor: "#FFFFFF",
-                marginLeft: index === 0 ? 0 : -7,
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.1,
-                shadowRadius: 2,
-                elevation: 2,
-                zIndex: 10 - index,
-              }}
-            >
-              {app.photoUrl ? (
-                <Image
-                  source={{ uri: app.photoUrl }}
-                  style={{ width: "100%", height: "100%" }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "800",
-                    color: palette.text,
-                  }}
-                >
-                  {initial}
-                </Text>
-              )}
-            </View>
-          );
-        })}
-      </View>
-
-      {remaining > 0 && (
-        <View
-          style={{
-            marginLeft: -5,
-            backgroundColor: "#EEF2FF",
-            paddingHorizontal: 5,
-            paddingVertical: 2,
-            borderRadius: 8,
-            borderWidth: 1.5,
-            borderColor: "#FFFFFF",
-            zIndex: 1,
-          }}
-        >
-          <Text style={{ fontSize: 10, fontWeight: "800", color: "#4F46E5" }}>
-            +{remaining}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 function SmoothPausedBanner({ isPaused }: { isPaused: boolean }) {
@@ -351,21 +333,73 @@ function SmoothPausedBanner({ isPaused }: { isPaused: boolean }) {
 
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ filter?: string }>();
-  const [selectedFilter, setSelectedFilter] = useState<string>(params.filter || "active");
+  const params = useLocalSearchParams<{ filter?: string; jobId?: string; completionInteractionId?: string }>();
+  const completionInteractionId = params.completionInteractionId;
+  const [selectedFilter, setSelectedFilter] = useState<string>(
+    (params.filter === "history" ? "completed" : (params.filter || "active")),
+  );
+
+  useEffect(() => {
+    if (params.filter) {
+      setSelectedFilter(params.filter === "history" ? "completed" : params.filter);
+    }
+  }, [params.filter]);
   const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
   const [jobToPause, setJobToPause] = useState<Job | null>(null);
+  const [jobToComplete, setJobToComplete] = useState<Job | null>(null);
   const [applicationsJob, setApplicationsJob] = useState<Job | null>(null);
+  const [feedbackInteraction, setFeedbackInteraction] = useState<CompletionInteraction | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
+  const [navVisible, setNavVisible] = useState(true);
+  const lastScrollY = useRef(0);
+  const scrollAccumulator = useRef(0);
+  const lastDirection = useRef<"up" | "down">("up");
+  const openedNotificationJobId = useRef<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const client = useQueryClient();
+  const auth = useAuth();
+  const token = auth.session?.token || null;
+  const userId = auth.user?.id || auth.session?.userId || null;
+  const feedbackInteractionQuery = useQuery({
+    queryKey: ["provider-completion-feedback", userId, completionInteractionId],
+    enabled: Boolean(token && userId && completionInteractionId),
+    queryFn: () => api<{
+      id: string;
+      kind: string;
+      jobId: string | null;
+      title: string;
+      status: string;
+      area?: string | null;
+      otherName?: string;
+      isOwner?: boolean;
+      scheduledAt?: number | null;
+      jobOverview?: { payPaise?: number | null; payUnit?: string | null } | null;
+    }>(`/interactions/${encodeURIComponent(completionInteractionId!)}`),
+  });
+  const openedFeedbackNotificationId = useRef<string | null>(null);
 
-  const {
-    getAdjustedWorkers,
-    incrementWorkers,
-  } = useJobsNotification();
+  useEffect(() => {
+    const detail = feedbackInteractionQuery.data;
+    const id = completionInteractionId;
+    if (!id || !detail || detail.id !== id || openedFeedbackNotificationId.current === id) return;
+    openedFeedbackNotificationId.current = id;
+    setFeedbackInteraction({
+      id: detail.id,
+      kind: detail.kind,
+      jobId: detail.jobId,
+      status: detail.status,
+      title: detail.title,
+      area: detail.area || "",
+      otherName: detail.otherName || "Worker",
+      startsAt: detail.scheduledAt,
+      payPaise: detail.jobOverview?.payPaise,
+      payUnit: detail.jobOverview?.payUnit,
+    });
+  }, [completionInteractionId, feedbackInteractionQuery.data]);
+
+  const { getAdjustedWorkers } = useJobsNotification();
 
   const showToast = useCallback(
     (msg: string) => {
@@ -394,36 +428,131 @@ export default function ActivityScreen() {
         });
       }, 2600);
     },
-    [toastAnim]
+    [toastAnim],
   );
+
+  const [historyLimit, setHistoryLimit] = useState(15);
+  const [hiddenHistoryJobIds, setHiddenHistoryJobIds] = useState<Set<string>>(new Set());
 
   const {
     data: jobs,
-    isLoading,
-    error,
-    refetch,
-    isRefetching,
+    isLoading: isJobsLoading,
+    error: jobsError,
+    refetch: refetchJobs,
+    isRefetching: isJobsRefetching,
   } = useQuery<Job[]>({
-    queryKey: ["provider-recent-jobs"],
+    queryKey: ["provider-recent-jobs", userId],
     queryFn: () => api<Job[]>("/jobs/provider/recent"),
-    staleTime: 60 * 1000,
-    placeholderData: (prev) => prev,
+    enabled: !!token && !!userId,
   });
 
+  const isHistorySelected = selectedFilter === "completed" || selectedFilter === "history";
+
+  const historyQuery = useQuery<{
+    items: Job[];
+    total: number;
+    hasMore: boolean;
+  }>({
+    queryKey: ["provider-job-history", userId, historyLimit],
+    queryFn: () =>
+      api<{ items: Job[]; total: number; hasMore: boolean }>(
+        `/jobs/provider/history?limit=${historyLimit}&offset=0`,
+      ),
+    enabled: !!token && !!userId && isHistorySelected,
+  });
+
+  const refetch = useCallback(async () => {
+    await refetchJobs();
+    if (isHistorySelected) {
+      await historyQuery.refetch();
+    }
+  }, [refetchJobs, isHistorySelected, historyQuery]);
+
+  const isRefetching = isJobsRefetching || (isHistorySelected && historyQuery.isRefetching);
+
+  const notificationJobQuery = useQuery<Job>({
+    queryKey: ["job-rating-queue", userId, params.jobId],
+    enabled: Boolean(
+      !!token &&
+      !!userId &&
+      params.jobId &&
+      !isJobsLoading &&
+      !jobs?.some((job) => job.id === params.jobId)
+    ),
+    queryFn: () => api<Job>(`/jobs/${encodeURIComponent(params.jobId!)}`),
+  });
+
+  useEffect(() => {
+    const jobId = params.jobId;
+    if (!jobId || (openedNotificationJobId.current === jobId && applicationsJob?.id === jobId)) return;
+    if (notificationJobQuery.isError) {
+      showToast("This job was deleted and is no longer available.");
+      openedNotificationJobId.current = jobId;
+      router.setParams({ jobId: undefined });
+      return;
+    }
+    const job = jobs?.find((item) => item.id === jobId) || notificationJobQuery.data;
+    if (!job) return;
+    if (job.status === "DELETED") {
+      showToast("This job was deleted and is no longer available.");
+      openedNotificationJobId.current = jobId;
+      router.setParams({ jobId: undefined });
+      return;
+    }
+    openedNotificationJobId.current = jobId;
+    setSelectedFilter("hired");
+    setApplicationsJob(job);
+    router.setParams({ jobId: undefined });
+  }, [params.jobId, jobs, notificationJobQuery.data, notificationJobQuery.isError, applicationsJob?.id, isJobsLoading]);
+
+
+  const mergedHistoryJobs = useMemo<Job[]>(() => {
+    // When historyQuery has loaded, its items are the authoritative backend source.
+    const rawList = historyQuery.data?.items ?? (jobs || []).filter((job) => isJobCompleted(job));
+    const list = rawList.filter((job) => !hiddenHistoryJobIds.has(job.id));
+    list.sort((a, b) => {
+      const timeA = Number(a.lastCompletedAt || a.createdAt || 0);
+      const timeB = Number(b.lastCompletedAt || b.createdAt || 0);
+      return timeB - timeA;
+    });
+    return list;
+  }, [historyQuery.data?.items, jobs, hiddenHistoryJobIds]);
+
   const counts = useMemo(() => {
-    if (!jobs) return { active: 0, interested: 0, hired: 0, completed: 0, total: 0, live: 0, paused: 0 };
-    const live = jobs.filter((j) => j.status === "PUBLISHED").length;
-    const paused = jobs.filter((j) => j.status === "PAUSED").length;
+    if (!jobs)
+      return {
+        active: 0,
+        interested: 0,
+        hired: 0,
+        completed: 0,
+        total: 0,
+        live: 0,
+        paused: 0,
+      };
+
+    const activeList = jobs.filter((job) => !isJobCompleted(job));
+    const live = activeList.filter((j) => j.status === "PUBLISHED").length;
+    const paused = activeList.filter((j) => j.status === "PAUSED").length;
+    const hired = activeList.filter((j) => j.status === "FILLED").length;
+    const interested = activeList.filter((j) => (j.applicantCount || 0) > 0).length;
+    const recentCompleted = jobs.filter((j) => isJobCompleted(j) && !hiddenHistoryJobIds.has(j.id)).length;
+    const hiddenCount = Array.from(hiddenHistoryJobIds).filter(
+      (id) => historyQuery.data?.items?.some((it) => it.id === id) || jobs.some((j) => j.id === id && isJobCompleted(j)),
+    ).length;
+    const completed = historyQuery.data?.total !== undefined
+      ? Math.max(0, historyQuery.data.total - hiddenCount)
+      : recentCompleted;
+
     return {
       total: jobs.length,
-      active: live + paused,
+      active: live + paused + hired,
       live,
       paused,
-      interested: jobs.filter((j) => (j.applicantCount || 0) > 0).length,
-      hired: jobs.filter((j) => j.status === "FILLED").length,
-      completed: jobs.filter((j) => j.status === "COMPLETED").length,
+      interested,
+      hired,
+      completed,
     };
-  }, [jobs]);
+  }, [jobs, historyQuery.data?.total]);
 
   // Removed "All" filter; defaults to Active jobs
   const filterOptions: {
@@ -436,7 +565,7 @@ export default function ActivityScreen() {
   }[] = [
     {
       key: "active",
-      label: "Active",
+      label: "All",
       icon: "flash-outline",
       activeIcon: "flash",
       count: counts.active,
@@ -460,52 +589,129 @@ export default function ActivityScreen() {
     },
     {
       key: "completed",
-      label: "Done",
-      icon: "checkmark-done-circle-outline",
-      activeIcon: "checkmark-done-circle",
+      label: "History",
+      icon: "time-outline",
+      activeIcon: "time",
       count: counts.completed,
       color: "#059669",
     },
   ];
 
   const filteredJobs = useMemo(() => {
+    if (selectedFilter === "completed" || selectedFilter === "history") {
+      return mergedHistoryJobs;
+    }
     if (!jobs) return [];
     return jobs.filter((job) => {
-      if (selectedFilter === "active") return job.status === "PUBLISHED" || job.status === "PAUSED";
+      const completed = isJobCompleted(job);
+      // When a job is completed, show it ONLY in History; do not show in All, With Applicants, or Hired
+      if (completed) return false;
+
+      if (selectedFilter === "active") {
+        return job.status === "PUBLISHED" || job.status === "PAUSED" || job.status === "FILLED";
+      }
       if (selectedFilter === "interested") return (job.applicantCount || 0) > 0;
       if (selectedFilter === "hired") return job.status === "FILLED";
-      if (selectedFilter === "completed") return job.status === "COMPLETED";
       return true;
     });
-  }, [jobs, selectedFilter]);
+  }, [jobs, selectedFilter, mergedHistoryJobs]);
 
-  // Job Action Mutation (pause / publish / cancel)
+  const displayedJobs = useMemo(() => {
+    if (selectedFilter === "completed" || selectedFilter === "history") {
+      return filteredJobs.slice(0, historyLimit);
+    }
+    return filteredJobs;
+  }, [filteredJobs, selectedFilter, historyLimit]);
+
+  const isHistoryLoading = isHistorySelected && historyQuery.isLoading && mergedHistoryJobs.length === 0;
+  const isScreenLoading = isJobsLoading || isHistoryLoading;
+  const isScreenError = Boolean(jobsError) || (isHistorySelected && Boolean(historyQuery.error) && mergedHistoryJobs.length === 0);
+
+  // Job Action Mutation (pause / publish / cancel / delete)
   const actionMutation = useMutation({
-    mutationFn: ({ jobId, action }: { jobId: string; action: "pause" | "publish" | "cancel" }) =>
-      api(`/jobs/${jobId}/action`, { action }),
-    onSuccess: (_, { action }) => {
+    mutationFn: ({
+      jobId,
+      action,
+    }: {
+      jobId: string;
+      action: "pause" | "publish" | "cancel" | "delete" | "remove-history";
+    }) => {
+      if (action === "remove-history") {
+        return api(`/jobs/provider/history/${encodeURIComponent(jobId)}`, undefined, "DELETE");
+      }
+      if (action === "delete") {
+        return api(`/jobs/${jobId}`, undefined, "DELETE");
+      }
+      return api(`/jobs/${jobId}/action`, { action });
+    },
+    onSuccess: (_, { action, jobId }) => {
       setJobToPause(null);
       setJobToDelete(null);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      const msg =
+      const msg = action === "remove-history"
+        ? "Removed from your history."
+        :
         action === "pause"
           ? "Job paused. Posting is stopped."
           : action === "publish"
-          ? "Job resumed and live for workers!"
-          : "Job posting deleted.";
+            ? "Job resumed and live for workers!"
+            : "Job removed from active listings. Work history and ratings retained.";
       showToast(msg);
-      void client.invalidateQueries({ queryKey: ["my-jobs"] });
-      void client.invalidateQueries({ queryKey: ["provider-recent-jobs"] });
+      if (action === "remove-history") {
+        setHiddenHistoryJobIds((prev) => new Set(prev).add(jobId));
+        client.setQueriesData(
+          { queryKey: ["provider-job-history"] },
+          (old: any) => {
+            if (!old || typeof old !== "object") return old;
+            return {
+              ...old,
+              items: Array.isArray(old.items) ? old.items.filter((item: any) => item.id !== jobId) : [],
+              total: Math.max(0, (old.total || 1) - 1),
+            };
+          }
+        );
+        client.setQueriesData(
+          { queryKey: ["provider-recent-jobs"] },
+          (old: any) => (Array.isArray(old) ? old.filter((item: any) => item.id !== jobId) : old)
+        );
+      } else {
+        void invalidateJobLifecycleQueries(client);
+      }
     },
     onError: (err: any) => {
       showToast(err?.message || "Action failed. Please try again.");
     },
   });
 
-  const handleIncrementWorkers = (job: Job) => {
-    const currentTotal = getAdjustedWorkers(job.id, job.workers || 1);
-    incrementWorkers(job.id);
-    showToast(`Updated to ${currentTotal + 1} workers needed for "${job.title}"`);
+  const completeWorkMutation = useMutation({
+    mutationFn: ({ jobId }: { jobId: string }) =>
+      api<{ markedCount: number; completedCount: number; awaitingSeekerCount: number }>(
+        `/jobs/${encodeURIComponent(jobId)}/complete-work`,
+        {},
+      ),
+    onSuccess: async (result) => {
+      await Promise.all([
+        invalidateJobLifecycleQueries(client),
+      ]);
+      if (result.markedCount === 0) {
+        showToast("No new in-progress work needed marking.");
+      } else if (result.awaitingSeekerCount > 0) {
+        showToast(
+          result.completedCount > 0
+            ? `${result.completedCount} completed; ${result.awaitingSeekerCount} seeker${result.awaitingSeekerCount === 1 ? "" : "s"} still need to confirm.`
+            : `Asked ${result.awaitingSeekerCount} seeker${result.awaitingSeekerCount === 1 ? "" : "s"} to confirm completion.`,
+        );
+      } else {
+        showToast(`${result.completedCount} hire${result.completedCount === 1 ? "" : "s"} completed. Review prompts sent.`);
+      }
+    },
+    onError: (err: any) => showToast(err?.message || "Couldn't mark this work complete. Please retry."),
+  });
+
+  const confirmJobCompletion = (job: Job) => {
+    const count = job.workAwaitingProviderCount || 0;
+    if (!count || completeWorkMutation.isPending) return;
+    setJobToComplete(job);
   };
 
   return (
@@ -540,30 +746,13 @@ export default function ActivityScreen() {
       )}
 
       {/* Top Header */}
-      <View style={[styles.header, { paddingTop: Math.max(insets.top + 8, 16) }]}>
+      <View
+        style={[styles.header, { paddingTop: Math.max(insets.top + 8, 16) }]}
+      >
         <View style={styles.headerContent}>
           <View style={styles.headerTop}>
             <View style={styles.titleArea}>
-              <View style={styles.titleRow}>
-                <Text style={styles.title}>Posted Jobs</Text>
-                <View style={styles.headerCountGroup}>
-                  <View style={styles.activeBadge}>
-                    <View style={styles.activeDot} />
-                    <Text style={styles.activeBadgeText}>{counts.live} Active</Text>
-                  </View>
-                  <View style={[styles.inactiveBadge, counts.paused > 0 && styles.inactiveBadgeActive]}>
-                    <View style={[styles.inactiveDot, counts.paused > 0 && styles.inactiveDotActive]} />
-                    <Text style={[styles.inactiveBadgeText, counts.paused > 0 && styles.inactiveBadgeTextActive]}>
-                      {counts.paused} Inactive
-                    </Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.subtitle}>
-                {counts.interested > 0
-                  ? `${counts.interested} listing${counts.interested === 1 ? "" : "s"} with applicants waiting`
-                  : "Manage your listings and track candidate responses"}
-              </Text>
+              <Text style={styles.title}>Posted Jobs</Text>
             </View>
 
             <Pressable
@@ -578,6 +767,33 @@ export default function ActivityScreen() {
               <Ionicons name="add" size={18} color="#FFFFFF" />
               <Text style={styles.postBtnText}>Post Job</Text>
             </Pressable>
+          </View>
+          <View style={styles.headerCountGroup}>
+            <View style={styles.activeBadge} accessible accessibilityLabel={`${counts.live} active jobs`}>
+              <View style={styles.statusBadgeLabelGroup}>
+                <View style={styles.activeBadgeIcon}>
+                  <Ionicons name="checkmark" size={14} color="#16804F" />
+                </View>
+                <Text style={styles.activeBadgeText} numberOfLines={1}>Active</Text>
+              </View>
+              <Text style={styles.statusBadgeCount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{counts.live}</Text>
+            </View>
+            <View
+              style={[
+                styles.inactiveBadge,
+                counts.paused > 0 && styles.inactiveBadgeActive,
+              ]}
+              accessible
+              accessibilityLabel={`${counts.paused} inactive jobs`}
+            >
+              <View style={styles.statusBadgeLabelGroup}>
+                <View style={[styles.inactiveBadgeIcon, counts.paused > 0 && styles.inactiveBadgeIconActive]}>
+                  <Ionicons name="pause" size={12} color={counts.paused > 0 ? "#A96810" : "#66766D"} />
+                </View>
+                <Text style={[styles.inactiveBadgeText, counts.paused > 0 && styles.inactiveBadgeTextActive]} numberOfLines={1}>Inactive</Text>
+              </View>
+              <Text style={[styles.statusBadgeCount, counts.paused > 0 && styles.inactiveBadgeCountActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{counts.paused}</Text>
+            </View>
           </View>
         </View>
 
@@ -594,19 +810,37 @@ export default function ActivityScreen() {
                 <Pressable
                   key={opt.key}
                   onPress={() => setSelectedFilter(opt.key)}
-                  style={[styles.filterChip, isSelected && styles.filterChipActive]}
+                  style={[
+                    styles.filterChip,
+                    isSelected && styles.filterChipActive,
+                  ]}
                 >
                   <Ionicons
                     name={isSelected ? opt.activeIcon : opt.icon}
                     size={14}
                     color={isSelected ? "#FFFFFF" : opt.color}
                   />
-                  <Text style={[styles.filterChipText, isSelected && styles.filterChipTextActive]}>
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      isSelected && styles.filterChipTextActive,
+                    ]}
+                  >
                     {opt.label}
                   </Text>
                   {opt.count > 0 && (
-                    <View style={[styles.filterCountBadge, isSelected && styles.filterCountBadgeActive]}>
-                      <Text style={[styles.filterCountText, isSelected && styles.filterCountTextActive]}>
+                    <View
+                      style={[
+                        styles.filterCountBadge,
+                        isSelected && styles.filterCountBadgeActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterCountText,
+                          isSelected && styles.filterCountTextActive,
+                        ]}
+                      >
                         {opt.count}
                       </Text>
                     </View>
@@ -623,6 +857,36 @@ export default function ActivityScreen() {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          const clampedY = Math.max(0, y);
+          const delta = clampedY - lastScrollY.current;
+          lastScrollY.current = clampedY;
+
+          if (clampedY < 60) {
+            setNavVisible(true);
+            scrollAccumulator.current = 0;
+          } else if (delta > 0) {
+            if (lastDirection.current !== "down") {
+              lastDirection.current = "down";
+              scrollAccumulator.current = 0;
+            }
+            scrollAccumulator.current += delta;
+            if (scrollAccumulator.current > 38) {
+              setNavVisible(false);
+            }
+          } else if (delta < 0) {
+            if (lastDirection.current !== "up") {
+              lastDirection.current = "up";
+              scrollAccumulator.current = 0;
+            }
+            scrollAccumulator.current += Math.abs(delta);
+            if (scrollAccumulator.current > 22) {
+              setNavVisible(true);
+            }
+          }
+        }}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
@@ -632,17 +896,23 @@ export default function ActivityScreen() {
           />
         }
       >
-        {isLoading ? (
+        {isScreenLoading ? (
           <View style={styles.jobsList}>
             <ActivityJobSkeleton />
             <ActivityJobSkeleton />
             <ActivityJobSkeleton />
           </View>
-        ) : error ? (
+        ) : isScreenError ? (
           <View style={styles.errorCard}>
-            <Ionicons name="alert-circle-outline" size={40} color={dash.error} />
+            <Ionicons
+              name="alert-circle-outline"
+              size={40}
+              color={dash.error}
+            />
             <Text style={styles.errorTitle}>Failed to load jobs</Text>
-            <Text style={styles.errorMessage}>Please check your connection and try again.</Text>
+            <Text style={styles.errorMessage}>
+              Please check your connection and try again.
+            </Text>
             <Pressable onPress={() => refetch()} style={styles.retryBtn}>
               <Text style={styles.retryBtnText}>Retry</Text>
             </Pressable>
@@ -650,10 +920,16 @@ export default function ActivityScreen() {
         ) : filteredJobs.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name="briefcase-outline" size={32} color={dash.primary} />
+              <Ionicons
+                name="briefcase-outline"
+                size={32}
+                color={dash.primary}
+              />
             </View>
             <Text style={styles.emptyTitle}>
-              {selectedFilter === "active" ? "No active jobs right now" : `No ${selectedFilter} jobs`}
+              {selectedFilter === "active"
+                ? "No active jobs right now"
+                : `No ${selectedFilter} jobs`}
             </Text>
             <Text style={styles.emptySubtitle}>
               {selectedFilter === "active"
@@ -662,7 +938,10 @@ export default function ActivityScreen() {
             </Text>
             <Pressable
               onPress={() => router.push("/post-work")}
-              style={({ pressed }) => [styles.emptyActionBtn, pressed && { opacity: 0.9 }]}
+              style={({ pressed }) => [
+                styles.emptyActionBtn,
+                pressed && { opacity: 0.9 },
+              ]}
             >
               <Ionicons name="add-circle" size={20} color="#FFFFFF" />
               <Text style={styles.emptyActionBtnText}>Post a Job Now</Text>
@@ -670,199 +949,189 @@ export default function ActivityScreen() {
           </View>
         ) : (
           <View style={styles.jobsList}>
-            {filteredJobs.map((job) => {
+            {displayedJobs.map((job: Job) => {
               const isPaused = job.status === "PAUSED";
-              const statusMeta = getJobStatusMeta(job.status);
               const roleTheme = getRoleTheme(
                 job.roleId,
                 job.title,
-                job.categoryName || job.categoryId
+                job.categoryName || job.categoryId,
               );
               const workersCount = getAdjustedWorkers(job.id, job.workers || 1);
+              const attributeTags = getJobAttributeTags({ ...job, workers: workersCount });
+              const isEducation = /education|tuition|tutor|school/i.test(
+                `${job.categoryName} ${job.categoryId || ""}`,
+              );
+              const awaitingProvider = job.workAwaitingProviderCount || 0;
+              const awaitingSeeker = job.workAwaitingSeekerCount || 0;
+              const hasAcceptedSeeker = (job.acceptedCount || 0) > 0;
+              const canMarkComplete = awaitingProvider > 0;
+              const completionDisabledLabel = awaitingSeeker > 0
+                ? `Waiting for ${awaitingSeeker} seeker${awaitingSeeker === 1 ? "" : "s"} to confirm`
+                : "Available when work is ready";
 
               return (
                 <View key={job.id} style={styles.jobCard}>
-                  {/* Top Row: Role Icon + Title/Status on Left; Delete Icon on Top Right */}
                   <View style={styles.cardHeaderTop}>
-                    {/* Left: Icon and Title */}
                     <View style={styles.roleTitleGroup}>
                       <View
                         style={[
                           styles.roleIconBox,
-                          { backgroundColor: roleTheme.bg, borderColor: roleTheme.border },
+                          {
+                            backgroundColor: roleTheme.bg,
+                            borderColor: roleTheme.border,
+                          },
                         ]}
                       >
                         <Text style={{ fontSize: 24 }}>{roleTheme.icon}</Text>
                       </View>
 
                       <View style={styles.cardHeaderText}>
-                        <View style={styles.titleStatusRow}>
-                          <Text style={styles.jobTitle} numberOfLines={1}>
-                            {job.title}
-                          </Text>
-                          <View
-                            style={[
-                              styles.statusPill,
-                              { backgroundColor: statusMeta.bgColor, borderColor: statusMeta.borderColor },
-                            ]}
-                          >
-                            <View style={[styles.statusDot, { backgroundColor: statusMeta.dotColor }]} />
-                            <Text style={[styles.statusText, { color: statusMeta.textColor }]}>
-                              {statusMeta.label}
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <View style={styles.cardCategoryPill}>
+                            <Ionicons
+                              name={isEducation ? "school-outline" : "briefcase-outline"}
+                              size={13}
+                              color="#075B43"
+                            />
+                            <Text style={styles.cardCategoryText} numberOfLines={1}>
+                              {job.categoryName || "General work"}
                             </Text>
                           </View>
-                        </View>
-
-                        <View style={styles.cardMetaRow}>
-                          <Ionicons name="location-outline" size={13} color={dash.muted} />
-                          <Text style={styles.cardLocationText} numberOfLines={1}>
-                            {job.area || "Nearby"}
-                          </Text>
-                          {!!job.createdAt && (
-                            <>
-                              <Text style={styles.metaDot}>•</Text>
-                              <Text style={styles.cardTimeText}>
-                                {formatRelativeTime(job.createdAt)}
-                              </Text>
-                            </>
+                          {job.status === "FILLED" && (
+                            <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "#EEF3FF" }}>
+                              <Text style={{ color: "#2F6FED", fontSize: 10, fontWeight: "700" }}>Hired</Text>
+                            </View>
                           )}
                         </View>
                       </View>
                     </View>
-
-                    {/* Top Right Corner Action Icons: Stop/Resume Pill + Delete Button */}
                     <View style={styles.topRightActions}>
-                      {job.status === "PUBLISHED" ? (
+                      {!isJobCompleted(job) && job.status === "PUBLISHED" ? (
                         <Pressable
                           accessibilityRole="button"
-                          accessibilityLabel="Stop posting this job"
+                          accessibilityLabel="Pause job"
+                          hitSlop={6}
                           onPress={() => setJobToPause(job)}
                           style={({ pressed }) => [
-                            styles.topActionPill,
-                            styles.topStopPill,
-                            pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] },
+                            styles.topMiniAction,
+                            styles.pauseMiniAction,
+                            pressed && styles.miniActionPressed,
                           ]}
                         >
-                          <Ionicons name="pause-circle" size={14} color="#D97706" />
-                          <Text style={styles.topStopPillText}>Stop</Text>
+                          <Ionicons name="pause" size={15} color="#047857" />
+                          <Text style={styles.pauseMiniActionText}>Pause</Text>
                         </Pressable>
-                      ) : job.status === "PAUSED" ? (
+                      ) : !isJobCompleted(job) && job.status === "PAUSED" ? (
                         <Pressable
                           accessibilityRole="button"
-                          accessibilityLabel="Resume posting this job"
+                          accessibilityLabel="Resume job"
+                          hitSlop={6}
                           disabled={actionMutation.isPending}
-                          onPress={() => actionMutation.mutate({ jobId: job.id, action: "publish" })}
+                          onPress={() =>
+                            actionMutation.mutate({ jobId: job.id, action: "publish" })
+                          }
                           style={({ pressed }) => [
-                            styles.topActionPill,
-                            styles.topResumePill,
-                            pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] },
+                            styles.topMiniAction,
+                            styles.resumeMiniAction,
+                            pressed && styles.miniActionPressed,
                           ]}
                         >
                           {actionMutation.isPending &&
                           (actionMutation.variables as any)?.jobId === job.id &&
                           (actionMutation.variables as any)?.action === "publish" ? (
-                            <ActivityIndicator size="small" color="#15803D" />
+                            <ActivityIndicator size="small" color="#DC2626" />
                           ) : (
-                            <Ionicons name="play-circle" size={14} color="#15803D" />
+                            <Ionicons name="play" size={15} color="#DC2626" />
                           )}
-                          <Text style={styles.topResumePillText}>Resume</Text>
+                          <Text style={styles.resumeMiniActionText}>Resume</Text>
                         </Pressable>
                       ) : null}
-
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel="Delete job"
+                      accessibilityLabel={isJobCompleted(job) && isHistorySelected ? "Remove completed job from history" : "Delete job"}
+                        hitSlop={6}
                         onPress={() => setJobToDelete(job)}
                         style={({ pressed }) => [
-                          styles.topIconBtn,
-                          styles.topDeleteBtn,
-                          pressed && { opacity: 0.75, transform: [{ scale: 0.95 }] },
+                          styles.topMiniAction,
+                          styles.deleteMiniAction,
+                          pressed && styles.miniActionPressed,
                         ]}
                       >
-                        <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                        <Ionicons name="trash-outline" size={15} color="#DC2626" />
                       </Pressable>
                     </View>
                   </View>
 
-                  {/* Smooth Animated Notice Banner if Job is Stopped/Paused */}
-                  <SmoothPausedBanner isPaused={isPaused} />
+                  <Text style={styles.jobTitle} numberOfLines={2}>
+                    {job.title.replace(/^Wanted:\s*/i, "")}
+                  </Text>
 
-                  {/* Essential Provider Data Grid */}
-                  <View style={styles.essentialDataGrid}>
-                    {/* Pay Rate */}
-                    <View style={styles.dataItem}>
-                      <Text style={styles.dataLabel}>PAY RATE</Text>
-                      <View style={styles.payRow}>
-                        <Text style={styles.payAmount}>
-                          ₹{((job.payPaise || 0) / 100).toLocaleString("en-IN")}
-                        </Text>
-                        <Text style={styles.payUnit}>/{formatPayUnit(job.payUnit)}</Text>
-                      </View>
+                  <View style={styles.cardMetaRow}>
+                    <View style={styles.cardMetaLocation}>
+                      <Ionicons name="location-outline" size={14} color={dash.muted} />
+                      <Text style={styles.cardLocationText} numberOfLines={1} ellipsizeMode="tail">
+                        {job.area || "Nearby"}
+                      </Text>
                     </View>
-
-                    {/* Workers Needed with Quick +1 */}
-                    <View style={styles.dataItem}>
-                      <Text style={styles.dataLabel}>WORKERS NEEDED</Text>
-                      <View style={styles.workerRow}>
-                        <Text style={styles.workerCountText}>{workersCount} Required</Text>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Add 1 worker"
-                          onPress={() => handleIncrementWorkers(job)}
-                          style={({ pressed }) => [
-                            styles.inlineAddWorkerBtn,
-                            pressed && { opacity: 0.8 },
-                          ]}
-                        >
-                          <Ionicons name="add" size={12} color="#FFFFFF" />
-                          <Text style={styles.inlineAddWorkerText}>+1</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-
-                    {/* Category */}
-                    {!!job.categoryName && (
-                      <View style={styles.dataItem}>
-                        <Text style={styles.dataLabel}>CATEGORY</Text>
-                        <Text style={styles.dataValue} numberOfLines={1}>
-                          {job.categoryName}
-                        </Text>
-                      </View>
+                    {!!job.createdAt && (
+                      <>
+                        <View style={styles.metaColumnDivider} />
+                        <View style={styles.postedDateGroup}>
+                          <Ionicons name="calendar-outline" size={13} color="#718178" />
+                          <Text style={styles.cardTimeText} numberOfLines={1}>
+                            {formatPostedDate(job.createdAt)}
+                          </Text>
+                        </View>
+                      </>
                     )}
                   </View>
 
-                  {/* Applicants Summary */}
-                  {(job.applicantCount || 0) > 0 ? (
-                    <Pressable
-                      onPress={() => setApplicationsJob(job)}
-                      style={styles.applicantBar}
-                    >
-                      <ApplicantAvatarStack
-                        applicants={job.applicants}
-                        totalCount={job.applicantCount}
-                      />
-                      <View style={{ marginLeft: 8, flex: 1 }}>
-                        <Text style={styles.applicantBarTitle}>
-                          {job.applicantCount} {job.applicantCount === 1 ? "Candidate Applied" : "Candidates Applied"}
-                        </Text>
-                        <Text style={styles.applicantBarHint}>
-                          Tap to view candidate details
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={15} color="#2563EB" />
-                    </Pressable>
-                  ) : (
-                    <View style={styles.noApplicantBar}>
-                      <Ionicons name="people-outline" size={15} color={dash.muted} />
-                      <Text style={styles.noApplicantText}>
-                        0 Applicants so far • Ready for workers to apply
+                  <View style={styles.cardUtilityRow}>
+                    <View style={styles.attributeTags}>
+                      {attributeTags.map((tag) => (
+                        <View key={tag.label} style={styles.attributeTag}>
+                          <Ionicons name={tag.icon} size={12} color="#52645A" />
+                          <Text style={styles.attributeTagText} numberOfLines={1} ellipsizeMode="clip" adjustsFontSizeToFit minimumFontScale={0.6}>{tag.label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+
+                  <SmoothPausedBanner isPaused={isPaused} />
+
+                  {isJobCompleted(job) && (
+                    <View style={styles.completedNoticeBar}>
+                      <Ionicons name="checkmark-circle" size={15} color="#059669" />
+                      <Text style={styles.completedNoticeText} numberOfLines={1}>
+                        {(job.completedCount || 0) > 0
+                          ? `Work completed • ${job.completedCount} hire${job.completedCount === 1 ? "" : "s"} completed`
+                          : "Job listing completed • Lifetime history retained"}
                       </Text>
                     </View>
                   )}
 
-                  {/* Bottom Management Actions: View Applications + View Details */}
+                  <View style={styles.essentialDataGrid}>
+                    <View style={[styles.dataItem, styles.payDataItem]}>
+                      <Text style={styles.dataLabel}>Pay rate</Text>
+                      <View style={styles.payRow}>
+                        <Text style={styles.payAmount} numberOfLines={1}>
+                          ₹{((job.payPaise || 0) / 100).toLocaleString("en-IN")}
+                        </Text>
+                        <Text style={styles.payUnit}>
+                          /{formatPayUnit(job.payUnit)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.dataDivider} />
+                    <View style={styles.dataItem}>
+                      <Text style={styles.dataLabel}>Job type</Text>
+                      <Text style={styles.workerCountText} numberOfLines={1}>
+                        {getJobTypeLabel(job)}
+                      </Text>
+                    </View>
+                  </View>
+
                   <View style={styles.cardFooterActions}>
-                    {/* View Applications Button Column */}
                     <View style={styles.actionBtnCol}>
                       <Pressable
                         accessibilityRole="button"
@@ -874,10 +1143,12 @@ export default function ActivityScreen() {
                         })}
                       >
                         <View style={[styles.footerBtnBase, styles.viewAppsBtn]}>
-                          <Ionicons name="people" size={16} color={dash.primary} />
-                          <Text style={styles.viewAppsBtnText} numberOfLines={1}>
-                            View Applications
-                          </Text>
+                          <View style={styles.appsLabelGroup}>
+                            <Ionicons name="people-outline" size={16} color="#FFFFFF" />
+                            <Text style={styles.viewAppsBtnText} numberOfLines={1}>
+                              Review
+                            </Text>
+                          </View>
                           {(job.applicantCount || 0) > 0 && (
                             <View style={styles.appsCountBadge}>
                               <Text style={styles.appsCountBadgeText}>
@@ -889,7 +1160,6 @@ export default function ActivityScreen() {
                       </Pressable>
                     </View>
 
-                    {/* View Details Button Column */}
                     <View style={styles.actionBtnCol}>
                       <Pressable
                         accessibilityRole="button"
@@ -904,17 +1174,121 @@ export default function ActivityScreen() {
                           <Text style={styles.viewJobBtnText} numberOfLines={1}>
                             View Details
                           </Text>
-                          <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                          <Ionicons
+                            name="arrow-forward"
+                            size={15}
+                            color={dash.primary}
+                          />
                         </View>
                       </Pressable>
                     </View>
                   </View>
+
+                  {hasAcceptedSeeker && (selectedFilter === "active" || selectedFilter === "hired") && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={canMarkComplete
+                        ? `Mark work complete for ${awaitingProvider} seekers`
+                        : completionDisabledLabel}
+                      accessibilityState={{ disabled: !canMarkComplete || completeWorkMutation.isPending }}
+                      disabled={!canMarkComplete || completeWorkMutation.isPending}
+                      onPress={() => confirmJobCompletion(job)}
+                      style={({ pressed }) => [
+                        styles.completeWorkButton,
+                        !canMarkComplete && styles.completeWorkButtonDisabled,
+                        pressed && canMarkComplete && !completeWorkMutation.isPending && { opacity: 0.86 },
+                        completeWorkMutation.isPending && { opacity: 0.72 },
+                      ]}
+                    >
+                      {canMarkComplete ? (
+                        completeWorkMutation.isPending && (completeWorkMutation.variables as any)?.jobId === job.id
+                          ? <ActivityIndicator size="small" color="#FFFFFF" />
+                          : <Ionicons name="checkmark-done-circle-outline" size={17} color={dash.primary} />
+                      ) : (
+                        <Ionicons name={awaitingSeeker > 0 ? "time-outline" : "lock-closed-outline"} size={15} color="#718078" />
+                      )}
+                      <Text style={[styles.completeWorkButtonText, !canMarkComplete && styles.completeWorkButtonTextDisabled]} numberOfLines={1}>
+                        {canMarkComplete
+                          ? `Mark work complete · ${awaitingProvider}`
+                          : completionDisabledLabel}
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  {(job.workAwaitingSeekerCount || 0) > 0 && (
+                    <View style={styles.completionWaitingNote}>
+                      <Ionicons name="time-outline" size={14} color="#566B60" />
+                      <Text style={styles.completionWaitingText}>
+                        Waiting for {job.workAwaitingSeekerCount} seeker{job.workAwaitingSeekerCount === 1 ? "" : "s"} to confirm
+                      </Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
+            {(selectedFilter === "completed" || selectedFilter === "history") && filteredJobs.length > historyLimit ? (
+              <View style={styles.historyLoadMoreBox}>
+                <Text style={styles.historyCountLabel}>
+                  Showing {Math.min(historyLimit, filteredJobs.length)} of {filteredJobs.length} completed postings
+                </Text>
+                <Pressable
+                  style={styles.historyLoadMoreBtn}
+                  onPress={() => setHistoryLimit((prev) => prev + 15)}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="time-outline" size={16} color="#059669" />
+                  <Text style={styles.historyLoadMoreBtnText}>Load more history</Text>
+                </Pressable>
+              </View>
+            ) : (selectedFilter === "completed" || selectedFilter === "history") && filteredJobs.length > 0 ? (
+              <View style={styles.historyLoadMoreBox}>
+                <Text style={styles.historyCountLabel}>
+                  Showing all {filteredJobs.length} completed postings
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!jobToComplete}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setJobToComplete(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setJobToComplete(null)} />
+          <View style={styles.completeModalBox}>
+            <View style={styles.completeIconCircle}>
+              <Ionicons name="checkmark-done" size={24} color="#087B55" />
+            </View>
+            <Text style={styles.completeModalTitle}>
+              Mark work complete for {jobToComplete?.workAwaitingProviderCount || 1} seeker{(jobToComplete?.workAwaitingProviderCount || 1) === 1 ? "" : "s"}?
+            </Text>
+            <Text style={styles.completeModalDesc}>
+              They’ll be notified to confirm. Work is complete once you both confirm.
+            </Text>
+            <View style={styles.completeModalBtns}>
+              <Pressable onPress={() => setJobToComplete(null)} style={styles.completeCancelBtn}>
+                <Text style={styles.completeCancelText}>Not yet</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (jobToComplete) {
+                    completeWorkMutation.mutate({ jobId: jobToComplete.id });
+                    setJobToComplete(null);
+                  }
+                }}
+                style={styles.completeConfirmBtn}
+              >
+                <Ionicons name="notifications-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.completeConfirmText}>Notify seekers</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Stop Posting / Pause Confirmation Modal with Clear Explanation */}
       <Modal
@@ -924,7 +1298,10 @@ export default function ActivityScreen() {
         onRequestClose={() => setJobToPause(null)}
       >
         <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setJobToPause(null)} />
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setJobToPause(null)}
+          />
           <View style={styles.confirmModalBox}>
             <View style={styles.pauseIconCircle}>
               <Ionicons name="pause" size={22} color="#D97706" />
@@ -946,14 +1323,24 @@ export default function ActivityScreen() {
               <Pressable
                 onPress={() => {
                   if (jobToPause) {
-                    actionMutation.mutate({ jobId: jobToPause.id, action: "pause" });
+                    actionMutation.mutate({
+                      jobId: jobToPause.id,
+                      action: "pause",
+                    });
                   }
                 }}
                 disabled={actionMutation.isPending}
                 style={styles.confirmPauseBtn}
               >
                 {actionMutation.isPending ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
                     <ActivityIndicator size="small" color="#FFFFFF" />
                     <Text style={styles.confirmPauseText}>Stopping...</Text>
                   </View>
@@ -974,15 +1361,20 @@ export default function ActivityScreen() {
         onRequestClose={() => setJobToDelete(null)}
       >
         <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setJobToDelete(null)} />
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setJobToDelete(null)}
+          />
           <View style={styles.confirmModalBox}>
             <View style={styles.deleteIconCircle}>
               <Ionicons name="trash-outline" size={22} color="#EF4444" />
             </View>
 
-            <Text style={styles.confirmModalTitle}>Delete Job?</Text>
-            <Text style={styles.confirmModalDesc} numberOfLines={1}>
-              This job will be permanently removed.
+            <Text style={styles.confirmModalTitle}>{isHistorySelected && jobToDelete && isJobCompleted(jobToDelete) ? "Remove from history?" : "Remove Job Listing?"}</Text>
+            <Text style={styles.confirmModalDesc} numberOfLines={3}>
+              {isHistorySelected && jobToDelete && isJobCompleted(jobToDelete)
+                ? "This completed job will be removed from your history. Seekers’ history and reviews will remain."
+                : "This closes the listing and cancels outstanding applications. Completed work, reviews, and lifetime totals stay in your history."}
             </Text>
 
             <View style={styles.confirmModalBtns}>
@@ -996,14 +1388,24 @@ export default function ActivityScreen() {
               <Pressable
                 onPress={() => {
                   if (jobToDelete) {
-                    actionMutation.mutate({ jobId: jobToDelete.id, action: "cancel" });
+                    actionMutation.mutate({
+                      jobId: jobToDelete.id,
+                      action: isHistorySelected && isJobCompleted(jobToDelete) ? "remove-history" : "delete",
+                    });
                   }
                 }}
                 disabled={actionMutation.isPending}
                 style={styles.confirmDeleteBtn}
               >
                 {actionMutation.isPending ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
                     <ActivityIndicator size="small" color="#FFFFFF" />
                     <Text style={styles.confirmDeleteText}>Deleting...</Text>
                   </View>
@@ -1020,14 +1422,27 @@ export default function ActivityScreen() {
       <JobApplicationsModal
         visible={!!applicationsJob}
         jobId={applicationsJob?.id}
-        jobTitle={applicationsJob?.title}
         initialApplicants={applicationsJob?.applicants}
         initialApplicantCount={applicationsJob?.applicantCount}
         onClose={() => setApplicationsJob(null)}
       />
 
+      <JobCompletionConfirmationSheet
+        visible={!!feedbackInteraction}
+        interaction={feedbackInteraction}
+        isOwner
+        onClose={() => {
+          setFeedbackInteraction(null);
+          router.setParams({ completionInteractionId: undefined });
+        }}
+        onConfirm={async () => undefined}
+        onReviewJob={(interaction) => {
+          if (interaction.jobId) router.push(`/jobs/${interaction.jobId}`);
+        }}
+      />
+
       {/* Floating Bottom Navigation Bar */}
-      <ProviderBottomNav active="jobs" />
+      <ProviderBottomNav active="jobs" visible={navVisible} />
     </View>
   );
 }
@@ -1041,16 +1456,17 @@ const styles = StyleSheet.create({
   },
   toast: {
     position: "absolute",
-    top: 60,
+    top: 52,
+    maxWidth: "84%",
     alignSelf: "center",
     zIndex: 999,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     backgroundColor: "#1E293B",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
@@ -1059,8 +1475,9 @@ const styles = StyleSheet.create({
   },
   toastText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "600",
   },
   header: {
     backgroundColor: "#FFFFFF",
@@ -1086,6 +1503,7 @@ const styles = StyleSheet.create({
   },
   titleArea: {
     flex: 1,
+    minWidth: 0,
   },
   titleRow: {
     flexDirection: "row",
@@ -1094,78 +1512,105 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "900",
     color: dash.ink,
     letterSpacing: -0.6,
   },
   headerCountGroup: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
+    alignItems: "stretch",
+    gap: 8,
+    width: "100%",
+    marginTop: 10,
   },
   activeBadge: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: dash.softGreen,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
+    justifyContent: "space-between",
+    gap: 8,
+    backgroundColor: "#F0F8F3",
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    minHeight: 52,
+    borderRadius: 15,
     borderWidth: 1,
-    borderColor: "#D1EAD8",
+    borderColor: "#D8EBDE",
   },
-  activeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: dash.secondary,
+  activeBadgeIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#DDF1E4",
+  },
+  statusBadgeLabelGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
   },
   activeBadgeText: {
-    color: dash.primary,
-    fontSize: 12,
+    color: "#4D705C",
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  statusBadgeCount: {
+    color: "#174E32",
+    fontSize: 16,
+    lineHeight: 19,
     fontWeight: "800",
-    letterSpacing: -0.2,
+    letterSpacing: -0.25,
+    fontVariant: ["tabular-nums"],
+    flexShrink: 0,
   },
   inactiveBadge: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
+    justifyContent: "space-between",
+    gap: 8,
+    backgroundColor: "#F4F6F5",
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    minHeight: 52,
+    borderRadius: 15,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "#E4EAE6",
   },
   inactiveBadgeActive: {
-    backgroundColor: "#FEF3C7",
-    borderColor: "#FDE68A",
+    backgroundColor: "#FFF8EC",
+    borderColor: "#F2DFC0",
   },
-  inactiveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#94A3B8",
+  inactiveBadgeIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E7ECE9",
   },
-  inactiveDotActive: {
-    backgroundColor: "#D97706",
+  inactiveBadgeIconActive: {
+    backgroundColor: "#F9EACD",
+  },
+  inactiveBadgeCountActive: {
+    color: "#8E5B17",
   },
   inactiveBadgeText: {
-    color: "#64748B",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: -0.2,
+    color: "#68766F",
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontWeight: "700",
+    flexShrink: 1,
   },
   inactiveBadgeTextActive: {
-    color: "#B45309",
-  },
-  subtitle: {
-    fontSize: 13,
-    color: dash.muted,
-    marginTop: 3,
-    lineHeight: 18,
+    color: "#926321",
   },
   postBtn: {
     flexDirection: "row",
@@ -1185,8 +1630,35 @@ const styles = StyleSheet.create({
   },
   postBtnText: {
     color: "#FFFFFF",
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "700",
+  },
+  historyLoadMoreBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 18,
+    gap: 8,
+  },
+  historyCountLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  historyLoadMoreBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  historyLoadMoreBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#059669",
   },
   filterContainer: {
     width: "100%",
@@ -1215,7 +1687,7 @@ const styles = StyleSheet.create({
     borderColor: dash.primary,
   },
   filterChipText: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     fontWeight: "700",
     color: dash.muted,
   },
@@ -1232,7 +1704,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.25)",
   },
   filterCountText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: "800",
     color: dash.ink,
   },
@@ -1357,16 +1829,35 @@ const styles = StyleSheet.create({
   jobCard: {
     width: "100%",
     backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 18,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#E6ECE8",
-    shadowColor: "#0A281E",
+    gap: 9,
+    shadowColor: "#143B2B",
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.045,
     shadowRadius: 8,
     elevation: 2,
-    gap: 12,
+  },
+  completedNoticeBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  completedNoticeText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#047857",
+    flex: 1,
   },
   pausedNoticeBar: {
     flexDirection: "row",
@@ -1408,232 +1899,245 @@ const styles = StyleSheet.create({
   cardHeaderTop: {
     flexDirection: "row",
     alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
   },
   roleTitleGroup: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 10,
     flex: 1,
+    minWidth: 0,
   },
   roleIconBox: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 13,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   cardHeaderText: {
     flex: 1,
+    minWidth: 0,
+    gap: 6,
   },
-  titleStatusRow: {
+  cardCategoryPill: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: "#E9F5ED",
+  },
+  cardCategoryText: {
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#075B43",
+  },
+  topRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 9,
+    marginTop: -2,
+    flexShrink: 0,
+  },
+  topMiniAction: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  pauseMiniAction: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#A7F3D0",
+  },
+  resumeMiniAction: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
+  },
+  deleteMiniAction: {
+    width: 28,
+    height: 28,
+    paddingHorizontal: 0,
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FEE2E2",
+  },
+  pauseMiniActionText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  resumeMiniActionText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#DC2626",
+  },
+  miniActionPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.94 }],
+  },
+  cardUtilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 28,
+    width: "100%",
   },
   jobTitle: {
     fontSize: 15.5,
+    lineHeight: 20,
     fontWeight: "800",
     color: dash.ink,
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
+    flexShrink: 1,
+    marginTop: 3,
+    marginBottom: 0,
   },
   cardMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    marginTop: 3,
+    minHeight: 34,
+    gap: 9,
+    marginTop: 2,
+    paddingHorizontal: 10,
+    borderRadius: 11,
+    backgroundColor: "#F7F9F7",
+    borderWidth: 1,
+    borderColor: "#EDF1EE",
+    minWidth: 0,
+  },
+  cardMetaLocation: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  metaColumnDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: "#E1E8E3",
+  },
+  postedDateGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 5,
+    flexShrink: 0,
   },
   cardLocationText: {
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
     fontSize: 12,
     color: dash.muted,
     fontWeight: "600",
-    maxWidth: "60%",
-  },
-  metaDot: {
-    fontSize: 10,
-    color: "#94A3B8",
-    marginHorizontal: 2,
   },
   cardTimeText: {
     fontSize: 11.5,
     color: "#94A3B8",
     fontWeight: "500",
+    flexShrink: 0,
   },
-  statusPill: {
+  attributeTags: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "stretch",
+    gap: 6,
+    minWidth: 0,
+  },
+  attributeTag: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
+    justifyContent: "center",
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 4,
+    borderRadius: 11,
+    backgroundColor: "#F3F6F4",
     borderWidth: 1,
+    borderColor: "#E7ECE8",
   },
-  statusDot: {
-    width: 5.5,
-    height: 5.5,
-    borderRadius: 2.75,
-  },
-  statusText: {
-    fontSize: 10.5,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  topRightActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  topActionPill: {
-    height: 32,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4.5,
-  },
-  topStopPill: {
-    backgroundColor: "#FFFBEB",
-    borderWidth: 1.2,
-    borderColor: "#FDE68A",
-  },
-  topStopPillText: {
-    fontSize: 12,
+  attributeTagText: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 9,
+    lineHeight: 11,
     fontWeight: "700",
-    color: "#D97706",
-  },
-  topResumePill: {
-    backgroundColor: "#F0FDF4",
-    borderWidth: 1.2,
-    borderColor: "#BBF7D0",
-  },
-  topResumePillText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#15803D",
-  },
-  topIconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  topDeleteBtn: {
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1.2,
-    borderColor: "#FEE2E2",
+    color: "#52645A",
+    textAlign: "center",
   },
   essentialDataGrid: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#F9FAF9",
-    padding: 10,
+    alignItems: "stretch",
+    gap: 0,
+    backgroundColor: "#EEF6F0",
+    paddingVertical: 9,
+    paddingHorizontal: 3,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#EEF2EE",
+    borderColor: "#E3EEE6",
   },
   dataItem: {
     flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 8,
+    justifyContent: "center",
+  },
+  payDataItem: { flex: 1.5 },
+  dataDivider: {
+    width: 1,
+    alignSelf: "stretch",
+    backgroundColor: "#E2E9E4",
+    marginVertical: 2,
   },
   dataLabel: {
-    fontSize: 9.5,
-    fontWeight: "700",
-    color: "#94A3B8",
-    letterSpacing: 0.4,
-    marginBottom: 2,
+    fontSize: 9,
+    fontWeight: "600",
+    color: dash.muted,
+    marginBottom: 3,
   },
   payRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "baseline",
     gap: 2,
   },
   payAmount: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: "900",
     color: dash.primary,
+    flexShrink: 0,
   },
   payUnit: {
-    fontSize: 10.5,
+    fontSize: 9,
     fontWeight: "700",
     color: dash.primarySoft,
-  },
-  workerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
+    flexShrink: 0,
   },
   workerCountText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: dash.ink,
-  },
-  inlineAddWorkerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: dash.primary,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  inlineAddWorkerText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  dataValue: {
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: "700",
-    color: "#475569",
-  },
-  applicantBar: {
-    backgroundColor: "#F5F8FF",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  applicantBarTitle: {
-    fontSize: 12.5,
-    fontWeight: "800",
-    color: "#1E40AF",
-  },
-  applicantBarHint: {
-    fontSize: 11,
-    color: "#3B82F6",
-    fontWeight: "600",
-    marginTop: 1,
-  },
-  noApplicantBar: {
-    backgroundColor: "#F8FAF8",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "#EAEFEA",
-  },
-  noApplicantText: {
-    fontSize: 11.5,
-    fontWeight: "600",
-    color: dash.muted,
+    color: dash.ink,
   },
   cardFooterActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginTop: 6,
-    paddingTop: 10,
+    gap: 8,
+    marginTop: 3,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: "#F1F5F2",
     width: "100%",
@@ -1650,59 +2154,150 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
   },
   viewAppsBtn: {
-    backgroundColor: dash.softGreen,
-    borderWidth: 1.5,
-    borderColor: "#A7F3D0",
-    borderRadius: 14,
-  },
-  viewAppsBtnText: {
-    fontSize: 12.5,
-    fontWeight: "800",
-    color: dash.primary,
-    letterSpacing: -0.2,
-  },
-  appsCountBadge: {
     backgroundColor: dash.primary,
-    minWidth: 19,
-    height: 19,
-    borderRadius: 9.5,
+    borderRadius: 14,
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+  },
+  appsLabelGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  viewAppsBtnText: { fontSize: 12, fontWeight: "700", color: "#FFFFFF", flexShrink: 1 },
+  appsCountBadge: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
     paddingHorizontal: 5,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 2,
+    marginLeft: 8,
   },
   appsCountBadgeText: {
     fontSize: 11,
     fontWeight: "900",
     color: "#FFFFFF",
   },
-  viewJobBtn: {
+  viewJobBtn: { backgroundColor: "#EDF4EF", borderRadius: 14 },
+  viewJobBtnText: { fontSize: 12.5, fontWeight: "600", color: dash.primary },
+  completeWorkButton: {
+    width: "100%",
+    minHeight: 42,
+    marginTop: 9,
+    paddingHorizontal: 12,
+    borderRadius: 13,
     backgroundColor: dash.primary,
-    borderRadius: 14,
-    shadowColor: dash.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
   },
-  viewJobBtnText: {
-    fontSize: 12.5,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: -0.2,
+  completeWorkButtonDisabled: {
+    backgroundColor: "#F1F5F2",
+    borderWidth: 1,
+    borderColor: "#E3EAE5",
   },
+  completeWorkButtonText: { color: "#FFFFFF", fontSize: 12.5, fontWeight: "700" },
+  completeWorkButtonTextDisabled: { color: "#718078", fontWeight: "600" },
+  completionWaitingNote: {
+    width: "100%",
+    minHeight: 34,
+    marginTop: 7,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F2",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  completionWaitingText: { color: "#566B60", fontSize: 11.5, fontWeight: "600" },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    backgroundColor: "rgba(18, 38, 29, 0.28)",
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 20,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
+  },
+  completeModalBox: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 22,
+    alignItems: "flex-start",
+    shadowColor: "#10251C",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  completeIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "#E8F5EE",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  completeModalTitle: {
+    color: "#17221C",
+    fontSize: 21,
+    lineHeight: 27,
+    fontWeight: "800",
+    letterSpacing: -0.35,
+  },
+  completeModalDesc: {
+    color: "#68756D",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    marginBottom: 22,
+  },
+  completeModalBtns: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+  },
+  completeCancelBtn: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E4EAE5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completeCancelText: {
+    color: "#536159",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  completeConfirmBtn: {
+    flex: 1,
+    minHeight: 48,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: "#087B55",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completeConfirmText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
   confirmModalBox: {
     backgroundColor: "#FFFFFF",

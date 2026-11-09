@@ -13,13 +13,18 @@ import { requireAuth } from "./modules/auth/session";
 import { jobRoutes } from "./modules/jobs/routes";
 import { savedPlacesRoutes } from "./modules/locations/saved-places";
 import { services, requests } from "./modules/services/routes";
+import { marketplace } from "./modules/services/marketplace";
 import { interactions } from "./modules/interactions/routes";
+import { dedupeLatestJobApplications } from "./modules/interactions/normalize";
 import { trust } from "./modules/trust/routes";
 import { images } from "./modules/images/routes";
+import { stories } from "./modules/images/stories";
+import { appAssets } from "./modules/images/assets";
 import { profiles } from "./modules/profiles/routes";
 import { consumeAuthEvents } from "./modules/auth/audit";
 import { locations } from "./modules/users/locations";
 import { notificationRoutes } from "./modules/notifications/routes";
+import { consumePushQueue, runPushMaintenance } from "./modules/notifications/push";
 export { AuthCoordinator } from "./modules/auth/coordinator";
 
 const app = new Hono<AppEnv>();
@@ -174,6 +179,8 @@ app.post("/api/v1/webhooks/msg91", async (c) => {
 app.route("/api/v1/auth", auth);
 app.route("/api/auth", auth);
 app.route("/api/v1/images", images);
+app.route("/api/v1/stories", stories);
+app.route("/api/v1/assets", appAssets);
 app.route("/api/v1/profiles", profiles);
 app.get("/api/v1/categories", async (c) => {
   const db = drizzle(c.env.DB);
@@ -181,13 +188,43 @@ app.get("/api/v1/categories", async (c) => {
     db.select().from(categories),
     db.select().from(roles),
   ]);
-  c.header("Cache-Control", "public,max-age=86400");
+  c.header("Cache-Control", "no-cache, no-store, must-revalidate");
   return ok(c, {
     categories: categoryRows,
     roles: roleRows,
     locations: [],
-    version: 1,
+    version: Date.now(),
   });
+});
+
+app.post("/api/v1/categories", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const id = String(body.id || "").toLowerCase().trim().replace(/[^a-z0-9-_]/g, "-");
+  const name = String(body.name || "").trim();
+  const icon = String(body.icon || "📋").trim();
+  const kind = body.kind === "service" ? "service" : "job";
+  if (!id || !name) throw new ApiError("VALIDATION_ERROR", 400, "Category id and name are required");
+  const db = drizzle(c.env.DB);
+  await db.insert(categories).values({ id, name, icon, kind }).onConflictDoNothing();
+  return ok(c, { id, name, icon, kind });
+});
+
+app.post("/api/v1/roles", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const id = String(body.id || "").toLowerCase().trim().replace(/[^a-z0-9-_]/g, "-");
+  const categoryId = String(body.categoryId || "").toLowerCase().trim();
+  const name = String(body.name || "").trim();
+  const icon = String(body.icon || "💼").trim();
+  if (!id || !categoryId || !name) throw new ApiError("VALIDATION_ERROR", 400, "Role id, categoryId, and name are required");
+  const db = drizzle(c.env.DB);
+  // Ensure category exists first
+  const existingCat = await db.select().from(categories).where(eq(categories.id, categoryId)).get();
+  if (!existingCat) {
+    const catName = categoryId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    await db.insert(categories).values({ id: categoryId, name: catName, icon: "📋", kind: "job" }).onConflictDoNothing();
+  }
+  await db.insert(roles).values({ id, categoryId, name, icon }).onConflictDoNothing();
+  return ok(c, { id, categoryId, name, icon });
 });
 
 // ── Category Services — GET /api/v1/categories/:categoryId/services ──
@@ -845,6 +882,9 @@ app.get("/api/v1/activity", requireAuth, async (c) => {
         i.worker_id AS workerId,
         i.owner_confirmed_at AS ownerConfirmedAt,
         i.worker_confirmed_at AS workerConfirmedAt,
+        i.completion_rejected_at AS completionRejectedAt,
+        i.completion_rejected_by AS completionRejectedBy,
+        i.completion_rejection_reason AS completionRejectionReason,
         i.details,
         i.created_at AS createdAt,
         i.accepted_at AS acceptedAt,
@@ -859,7 +899,7 @@ app.get("/api/v1/activity", requireAuth, async (c) => {
         j.starts_at AS startsAt,
         u.id AS otherId,
         u.name AS otherName,
-        CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') AND u.suspended=0 AND (i.kind='job' OR s.archived_at IS NULL) AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=i.owner_id AND b.target_id=i.worker_id) OR (b.user_id=i.worker_id AND b.target_id=i.owner_id)) THEN u.phone ELSE NULL END AS otherPhone,
+        CASE WHEN i.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED') AND u.suspended=0 AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=i.owner_id AND b.target_id=i.worker_id) OR (b.user_id=i.worker_id AND b.target_id=i.owner_id)) THEN u.phone ELSE NULL END AS otherPhone,
         u.photo_url AS otherPhotoUrl,
         EXISTS(SELECT 1 FROM reviews WHERE interaction_id=i.id AND author_id=?) AS reviewed 
       FROM interactions i 
@@ -868,22 +908,40 @@ app.get("/api/v1/activity", requireAuth, async (c) => {
       LEFT JOIN service_profiles s ON s.id=i.service_id 
       LEFT JOIN categories c ON c.id=s.category_id 
       JOIN users u ON u.id=CASE WHEN i.owner_id=? THEN i.worker_id ELSE i.owner_id END 
-      WHERE i.owner_id=? OR i.worker_id=? 
-      ORDER BY i.created_at DESC 
+      WHERE (i.owner_id=? OR i.worker_id=?)
+        AND i.owner_id != i.worker_id
+        AND (
+          (i.kind='job' AND i.job_id IS NOT NULL AND j.id IS NOT NULL AND j.owner_id=i.owner_id
+            AND (i.status='COMPLETED' OR i.accepted_at IS NOT NULL OR j.status!='DELETED'))
+          OR
+          (i.kind='service' AND i.service_id IS NOT NULL AND s.id IS NOT NULL AND s.user_id=i.owner_id)
+        )
+      ORDER BY CASE WHEN i.kind='job' AND (
+        i.completion_rejected_at IS NOT NULL OR
+        (i.status='IN_PROGRESS' AND (
+          i.completion_rejected_at IS NULL AND (
+            (i.owner_id=? AND i.owner_confirmed_at IS NULL AND i.worker_confirmed_at IS NOT NULL) OR
+            (i.worker_id=? AND i.worker_confirmed_at IS NULL AND i.owner_confirmed_at IS NOT NULL)
+          )
+        )) OR
+        (i.status='COMPLETED' AND NOT EXISTS(
+          SELECT 1 FROM reviews pending_review WHERE pending_review.interaction_id=i.id AND pending_review.author_id=?
+        ))
+      ) THEN 0 ELSE 1 END, i.created_at DESC
       LIMIT 100`,
     )
-      .bind(uid, uid, uid, uid)
+      .bind(uid, uid, uid, uid, uid, uid, uid)
       .all(),
     c.env.DB.prepare(
-      "SELECT j.id,COALESCE(NULLIF(j.title, ''), r.name, 'Job') AS title,j.status,j.pay_paise AS payPaise,j.pay_unit AS payUnit,j.area,j.starts_at AS startsAt,j.created_at AS createdAt FROM jobs j LEFT JOIN roles r ON r.id=j.role_id WHERE owner_id=? ORDER BY j.created_at DESC LIMIT 100",
+      "SELECT j.id,COALESCE(NULLIF(j.title, ''), r.name, 'Job') AS title,j.status,j.pay_paise AS payPaise,j.pay_unit AS payUnit,j.area,j.starts_at AS startsAt,j.created_at AS createdAt FROM jobs j LEFT JOIN roles r ON r.id=j.role_id WHERE owner_id=? AND status != 'DELETED' ORDER BY j.created_at DESC LIMIT 100",
     )
       .bind(uid)
       .all(),
   ]);
-  const sanitizedInteractions = (rows.results || []).map((row: any) => ({
+  const sanitizedInteractions = dedupeLatestJobApplications((rows.results || []).map((row: any) => ({
     ...row,
     otherPhone: row.otherPhone ? formatDirectPhone(row.otherPhone) : null,
-  }));
+  })));
   return ok(c, { interactions: sanitizedInteractions, jobs: owned.results });
 });
 app.get("/api/v1/admin/usage", requireAuth, async (c) => {
@@ -917,6 +975,8 @@ app.get("/api/v1/admin/providers/by-phone/:phone", requireAuth, async (c) => {
 });
 app.route("/api/v1/jobs", jobRoutes);
 app.route("/api/v1/saved-places", savedPlacesRoutes);
+app.route("/api/v1/service", marketplace);
+app.route("/api/v1/provider", marketplace);
 app.route("/api/v1/services", services);
 app.route("/api/v1/service-requests", requests);
 app.route("/api/v1/applications", interactions);
@@ -925,4 +985,20 @@ app.route("/api/v1/notifications", notificationRoutes);
 app.route("/api/v1", trust);
 app.route("/api/v1", locations);
 export { app };
-export default { fetch: app.fetch, queue: consumeAuthEvents };
+async function queue(batch: MessageBatch<any>, env: AppEnv["Bindings"]) {
+  if (batch.queue.startsWith("bulao-push-deliveries-")) {
+    await consumePushQueue(batch as MessageBatch<{ deliveryId: string }>, env);
+    return;
+  }
+  await consumeAuthEvents(batch as MessageBatch<import("./modules/auth/audit").AuthEvent>, env);
+}
+
+export default {
+  fetch: app.fetch,
+  queue,
+  scheduled(_controller: ScheduledController, env: AppEnv["Bindings"], ctx: ExecutionContext) {
+    ctx.waitUntil(runPushMaintenance(env).catch((error) => {
+      console.error(JSON.stringify({ event: "PUSH_MAINTENANCE_FAILED", error: String(error) }));
+    }));
+  },
+};

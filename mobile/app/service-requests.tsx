@@ -1,18 +1,20 @@
+import { AppImage as Image } from '../src/components/AppImage';
 import { invalidateServiceQueries } from "../src/api/serviceApi";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
+  Animated,
+  Easing,
   View,
   Text,
   Pressable,
   ScrollView,
   ActivityIndicator,
-  Image,
   RefreshControl,
   StyleSheet,
   Alert,
   Linking,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +24,10 @@ import { useAuth } from "../src/auth";
 import { dash } from "../src/components/provider/palette";
 import { formatDirectPhone } from "@bulao/domain";
 import { ServiceBottomNav } from "../src/components/service/ServiceBottomNav";
+import { ServiceRequestCard } from "../src/components/service/ServiceRequestCard";
+import { ServiceCompletionConfirmationSheet } from "../src/components/service/ServiceCompletionConfirmationSheet";
+import { CancellationModal } from "../src/components/CancellationModal";
+import type { ServiceItem } from "../src/features/profile/types";
 
 type RequestTab = "requested" | "received";
 
@@ -88,7 +94,36 @@ export default function ActivityTabScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<RequestTab>("requested");
+  const params = useLocalSearchParams<{ tab?: string; serviceId?: string }>();
+  const [activeTab, setActiveTab] = useState<RequestTab>(
+    params.tab === "received" || !!params.serviceId ? "received" : "requested",
+  );
+  const [segmentWidth, setSegmentWidth] = useState(0);
+  const tabProgress = useRef(new Animated.Value(activeTab === "received" ? 1 : 0)).current;
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    params.serviceId || null,
+  );
+  const [cancellingRequest, setCancellingRequest] = useState<any | null>(null);
+  const [completionRequest, setCompletionRequest] = useState<any | null>(null);
+  const [completionIsProvider, setCompletionIsProvider] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (params.tab === "received" || params.serviceId) {
+      setActiveTab("received");
+      if (params.serviceId) {
+        setSelectedServiceId(params.serviceId);
+      }
+    }
+  }, [params.tab, params.serviceId]);
+
+  useEffect(() => {
+    Animated.timing(tabProgress, {
+      toValue: activeTab === "received" ? 1 : 0,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab, tabProgress]);
 
   // Fetch Current User
   const meQuery = useQuery({
@@ -97,44 +132,180 @@ export default function ActivityTabScreen() {
     queryFn: () => api<{ id: string; name: string }>("/users/me"),
   });
 
-  // Fetch Activity Data
-  const activityQuery = useQuery({
-    queryKey: ["activity-interactions", session?.token],
+  // Fetch My Services for filtering
+  const myServicesQuery = useQuery({
+    queryKey: ["my-services", session?.token],
+    queryFn: () => api<ServiceItem[]>("/services/mine"),
     enabled: Boolean(session?.token),
-    queryFn: () =>
-      api<{
-        interactions: Connection[];
-        jobs: Array<any>;
-      }>("/activity"),
-    refetchInterval: 15000,
+  });
+  const myServices = myServicesQuery.data || [];
+
+  // Fetch Service Requests Data
+  const activityQuery = useQuery({
+    queryKey: ["service-requests-interactions", session?.token],
+    enabled: Boolean(session?.token),
+    queryFn: async () => {
+      const currentUserId = meQuery.data?.id || "";
+
+      // 1. Try dedicated service interactions endpoint
+      try {
+        const res = await api<{
+          items?: Connection[];
+          interactions?: Connection[];
+        }>("/interactions?kind=service");
+        const list = res?.items || res?.interactions;
+        if (Array.isArray(list) && list.length > 0) {
+          return { interactions: list, jobs: [] };
+        }
+      } catch {
+        // Fall back gracefully to recent services endpoint
+      }
+
+      // 2. Reliable Service Provider Recent Endpoint
+      try {
+        const recent = await api<any[]>("/services/provider/recent");
+        if (Array.isArray(recent)) {
+          const reqItems = recent.filter(
+            (r) => r.applicantCount === 1 || !["PUBLISHED", "PAUSED"].includes(r.status),
+          );
+
+          const myServiceIds = new Set(myServices.map((s) => s.id));
+
+          const mapped: Connection[] = reqItems.map((r) => {
+            const matchedServiceId = r.serviceId || r.roleId || null;
+            const isMyService = matchedServiceId ? myServiceIds.has(matchedServiceId) : true;
+
+            return {
+              id: r.id,
+              kind: "service",
+              jobId: null,
+              serviceId: matchedServiceId,
+              status: r.status || "PENDING",
+              ownerId: isMyService ? currentUserId : (r.ownerId || "provider"),
+              workerId: isMyService ? (r.workerId || "seeker") : currentUserId,
+              title: r.title || "Service Request",
+              otherId: r.otherId || "",
+              otherName: r.otherName || "Customer",
+              otherPhone: r.otherPhone || null,
+              otherPhotoUrl: r.otherPhotoUrl || null,
+              area: r.area || "Local area",
+              createdAt: r.createdAt || Date.now(),
+              details: r.details || "",
+              reviewed: false,
+              ownerConfirmedAt: r.ownerConfirmedAt || null,
+              workerConfirmedAt: r.workerConfirmedAt || null,
+            };
+          });
+
+          return { interactions: mapped, jobs: [] };
+        }
+      } catch (err) {
+        console.warn("[service-requests] recent fetch error:", err);
+      }
+
+      return { interactions: [], jobs: [] };
+    },
+    staleTime: 30000,
   });
 
-  useFocusEffect(useCallback(() => { if (session?.token) void activityQuery.refetch(); }, [session?.token, activityQuery.refetch]));
+  useFocusEffect(
+    useCallback(() => {
+      if (session?.token) void queryClient.invalidateQueries({ queryKey: ["activity"] });
+    }, [session?.token, queryClient]),
+  );
   const userId = meQuery.data?.id;
 
   // 1. Requested Services (Where I am the seeker / workerId)
   const requestedServices = useMemo(() => {
     if (!activityQuery.data?.interactions || !userId) return [];
-    return activityQuery.data.interactions.filter((item) => item.kind === "service" && item.workerId === userId);
+    return activityQuery.data.interactions.filter(
+      (item) => item.kind === "service" && item.workerId === userId,
+    );
   }, [activityQuery.data, userId]);
 
-  // 2. Got Requests for My Service (Where I am the provider / ownerId)
-  const gotRequests = useMemo(() => {
+  // All Got Requests for My Service (Where I am the provider / ownerId)
+  const gotRequestsAll = useMemo(() => {
     if (!activityQuery.data?.interactions || !userId) return [];
-    return activityQuery.data.interactions.filter((item) => item.kind === "service" && item.ownerId === userId);
+    return activityQuery.data.interactions.filter(
+      (item) => item.kind === "service" && item.ownerId === userId,
+    );
   }, [activityQuery.data, userId]);
 
-  // Action Mutation (Accept, Reject, Withdraw, Cancel)
+  // 2. Got Requests (Filtered by selectedServiceId if selected)
+  const gotRequests = useMemo(() => {
+    if (!selectedServiceId) return gotRequestsAll;
+    return gotRequestsAll.filter((item) => item.serviceId === selectedServiceId);
+  }, [gotRequestsAll, selectedServiceId]);
+
+  // Action Mutation with instant optimistic updates
   const actionMutation = useMutation({
-    mutationFn: async ({ id, action }: { id: string; action: string }) => {
-      return api(`/applications/${id}/action`, { action });
+    mutationFn: async ({
+      id,
+      action,
+      reason,
+    }: {
+      id: string;
+      action: string;
+      reason?: string;
+    }) => {
+      return api(`/applications/${id}/action`, { action, reason });
+    },
+    onMutate: async ({ id, action, reason }) => {
+      queryClient.setQueryData(
+        ["activity-interactions", session?.token],
+        (old: any) => {
+          if (!old || !Array.isArray(old.interactions)) return old;
+          return {
+            ...old,
+            interactions: old.interactions.map((item: any) => {
+              if (item.id !== id) return item;
+              if (action === "confirm") {
+                const isProvider = activeTab === "received";
+                const otherConfirmed = isProvider
+                  ? item.workerConfirmedAt
+                  : item.ownerConfirmedAt;
+                return {
+                  ...item,
+                  status: otherConfirmed ? "COMPLETED" : "IN_PROGRESS",
+                  ...(isProvider
+                    ? {
+                        ownerConfirmedAt:
+                          item.ownerConfirmedAt || Math.floor(Date.now() / 1000),
+                      }
+                    : {
+                        workerConfirmedAt:
+                          item.workerConfirmedAt || Math.floor(Date.now() / 1000),
+                      }),
+                };
+              }
+              return {
+                ...item,
+                status:
+                  action === "accept"
+                    ? "ACCEPTED"
+                    : action === "reject"
+                      ? "REJECTED"
+                      : action === "withdraw"
+                        ? "WITHDRAWN"
+                        : "CANCELLED",
+                ...(reason ? { cancellationReason: reason } : {}),
+              };
+            }),
+          };
+        },
+      );
     },
     onSuccess: () => {
       void invalidateServiceQueries(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
+      void queryClient.invalidateQueries({ queryKey: ["activity-interactions"] });
     },
     onError: (err: any) => {
-      Alert.alert("Action Failed", err.message || "Could not update request status.");
+      void queryClient.invalidateQueries({ queryKey: ["activity-interactions"] });
+      Alert.alert(
+        "Action Failed",
+        err.message || "Could not update request status.",
+      );
     },
   });
 
@@ -163,20 +334,42 @@ export default function ActivityTabScreen() {
       <View style={[styles.header, { paddingTop: Math.max(insets.top + 8, 16) }]}>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Service Requests</Text>
-          <Text style={styles.headerSub}>Track requested services & manage incoming bookings</Text>
         </View>
 
         {/* Two Type Segment Tabs */}
-        <View style={styles.segmentBar}>
+        <View
+          style={styles.segmentBar}
+          onLayout={(event) => setSegmentWidth(event.nativeEvent.layout.width)}
+        >
+          {segmentWidth > 0 ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.segmentSelection,
+                {
+                  width: (segmentWidth - 8) / 2,
+                  transform: [
+                    {
+                      translateX: tabProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, (segmentWidth + 8) / 2],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          ) : null}
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ selected: activeTab === "requested" }}
             accessibilityLabel="Requested Services Tab"
             onPress={() => setActiveTab("requested")}
-            style={[styles.segmentBtn, activeTab === "requested" && styles.segmentBtnActive]}
+            style={styles.segmentBtn}
           >
             <Ionicons
               name="paper-plane"
-              size={15}
+              size={14}
               color={activeTab === "requested" ? "#FFFFFF" : "#047857"}
             />
             <Text
@@ -184,6 +377,9 @@ export default function ActivityTabScreen() {
                 styles.segmentBtnText,
                 activeTab === "requested" && styles.segmentBtnTextActive,
               ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
             >
               Requested Services ({requestedServices.length})
             </Text>
@@ -191,13 +387,14 @@ export default function ActivityTabScreen() {
 
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ selected: activeTab === "received" }}
             accessibilityLabel="Got Requests Tab"
             onPress={() => setActiveTab("received")}
-            style={[styles.segmentBtn, activeTab === "received" && styles.segmentBtnActive]}
+            style={styles.segmentBtn}
           >
             <Ionicons
               name="download"
-              size={15}
+              size={14}
               color={activeTab === "received" ? "#FFFFFF" : "#047857"}
             />
             <Text
@@ -205,11 +402,81 @@ export default function ActivityTabScreen() {
                 styles.segmentBtnText,
                 activeTab === "received" && styles.segmentBtnTextActive,
               ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
             >
-              Got Requests ({gotRequests.length})
+              Got Requests ({gotRequestsAll.length})
             </Text>
           </Pressable>
         </View>
+
+        {/* Service Filter Chips for Got Requests */}
+        {activeTab === "received" && myServices.length > 0 && (
+          <View style={styles.servicesFilterBar}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.servicesFilterScroll}
+            >
+              <Pressable
+                onPress={() => setSelectedServiceId(null)}
+                style={[
+                  styles.serviceFilterChip,
+                  !selectedServiceId && styles.serviceFilterChipActive,
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !selectedServiceId }}
+                accessibilityLabel="All services filter"
+              >
+                <Text
+                  style={[
+                    styles.serviceFilterChipText,
+                    !selectedServiceId && styles.serviceFilterChipTextActive,
+                  ]}
+                >
+                  All Services ({gotRequestsAll.length})
+                </Text>
+              </Pressable>
+
+              {myServices.map((svc) => {
+                const isSelected = selectedServiceId === svc.id;
+                const count = gotRequestsAll.filter(
+                  (r) => r.serviceId === svc.id,
+                ).length;
+                return (
+                  <Pressable
+                    key={svc.id}
+                    onPress={() =>
+                      setSelectedServiceId(isSelected ? null : svc.id)
+                    }
+                    style={[
+                      styles.serviceFilterChip,
+                      isSelected && styles.serviceFilterChipActive,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Filter by ${svc.title || svc.categoryName}`}
+                  >
+                    <Ionicons
+                      name="construct-outline"
+                      size={12}
+                      color={isSelected ? "#FFFFFF" : "#047857"}
+                    />
+                    <Text
+                      style={[
+                        styles.serviceFilterChipText,
+                        isSelected && styles.serviceFilterChipTextActive,
+                      ]}
+                    >
+                      {svc.title || svc.categoryName} ({count})
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </View>
 
       {/* Requests List */}
@@ -252,12 +519,18 @@ export default function ActivityTabScreen() {
               />
             </View>
             <Text style={styles.emptyTitle}>
-              {activeTab === "requested" ? "No requested services yet" : "No received requests yet"}
+              {activeTab === "requested"
+                ? "No requested services yet"
+                : selectedServiceId
+                  ? "No requests for this service"
+                  : "No received requests yet"}
             </Text>
             <Text style={styles.emptySub}>
               {activeTab === "requested"
                 ? "When you request a service profile, your active bookings will appear here."
-                : "When customers request your listed services, incoming requests will show up here."}
+                : selectedServiceId
+                  ? "No customer requests received for the selected service yet."
+                  : "When customers request your listed services, incoming requests will show up here."}
             </Text>
             {activeTab === "requested" && (
               <Pressable
@@ -268,10 +541,57 @@ export default function ActivityTabScreen() {
                 <Text style={styles.actionBtnPrimaryText}>Explore Local Services</Text>
               </Pressable>
             )}
+            {activeTab === "received" && selectedServiceId && (
+              <Pressable
+                onPress={() => setSelectedServiceId(null)}
+                style={styles.actionBtnPrimary}
+              >
+                <Text style={styles.actionBtnPrimaryText}>
+                  Show All Requests ({gotRequestsAll.length})
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        ) : activeTab === "received" ? (
+          <View style={styles.listContainer}>
+            {gotRequests.map((item) => (
+              <ServiceRequestCard
+                key={item.id}
+                request={item}
+                onAccept={(req) =>
+                  actionMutation.mutate({ id: req.id, action: "accept" })
+                }
+                onDecline={(req) =>
+                  actionMutation.mutate({ id: req.id, action: "reject" })
+                }
+                onCancel={(req) => setCancellingRequest(req)}
+                onCall={(phone, name) => handleCallUser(phone, name)}
+                onPressDetails={(req) =>
+                  router.push({
+                    pathname: "/requests/[id]",
+                    params: { id: req.id },
+                  })
+                }
+                onCompleteWork={(req) => {
+                  setCompletionRequest(req);
+                  setCompletionIsProvider(true);
+                }}
+                onRateCustomer={(req) => {
+                  setCompletionRequest(req);
+                  setCompletionIsProvider(true);
+                }}
+                isProvider={true}
+                isActing={
+                  actionMutation.isPending &&
+                  (actionMutation.variables as any)?.id === item.id
+                }
+                showServiceTitle={!selectedServiceId}
+              />
+            ))}
           </View>
         ) : (
           <View style={styles.listContainer}>
-            {currentList.map((item) => {
+            {requestedServices.map((item) => {
               const badge = getStatusBadge(item.status);
               const isPending = item.status === "PENDING";
               const isAccepted = item.status === "ACCEPTED" || item.status === "IN_PROGRESS";
@@ -311,7 +631,7 @@ export default function ActivityTabScreen() {
 
                     <View style={{ flex: 1 }}>
                       <Text style={styles.personName} numberOfLines={1}>
-                        {activeTab === "requested" ? `Provider: ${item.otherName}` : `Customer: ${item.otherName}`}
+                        Provider: {item.otherName}
                       </Text>
                       <Text style={styles.personSub} numberOfLines={1}>
                         {item.area ? `${item.area} • ` : ""}{formatRelativeTime(item.createdAt)}
@@ -349,15 +669,13 @@ export default function ActivityTabScreen() {
                         </Text>
                       </View>
                       <Text style={styles.connectedNotice}>
-                        {activeTab === "requested"
-                          ? "The service professional accepted your booking. You can now call each other directly."
-                          : "You accepted this booking. You can now call the customer directly to coordinate."}
+                        The service professional accepted your booking. You can now call each other directly.
                       </Text>
 
                       <View style={styles.directContactRow}>
                         <View style={styles.directContactInfo}>
                           <Text style={styles.directContactLabel}>
-                            {activeTab === "requested" ? "PROVIDER MOBILE" : "CUSTOMER MOBILE"}
+                            PROVIDER MOBILE
                           </Text>
                           <Text style={styles.directContactPhone}>
                             {item.otherPhone ? `+91 ${formatDirectPhone(item.otherPhone)}` : "Contact Available"}
@@ -380,47 +698,15 @@ export default function ActivityTabScreen() {
                     <View style={styles.pendingNoticeBox}>
                       <Ionicons name="time-outline" size={14} color="#B45309" />
                       <Text style={styles.pendingNoticeText}>
-                        {activeTab === "requested"
-                          ? "Awaiting provider acceptance. Mobile numbers will be unlocked once accepted."
-                          : "Customer request pending. Accept request to unlock direct mobile contact."}
+                        Awaiting provider acceptance. Mobile numbers will be unlocked once accepted.
                       </Text>
                     </View>
                   ) : null}
 
                   {/* Interactive Action Buttons */}
                   <View style={styles.actionRow}>
-                    {/* Got Requests Tab: Provider can Accept or Reject */}
-                    {activeTab === "received" && isPending && (
-                      <>
-                        <Pressable
-                          disabled={actionMutation.isPending}
-                          onPress={() => actionMutation.mutate({ id: item.id, action: "accept" })}
-                          style={styles.btnAccept}
-                        >
-                          {actionMutation.isPending &&
-                          (actionMutation.variables as any)?.id === item.id &&
-                          (actionMutation.variables as any)?.action === "accept" ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
-                          ) : (
-                            <>
-                              <Ionicons name="checkmark-circle" size={15} color="#FFFFFF" />
-                              <Text style={styles.btnAcceptText}>Accept Request</Text>
-                            </>
-                          )}
-                        </Pressable>
-
-                        <Pressable
-                          disabled={actionMutation.isPending}
-                          onPress={() => actionMutation.mutate({ id: item.id, action: "reject" })}
-                          style={styles.btnReject}
-                        >
-                          <Text style={styles.btnRejectText}>Decline</Text>
-                        </Pressable>
-                      </>
-                    )}
-
                     {/* Requested Services Tab: Customer can Withdraw if Pending */}
-                    {activeTab === "requested" && isPending && (
+                    {isPending && (
                       <Pressable
                         disabled={actionMutation.isPending}
                         onPress={() => actionMutation.mutate({ id: item.id, action: "withdraw" })}
@@ -430,29 +716,65 @@ export default function ActivityTabScreen() {
                       </Pressable>
                     )}
 
-                    {activeTab === "received" && item.status === "ACCEPTED" && (
-                      <Pressable disabled={actionMutation.isPending} style={styles.btnAccept} onPress={() => actionMutation.mutate({ id: item.id, action: "start" })}><Text style={styles.btnAcceptText}>Start service</Text></Pressable>
-                    )}
-                    {item.status === "IN_PROGRESS" && (
-                      (activeTab === "received" ? item.ownerConfirmedAt : item.workerConfirmedAt)
-                        ? <Text style={styles.waitingConfirmText}>Waiting for confirmation…</Text>
-                        : <Pressable disabled={actionMutation.isPending} style={styles.btnAccept} onPress={() => actionMutation.mutate({ id: item.id, action: "confirm" })}><Text style={styles.btnAcceptText}>Confirm completion</Text></Pressable>
-                    )}
                     {["ACCEPTED", "IN_PROGRESS"].includes(item.status) && (
-                      <Pressable disabled={actionMutation.isPending} style={styles.btnWithdraw} onPress={() => actionMutation.mutate({ id: item.id, action: "cancel" })}><Text style={styles.btnWithdrawText}>Cancel</Text></Pressable>
+                      item.workerConfirmedAt ? (
+                        <Text style={styles.waitingConfirmText}>
+                          You marked work complete. Waiting for the provider to confirm.
+                        </Text>
+                      ) : (
+                        <Pressable
+                          disabled={actionMutation.isPending}
+                          style={styles.btnAccept}
+                          onPress={() => {
+                            setCompletionRequest(item);
+                            setCompletionIsProvider(false);
+                          }}
+                        >
+                          <Ionicons name="checkmark-done" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                          <Text style={styles.btnAcceptText}>Mark work done</Text>
+                        </Pressable>
+                      )
+                    )}
+                    {["ACCEPTED", "IN_PROGRESS"].includes(item.status) && !item.workerConfirmedAt && (
+                      <Pressable
+                        disabled={actionMutation.isPending}
+                        style={styles.btnWithdraw}
+                        onPress={() => actionMutation.mutate({ id: item.id, action: "cancel" })}
+                      >
+                        <Text style={styles.btnWithdrawText}>Cancel</Text>
+                      </Pressable>
                     )}
 
                     {/* If Completed: Allow Leave Review */}
+                    {isCompleted && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="View offline payment status"
+                        onPress={() => router.push({ pathname: "/requests/[id]", params: { id: item.id, kind: "service" } })}
+                        style={styles.btnPaymentStatus}
+                      >
+                        <Ionicons name="cash-outline" size={15} color="#10563F" />
+                        <Text style={styles.btnPaymentStatusText}>Offline payment status</Text>
+                      </Pressable>
+                    )}
+
                     {isCompleted && !item.reviewed && (
                       <Pressable
-                        onPress={() =>
-                          router.push({ pathname: "/review", params: { id: item.id } })
-                        }
+                        onPress={() => {
+                          setCompletionRequest(item);
+                          setCompletionIsProvider(false);
+                        }}
                         style={styles.btnReview}
                       >
                         <Ionicons name="star" size={15} color="#F59E0B" />
-                        <Text style={styles.btnReviewText}>Leave Rating Review</Text>
+                        <Text style={styles.btnReviewText}>Rate Service Experience</Text>
                       </Pressable>
+                    )}
+                    {isCompleted && !!item.reviewed && (
+                      <View style={styles.ratedBadge}>
+                        <Ionicons name="star" size={13} color="#047857" />
+                        <Text style={styles.ratedBadgeText}>You rated this provider</Text>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -461,6 +783,32 @@ export default function ActivityTabScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Cancellation Modal for provider cancellation */}
+      <CancellationModal
+        visible={!!cancellingRequest}
+        title="Cancel Service Booking"
+        isProvider={true}
+        onClose={() => setCancellingRequest(null)}
+        onConfirm={(reason) => {
+          if (!cancellingRequest) return;
+          const req = cancellingRequest;
+          setCancellingRequest(null);
+          actionMutation.mutate({ id: req.id, action: "cancel", reason });
+        }}
+      />
+
+      {/* Service Completion & Mutual Rating Confirmation Sheet */}
+      <ServiceCompletionConfirmationSheet
+        visible={!!completionRequest}
+        interaction={completionRequest}
+        isProvider={completionIsProvider}
+        onClose={() => {
+          setCompletionRequest(null);
+          void activityQuery.refetch();
+          void invalidateServiceQueries(queryClient);
+        }}
+      />
 
       {/* Bottom Navigation Bar */}
       <ServiceBottomNav active="requests" />
@@ -472,6 +820,42 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F8FAF8",
+  },
+  servicesFilterBar: {
+    marginTop: 10,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+    paddingVertical: 3,
+  },
+  servicesFilterScroll: {
+    gap: 7,
+    paddingVertical: 3,
+  },
+  serviceFilterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "#DCE8E0",
+  },
+  serviceFilterChipActive: {
+    backgroundColor: "#087653",
+    borderColor: "#087653",
+  },
+  serviceFilterChipText: {
+    maxWidth: 190,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "600",
+    color: "#315343",
+  },
+  serviceFilterChipTextActive: {
+    color: "#FFFFFF",
   },
   header: {
     backgroundColor: "#FFFFFF",
@@ -486,40 +870,51 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   headerContent: {
-    marginBottom: 12,
+    marginBottom: 10,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: "900",
+    fontSize: 22,
+    fontWeight: "800",
     color: dash.ink,
     letterSpacing: -0.4,
   },
-  headerSub: {
-    fontSize: 13,
-    color: dash.muted,
-    marginTop: 2,
-  },
   segmentBar: {
     flexDirection: "row",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 14,
-    padding: 3,
-    gap: 4,
+    width: "100%",
+    gap: 8,
+    position: "relative",
+    backgroundColor: "transparent",
+  },
+  segmentSelection: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 13,
+    backgroundColor: "#047857",
   },
   segmentBtn: {
     flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 9,
-    borderRadius: 11,
-  },
-  segmentBtnActive: {
-    backgroundColor: "#047857",
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 13,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "#DCE8E0",
   },
   segmentBtnText: {
-    fontSize: 12,
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: "center",
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: "700",
     color: "#047857",
   },
@@ -857,9 +1252,47 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 12,
   },
+  btnPaymentStatus: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: "#EAF4EE",
+    borderWidth: 1,
+    borderColor: "#D4E7DB",
+    paddingHorizontal: 12,
+    borderRadius: 11,
+  },
+  btnPaymentStatusText: {
+    flexShrink: 1,
+    color: "#10563F",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   btnReviewText: {
     color: "#D97706",
     fontSize: 13,
+    fontWeight: "700",
+  },
+  ratedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  ratedBadgeText: {
+    color: "#047857",
+    fontSize: 12,
     fontWeight: "700",
   },
 });

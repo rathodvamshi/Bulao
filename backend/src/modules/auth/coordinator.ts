@@ -62,9 +62,9 @@ export class AuthCoordinator {
         if (action === "send") {
           msg91RequestId = await provider.send(input.phone);
         } else if (action === "resend") {
-          await provider.resend(input.phone);
+          challenge.msg91RequestId ? await provider.resend(input.phone, challenge.msg91RequestId) : await provider.resend(input.phone);
         } else {
-          valid = await provider.verify(input.phone, input.otp!);
+          valid = challenge.msg91RequestId ? await provider.verify(input.phone, input.otp!, challenge.msg91RequestId) : await provider.verify(input.phone, input.otp!);
         }
       } catch (error) { failure = error; }
 

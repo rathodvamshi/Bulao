@@ -6,6 +6,7 @@ export interface SearchJobsParams {
   longitude: number;
   radiusKm?: number;
   categoryId?: string | null;
+  q?: string;
   cursor?: string;
   all?: boolean;
 }
@@ -30,6 +31,7 @@ export const jobApi = {
       searchParams.append("all", "true");
     }
     if (params.categoryId) searchParams.append("categoryId", params.categoryId);
+    if (params.q?.trim()) searchParams.append("q", params.q.trim());
     if (params.cursor) searchParams.append("cursor", params.cursor);
 
     return apiClient.get<SearchJobsResult>(`/jobs?${searchParams.toString()}`, token);

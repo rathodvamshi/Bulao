@@ -1,3 +1,4 @@
+import { AppImage as Image } from '../AppImage';
 import { useAuth } from "../../auth";
 import { invalidateServiceQueries } from "../../api/serviceApi";
 import { useState } from "react";
@@ -9,8 +10,7 @@ import {
   Switch,
   ActivityIndicator,
   Alert,
-  Image,
-} from "react-native";
+  } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";

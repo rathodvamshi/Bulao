@@ -47,6 +47,7 @@ export type ProviderRoleData = {
   active: number;
   interested: number;
   hired: number;
+  currentHires?: number;
   completed: number;
   rating: number | null;
   totalReviews: number;
@@ -60,10 +61,7 @@ export type SeekerRoleData = {
   rating: number | null;
   totalReviews: number;
   completed: number;
-  punctualityScore: number;
-  available: boolean;
-  skills: string[];
-  feedbackTags: WorkerFeedbackTag[];
+  starDistribution?: StarDistribution;
   reviews: ReviewItem[];
 };
 
@@ -71,9 +69,11 @@ export type ServiceFeedbackReview = {
   id: string;
   stars: number;
   body: string;
+  feedback?: string;
   createdAt: number;
   authorName: string;
   authorPhoto?: string | null;
+  images?: string[];
 };
 
 export type ServiceItem = {
@@ -121,6 +121,8 @@ export type ServiceItem = {
   totalReviews: number;
   isNew: boolean;
   completedBookings: number;
+  offerings?: import("@bulao/domain").ServiceOffering[];
+  dynamicAnswers?: Record<string, any>;
   ratingBreakdown?: StarDistribution;
   provider?: {
     id: string;
@@ -137,9 +139,10 @@ export type ServiceRoleData = {
   rating: number | null;
   totalReviews: number;
   completed: number;
-  radiusKm: number;
-  available: boolean;
+  radiusKm: number | null;
   services: ServiceItem[];
-  reviews: ReviewItem[];
+  recentFeedback: (ServiceFeedbackReview & { serviceTitle: string })[];
+  starDistribution?: StarDistribution;
+  activeRequests?: number;
+  pendingRequests?: number;
 };
-

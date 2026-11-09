@@ -1,5 +1,16 @@
 export function apiBaseUrl() {
-  const value = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "");
+  let extraApiUrl: string | undefined;
+  try {
+    const Constants = (globalThis as any).expo?.modules?.ExpoConstants || undefined;
+    extraApiUrl = Constants?.manifest?.extra?.apiUrl || Constants?.expoConfig?.extra?.apiUrl;
+  } catch {}
+
+  const value = (
+    process.env.EXPO_PUBLIC_API_BASE_URL ||
+    extraApiUrl ||
+    "https://bulao-api-staging.codecheck369.workers.dev/api/v1"
+  )?.replace(/\/+$/, "");
+
   if (!value) throw new Error("Bulao API setup is incomplete. Configure the HTTPS API URL.");
   const url = new URL(value);
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.hostname.endsWith(".invalid") || url.hostname.includes("your-")) {

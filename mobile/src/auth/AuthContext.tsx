@@ -13,6 +13,8 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import type { AuthState, AuthStatus, UserData, SessionData } from './authTypes';
 import * as authService from './authService';
 import { setAuthTokenGetter } from '../api/client';
+import { usePostWorkStore } from '../features/post-work/store';
+import { unregisterAndroidPush } from '../notifications/registration';
 
 type AuthContextValue = {
   // Current auth state
@@ -125,6 +127,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
    */
   const login = useCallback((user: UserData, session: SessionData) => {
     console.log('Auth context: Login');
+    usePostWorkStore.getState().resetFlow();
     // Publish the token before navigating or mounting protected queries.
     setAuthTokenGetter(() => session.token);
     setUser(user);
@@ -145,6 +148,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
    */
   const logout = useCallback(async () => {
     console.log('Auth context: Logout');
+    usePostWorkStore.getState().resetFlow();
+    // Detach this installation before revoking its bearer session. UI state is
+    // cleared immediately, while the server calls remain ordered for privacy.
+    const unregisterDevice = unregisterAndroidPush(session?.token || null);
     
     const currentToken = session?.token || null;
     setAuthTokenGetter(() => null);
@@ -156,6 +163,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     // Revoke on server (async, non-blocking)
+    await unregisterDevice;
     await authService.performLogout(currentToken);
   }, [session?.token]);
 

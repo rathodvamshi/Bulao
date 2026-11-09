@@ -1,0 +1,29 @@
+# EAS Build Ignore (Root)
+node_modules/
+.expo/
+ios/
+dist/
+dist-*/
+build/
+*.log
+.DS_Store
+Thumbs.db
+coverage/
+.cache/
+*.jks
+*.p8
+*.p12
+*.key
+backend/
+output/
+docs/
+scripts/
+
+# Raw design originals in mobile (published to CDN; excluded from APK bundle)
+mobile/dist-*/
+mobile/.expo/
+mobile/assets/images/provider/bakery-hiring-story/
+mobile/assets/images/provider/kitchen-rescue-story/
+mobile/assets/images/provider/story/
+mobile/assets/images/provider/generated/
+mobile/assets/images/categories/

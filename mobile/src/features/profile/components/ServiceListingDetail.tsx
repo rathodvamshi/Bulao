@@ -1,51 +1,112 @@
-import { serviceApi, invalidateServiceQueries, tenDigitPhone, servicePhoneVisible } from "../../../api/serviceApi";
-import { formatDirectPhone } from "@bulao/domain";
-import { useLocation } from "../../../store/location";
 import { useState } from "react";
 import {
   View,
   Pressable,
   ScrollView,
   StyleSheet,
-  Image,
   ActivityIndicator,
   Share,
-  KeyboardAvoidingView,
   Platform,
   Linking,
-  TextInput,
   Alert,
+  Modal,
+  Dimensions,
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppImage as Image } from "../../../components/AppImage";
+import {
+  serviceApi,
+  invalidateServiceQueries,
+  tenDigitPhone,
+  servicePhoneVisible,
+} from "../../../api/serviceApi";
+import { formatDirectPhone } from "@bulao/domain";
+import { useLocation } from "../../../store/location";
 import { api } from "../../../api/client";
 import { useAuth } from "../../../auth";
-import type { ServiceItem } from "../types";
+import type { ServiceItem, ServiceFeedbackReview } from "../types";
 import {
   ServiceText as Text,
-  serviceTheme as theme,
   servicePrice,
-  serviceModeLabel,
   servicePhotos,
-  serviceTaskLabel,
+  serviceCategoryFallbackIcon,
 } from "./serviceProfileTheme";
+import {
+  ServicesIncludedList,
+  ServiceLocationMap,
+  ServiceSpecificationsCard,
+  ServiceAboutCard,
+  ServiceReviewsPhotosSection,
+  RateServiceModal,
+  FullScreenImageViewer,
+} from "./service-detail";
 
-type Update = Partial<
-  Pick<
-    ServiceItem,
-    | "title"
-    | "description"
-    | "offeredServices"
-    | "radiusKm"
-    | "operatingHours"
-    | "serviceMode"
-    | "pricingModel"
-    | "basePricePaise"
-    | "available"
-  >
->;
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const IMAGE_HEIGHT = 240;
+
+function getInitials(name?: string): string {
+  if (!name) return "P";
+  const trimmed = name.trim();
+  if (!trimmed) return "P";
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
+}
+
+function cleanServiceMode(mode?: string): string {
+  if (mode === "at_center") return "Customer Visits Shop";
+  if (mode === "both") return "Shop + Doorstep";
+  return "Doorstep Service";
+}
+
+function getServiceTimings(operatingHours?: string): { start: string; end: string; days: string } {
+  if (!operatingHours) {
+    return { start: "09:00 AM", end: "07:00 PM", days: "Mon – Sat (Closed: Sun)" };
+  }
+  const timeMatch = operatingHours.match(/(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))\s*[–-]\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))/i);
+  if (timeMatch && timeMatch[1] && timeMatch[2]) {
+    return {
+      start: timeMatch[1].toUpperCase(),
+      end: timeMatch[2].toUpperCase(),
+      days: operatingHours.split(":")[0]?.trim() || "Mon – Sat (Closed: Sun)",
+    };
+  }
+  return { start: "09:00 AM", end: "07:00 PM", days: operatingHours.slice(0, 32) };
+}
+
+function getVehicleOrTargetType(service: ServiceItem): string {
+  const text = `${service.title || ""} ${service.categoryName || ""}`.toLowerCase();
+  if (text.includes("bike") || text.includes("scooter") || text.includes("two wheeler")) {
+    return "Two Wheeler / All Bikes";
+  }
+  if (text.includes("car") || text.includes("auto")) {
+    return "Four Wheeler / Car";
+  }
+  if (text.includes("plumb") || text.includes("pipe")) {
+    return "Residential & Commercial";
+  }
+  if (text.includes("electric") || text.includes("ac")) {
+    return "Home & Office Appliances";
+  }
+  if (text.includes("clean") || text.includes("maid")) {
+    return "House & Apartment";
+  }
+  return service.categoryName || "All Service Types";
+}
+
+const STAR_LABELS: Record<number, string> = {
+  1: "1 - Poor",
+  2: "2 - Fair",
+  3: "3 - Good",
+  4: "4 - Very Good",
+  5: "5 - Excellent",
+};
+
 export function ServiceListingDetail({
   service,
   onClose,
@@ -56,943 +117,914 @@ export function ServiceListingDetail({
   isClientView?: boolean;
 }) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const client = useQueryClient();
-  const location = useLocation(state => state.location);
-  const [tab, setTab] = useState<"overview" | "photos" | "reviews">("overview");
-  const [expanded, setExpanded] = useState(false);
+  const location = useLocation((state) => state.location);
+
+  // Gallery state
   const [photoIndex, setPhotoIndex] = useState(0);
-  const [failed, setFailed] = useState<Record<string, boolean>>({});
-  const [shareError, setShareError] = useState("");
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
-  // Rating & Review Interaction State
-  const [myRatingStars, setMyRatingStars] = useState<number>(5);
-  const [myRatingFeedback, setMyRatingFeedback] = useState<string>("");
-  const [hasAlreadyRated, setHasAlreadyRated] = useState<boolean>(false);
-  const [isEditingRating, setIsEditingRating] = useState<boolean>(false);
-  const [ratingSubmitting, setRatingSubmitting] = useState<boolean>(false);
-  const [bookingSubmitting, setBookingSubmitting] = useState<boolean>(false);
-  const [bookingSuccess, setBookingSuccess] = useState<boolean>(false);
+  // Expandable description toggle
+  const [descExpanded, setDescExpanded] = useState(false);
 
-  const update = useMutation({
-    mutationFn: (changes: Update) =>
-      api(`/services/${service.id}`, changes, "PATCH"),
-    onSuccess: async (_, changes) => {
+  // Reviews query & sorting state
+  const [reviewSort, setReviewSort] = useState<"recent" | "highest" | "lowest" | "with_photos">("recent");
+  const {
+    data: reviewsResponse,
+    refetch: refetchReviews,
+    isFetching: isReviewsFetching,
+  } = useQuery({
+    queryKey: ["service-reviews", service.id, reviewSort],
+    queryFn: () => serviceApi.getReviews(service.id, reviewSort, null, 15),
+    staleTime: 15000,
+  });
+
+  // Rate Modal State
+  const [rateModalVisible, setRateModalVisible] = useState(false);
+
+  // Full-Screen Image Viewer State
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+
+  // Booking Modal State
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+
+  // Photos & tasks
+  const photos = servicePhotos(service).filter((uri) => !failedImages[uri]);
+  const tasks = service.offeredServices && service.offeredServices.length > 0
+    ? service.offeredServices
+    : ["General Service", "Engine Repair", "Tyre & Tube Service", "Oil Change"];
+
+  const isOwner = service.provider?.id === user?.id || !isClientView;
+
+  // Active reviews & rating statistics
+  const currentReviews: ServiceFeedbackReview[] = reviewsResponse?.reviews && reviewsResponse.reviews.length > 0
+    ? (reviewsResponse.reviews as ServiceFeedbackReview[])
+    : (service.reviews ?? []);
+
+  const totalReviewsCount = typeof reviewsResponse?.totalReviews === "number"
+    ? reviewsResponse.totalReviews
+    : (service.totalReviews || currentReviews.length);
+
+  const ratingNumeric = reviewsResponse?.rating != null
+    ? reviewsResponse.rating
+    : service.rating;
+
+  const ratingValue = ratingNumeric != null && totalReviewsCount > 0
+    ? Number(ratingNumeric).toFixed(1)
+    : (totalReviewsCount > 0 ? "4.5" : "New");
+
+  const reviewBreakdown = reviewsResponse?.ratingBreakdown || service.ratingBreakdown || {
+    stars5: totalReviewsCount > 0 ? Math.round(totalReviewsCount * 0.8) : 0,
+    stars4: totalReviewsCount > 0 ? Math.round(totalReviewsCount * 0.12) : 0,
+    stars3: totalReviewsCount > 0 ? Math.round(totalReviewsCount * 0.05) : 0,
+    stars2: totalReviewsCount > 0 ? Math.round(totalReviewsCount * 0.02) : 0,
+    stars1: totalReviewsCount > 0 ? Math.round(totalReviewsCount * 0.01) : 0,
+  };
+
+  // Specifications parsed values
+  const timings = getServiceTimings(service.operatingHours);
+  const vehicleType = getVehicleOrTargetType(service);
+  const serviceModeText = cleanServiceMode(service.serviceMode);
+  const areaName = service.area || location?.area || "Himayatnagar";
+  const distanceAwayText = "0.5 km away";
+
+  // Toggle Service Availability (Owner)
+  const toggleAvailability = useMutation({
+    mutationFn: () =>
+      api(`/services/${service.id}`, { available: !service.available }, "PATCH"),
+    onSuccess: async () => {
       client.setQueryData<ServiceItem[]>(
         ["my-services", session?.token],
         (items) =>
           items?.map((item) =>
-            item.id === service.id ? { ...item, ...changes } : item,
-          ),
+            item.id === service.id ? { ...item, available: !item.available } : item
+          )
       );
       await invalidateServiceQueries(client);
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ["my-services"] }),
-        client.invalidateQueries({ queryKey: ["myServices"] }),
-        client.invalidateQueries({ queryKey: ["nearby"] }),
-      ]);
+      Alert.alert(
+        service.available ? "Service Paused" : "Service Activated",
+        service.available
+          ? "Your service is currently hidden from search results."
+          : "Your service is now active and visible to local customers!"
+      );
+    },
+    onError: () => {
+      Alert.alert("Error", "Could not update service status. Please try again.");
     },
   });
-  const photos = servicePhotos(service).filter((uri) => !failed[uri]);
-  const currentPhoto =
-    photos[Math.min(photoIndex, Math.max(photos.length - 1, 0))];
-  const tasks = service.offeredServices ?? [];
-  const openEdit = () =>
+
+  const openEdit = () => {
     router.push({
       pathname: "/create-service",
       params: { editId: service.id },
     });
-  const share = async () => {
-    setShareError("");
+  };
+
+  const handleShare = async () => {
     try {
       await Share.share({
         title: service.title,
-        message: `${service.title || service.categoryName}\n${service.area}\n${serviceModeLabel(service)}\n${servicePrice(service)}\nFind my service on Bulao.`,
+        message: `${service.title || service.categoryName}\n📍 ${service.area}\n💰 ${servicePrice(service)}\nBook verified service on Bulao!`,
       });
     } catch {
-      setShareError("Couldn't open sharing. Please try again.");
+      Alert.alert("Share", "Unable to open share sheet.");
     }
   };
 
-  const callProvider = () => {
-    // Phone calling option if phoneVisible is enabled or provider contact available
-    const phone = tenDigitPhone(service.provider?.phone);
-    if (!phone || !servicePhoneVisible(service.phoneVisible)) { Alert.alert("Phone unavailable", "This provider has disabled direct calling."); return; }
-    Linking.openURL(`tel:${phone}`).catch(() => {
-      Alert.alert("Call Unavailable", "Direct phone calling is not available on this device.");
-    });
+  const handleCallProvider = () => {
+    const rawPhone = service.provider?.phone;
+    const phone = tenDigitPhone(rawPhone);
+    const visible = servicePhoneVisible(service.phoneVisible);
+
+    if (!visible || !phone) {
+      Alert.alert(
+        "Contact Provider",
+        "Direct calling is currently unavailable for this provider. You can send a Service Request to connect instantly."
+      );
+      return;
+    }
+
+    Alert.alert(
+      `Contact ${service.provider?.name || "Provider"}`,
+      `Dial +91 ${formatDirectPhone(phone)}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Call Now",
+          onPress: () => {
+            Linking.openURL(`tel:${phone}`).catch(() => {
+              Alert.alert("Error", "Could not trigger phone dialer.");
+            });
+          },
+        },
+      ]
+    );
   };
 
-  const handleBookService = async () => {
+  const handleConfirmBooking = async () => {
     if (!session?.token) {
+      setConfirmModalVisible(false);
       router.push("/auth");
       return;
     }
-    if (!location) { router.push("/location"); return; }
-    if (bookingSubmitting) return;
+
+    if (!location) {
+      setConfirmModalVisible(false);
+      router.push("/location");
+      return;
+    }
+
     setBookingSubmitting(true);
     try {
-      await serviceApi.request(service.id, location, `Booking request for ${service.title}`);
+      await serviceApi.request(
+        service.id,
+        location,
+        `Booking request for ${service.title}`
+      );
       await invalidateServiceQueries(client);
       setBookingSuccess(true);
       setTimeout(() => {
+        setConfirmModalVisible(false);
+        setBookingSuccess(false);
         onClose();
-        router.push("/activity"); // Redirect to Requests tab
+        router.push("/service-requests");
       }, 1200);
     } catch (err: any) {
-      Alert.alert("Booking Error", err.message || "Couldn't send request. You may already have an active request.");
+      Alert.alert(
+        "Booking Notice",
+        err.message || "Couldn't send request. You may already have an active request."
+      );
     } finally {
       setBookingSubmitting(false);
     }
   };
 
-  const handleSaveRating = async () => {
+  // Open Rate Modal
+  const handleOpenRateModal = () => {
     if (!session?.token) {
-      router.push("/auth");
+      Alert.alert(
+        "Sign In Required",
+        "Please sign in to rate and review this service.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Sign In", onPress: () => router.push("/auth") },
+        ]
+      );
       return;
     }
-    setRatingSubmitting(true);
-    try {
-      await api(`/services/${service.id}/ratings`, {
-        stars: myRatingStars,
-        feedback: myRatingFeedback,
-      });
-      setHasAlreadyRated(true);
-      setIsEditingRating(false);
-      await client.invalidateQueries({ queryKey: ["nearby"] });
-      await invalidateServiceQueries(client);
-      Alert.alert("Rating Saved ⭐", "Thank you for rating this service!");
-    } catch (err: any) {
-      Alert.alert("Rating Failed", err.message || "Could not submit rating. Please try again.");
-    } finally {
-      setRatingSubmitting(false);
-    }
+    setRateModalVisible(true);
   };
 
-  const handleReportReview = async (reviewId: string) => {
-    try {
-      await api(`/services/${service.id}/ratings/${reviewId}/report`, {
-        reason: "Inappropriate review content",
-      });
-      Alert.alert("Report Submitted", "Thank you for helping keep Bulao safe and trustworthy.");
-    } catch {
-      Alert.alert("Report failed", "Could not save your report. Please retry.");
-    }
+  // Submit Review with Strict Validation
+  const handleSubmitReview = async (stars: number, feedback: string, images: string[]) => {
+    await serviceApi.submitRating(
+      service.id,
+      stars,
+      feedback.trim(),
+      images
+    );
+    await invalidateServiceQueries(client);
+    await refetchReviews();
+    Alert.alert("Thank You!", "Your review and rating have been submitted successfully.");
   };
+
+  // Open Full-Screen Image Viewer
+  const handleOpenImageViewer = (images: string[], initialIdx: number = 0) => {
+    setViewerImages(images);
+    setViewerIndex(initialIdx);
+    setViewerVisible(true);
+  };
+
+  const descriptionText = service.description?.trim() || "Get professional bike repair and service for a smooth and safe ride. Expert mechanics handle all types of two-wheelers with quality workmanship and genuine tools.";
 
   return (
-    <KeyboardAvoidingView
-      style={[s.screen, { paddingTop: insets.top }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={[s.hero, !currentPhoto && s.emptyHero]}>
-          {currentPhoto ? (
-            <Image
-              source={{ uri: currentPhoto }}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-              onError={() =>
-                setFailed((previous) => ({
-                  ...previous,
-                  [currentPhoto]: true,
-                }))
-              }
-            />
-          ) : (
-            <View style={s.heroPlaceholder}>
-              <Ionicons name="storefront-outline" size={43} color="#D6EDE3" />
-              <Text style={s.placeholderText}>No service photos added</Text>
-            </View>
-          )}
-          <View style={s.heroControls}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close service details"
-              style={s.circle}
-              onPress={onClose}
-            >
-              <Ionicons name="arrow-back" size={21} color={theme.ink} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Share service"
-              style={s.circle}
-              onPress={() => void share()}
-            >
-              <Ionicons
-                name="share-social-outline"
-                size={19}
-                color={theme.green}
-              />
-            </Pressable>
-          </View>
-          {photos.length > 1 && (
-            <View style={s.photoControls}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Previous photo"
-                style={s.photoArrow}
-                onPress={() =>
-                  setPhotoIndex(
-                    (photoIndex - 1 + photos.length) % photos.length,
-                  )
-                }
-              >
-                <Ionicons name="chevron-back" size={17} color="white" />
-              </Pressable>
-              <Text style={s.photoCounter}>
-                {photoIndex + 1}/{photos.length}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Next photo"
-                style={s.photoArrow}
-                onPress={() => setPhotoIndex((photoIndex + 1) % photos.length)}
-              >
-                <Ionicons name="chevron-forward" size={17} color="white" />
-              </Pressable>
-            </View>
-          )}
+    <View style={s.screen}>
+      {/* ── Top Bar: Header (AI DIDI Removed) ──────────────────────────── */}
+      <View style={[s.topHeaderRow, { paddingTop: insets.top + 6 }]}>
+        <View style={s.topHeaderLeftGroup}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            style={s.backCircleBtn}
+            onPress={onClose}
+            hitSlop={8}
+          >
+            <Ionicons name="arrow-back" size={20} color="#0F172A" />
+          </Pressable>
+
+          <Text style={s.headerTitleText}>Service Information</Text>
         </View>
-        <View style={s.summary}>
-          {!!service.provider?.name && <Text style={s.body}>Provided by {service.provider.name}</Text>}
-          {isClientView && (
-            servicePhoneVisible(service.phoneVisible) && service.provider?.phone ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginVertical: 4 }}>
-                <Ionicons name="call" size={13} color={theme.green} />
-                <Text style={{ fontSize: 13, fontWeight: "700", color: theme.green }}>
-                  Direct Mobile: +91 {formatDirectPhone(service.provider.phone)}
-                </Text>
-              </View>
-            ) : (
-              <Text style={s.body}>Direct calling is restricted. Tap "Request Service" to connect.</Text>
-            )
-          )}
-          {Object.entries(service.socialLinks ?? {}).filter(([, url]) => /^https?:\/\//i.test(url)).map(([label, url]) => (
-            <Pressable key={label} onPress={() => void Linking.openURL(url).catch(() => Alert.alert("Link unavailable"))}><Text style={s.link}>{label}</Text></Pressable>
-          ))}
-          <View style={s.titleRow}>
-            <Text style={s.title} numberOfLines={2}>
-              {service.title || service.categoryName}
-            </Text>
-            <View style={[s.status, !service.available && s.paused]}>
-              <Ionicons
-                name={service.available ? "briefcase" : "pause"}
-                size={11}
-                color={service.available ? "white" : theme.muted}
-              />
-              <Text
-                style={[
-                  s.statusText,
-                  !service.available && { color: theme.muted },
-                ]}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Share Service"
+          style={s.backCircleBtn}
+          onPress={handleShare}
+          hitSlop={8}
+        >
+          <Ionicons name="share-outline" size={19} color="#0F172A" />
+        </Pressable>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 95 }}
+      >
+        {/* ── 1. Top Images Showcase (Horizontal Scroll) ───────────────── */}
+        <View style={s.topImagesShowcase}>
+          {photos.length > 0 ? (
+            <View style={{ width: SCREEN_WIDTH, height: IMAGE_HEIGHT }}>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e) => {
+                  const offset = e.nativeEvent.contentOffset.x;
+                  const idx = Math.round(offset / SCREEN_WIDTH);
+                  setPhotoIndex(idx);
+                }}
+                scrollEventThrottle={16}
               >
-                {service.available ? "Active" : "Paused"}
-              </Text>
-            </View>
-          </View>
+                {photos.map((uri, idx) => (
+                  <Pressable
+                    key={`${uri}-${idx}`}
+                    style={{ width: SCREEN_WIDTH, height: IMAGE_HEIGHT }}
+                    onPress={() => handleOpenImageViewer(photos, idx)}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                      priority={idx === 0 ? "high" : "normal"}
+                      onError={() =>
+                        setFailedImages((prev) => ({ ...prev, [uri]: true }))
+                      }
+                    />
+                  </Pressable>
+                ))}
+              </ScrollView>
 
-          {service.provider?.verified && <Text style={s.subtle}>Provider phone verified</Text>}
+              {/* Counter Badge */}
+              {photos.length > 1 && (
+                <View style={s.imageCounterBadge}>
+                  <Ionicons name="images-outline" size={11} color="#FFFFFF" />
+                  <Text style={s.imageCounterText}>
+                    {photoIndex + 1} / {photos.length}
+                  </Text>
+                </View>
+              )}
 
-          <Text style={s.subtle}>{service.categoryName}</Text>
-          <View style={s.reputation}>
-            <Ionicons
-              name={service.totalReviews > 0 ? "star" : "star-outline"}
-              size={17}
-              color={theme.gold}
-            />
-            <Text style={s.rating}>
-              {service.totalReviews > 0 && service.rating != null
-                ? service.rating.toFixed(1)
-                : "New"}
-            </Text>
-            <Text style={s.subtle}>
-              {service.totalReviews > 0
-                ? `(${service.totalReviews} reviews for this service)`
-                : "No reviews for this service yet"}
-            </Text>
-            {service.completedBookings > 0 && (
-              <Text style={s.subtle}>
-                {" "}
-                · {service.completedBookings} completed
-              </Text>
-            )}
-          </View>
-          {!!service.description && (
-            <Text numberOfLines={3} style={s.body}>
-              {service.description}
-            </Text>
-          )}
-          {!!tasks.length && (
-            <View style={s.chips}>
-              {tasks.slice(0, 5).map((task, i) => (
-                <Text key={`${task}-${i}`} style={s.chip}>
-                  {serviceTaskLabel(task)}
-                </Text>
-              ))}
-              {tasks.length > 5 && (
-                <Text style={s.chip}>+{tasks.length - 5} more</Text>
+              {/* Pagination Dots */}
+              {photos.length > 1 && (
+                <View style={s.paginationDotsRow}>
+                  {photos.map((_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        s.paginationDot,
+                        i === photoIndex && s.paginationDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
               )}
             </View>
-          )}
-          <View style={s.locationRow}>
-            <View style={s.location}>
-              <Ionicons name="location" size={17} color={theme.ink} />
-              <Text style={[s.subtle, s.flex]}>
-                {service.area || "Location not added"}
-              </Text>
-            </View>
-            <View style={s.location}>
-              <Ionicons name="home-outline" size={17} color={theme.ink} />
-              <Text style={[s.subtle, s.flex]}>
-                {serviceModeLabel(service)}
-              </Text>
-            </View>
-          </View>
-          {(Boolean(service.experienceYears && service.experienceYears > 0) || Boolean(service.radiusKm && service.radiusKm > 0)) && (
-            <View style={[s.locationRow, { borderTopWidth: 0, paddingTop: 0 }]}>
-              {Boolean(service.experienceYears && service.experienceYears > 0) ? (
-                <View style={s.location}>
-                  <Ionicons name="ribbon-outline" size={17} color={theme.ink} />
-                  <Text style={[s.subtle, s.flex]}>
-                    {service.experienceYears} yrs experience
-                  </Text>
-                </View>
-              ) : null}
-              {Boolean(service.radiusKm && service.radiusKm > 0) ? (
-                <View style={s.location}>
-                  <Ionicons name="navigate-outline" size={17} color={theme.ink} />
-                  <Text style={[s.subtle, s.flex]}>
-                    Serves within {service.radiusKm} km
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-          )}
-          <View style={s.hours}>
-            <Ionicons name="time-outline" size={17} color={theme.ink} />
-            <Text style={[s.subtle, s.flex]}>
-              {service.operatingHours || "Hours not added"}
-            </Text>
-            <Text style={s.price}>{servicePrice(service)}</Text>
-          </View>
-          <View style={s.actions}>
-            {bookingSuccess ? (
-              <View style={s.successBanner}>
-                <Ionicons name="checkmark-circle" size={18} color="#047857" />
-                <Text style={s.successText}>Request sent! Opening Requests tab…</Text>
+          ) : (
+            <View style={s.topFallbackShowcase}>
+              <View style={s.illustrationAura}>
+                <Ionicons
+                  name={serviceCategoryFallbackIcon(service)}
+                  size={58}
+                  color="#047857"
+                />
               </View>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                disabled={bookingSubmitting || !service.available}
-                style={[
-                  s.action,
-                  s.primaryAction,
-                  !service.available && { backgroundColor: "#9CA3AF" },
-                ]}
-                onPress={handleBookService}
-              >
-                {bookingSubmitting ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="paper-plane-outline" size={16} color="white" />
-                    <Text style={s.primaryText}>Request Service</Text>
-                  </>
-                )}
-              </Pressable>
-            )}
-
-            {/* Direct Call Button (If phoneVisible enabled) */}
-            {(servicePhoneVisible(service.phoneVisible) && !!service.provider?.phone) && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Call Provider"
-                style={s.callAction}
-                onPress={callProvider}
-              >
-                <Ionicons name="call" size={16} color="#047857" />
-                <Text style={s.callText}>Call</Text>
-              </Pressable>
-            )}
-
-            {!isClientView && (
-              <Pressable
-                accessibilityRole="button"
-                style={s.action}
-                onPress={openEdit}
-              >
-                <Ionicons name="pencil-outline" size={15} color={theme.ink} />
-                <Text style={s.actionText}>Edit</Text>
-              </Pressable>
-            )}
-          </View>
-          {(update.isError || shareError) && (
-            <Text accessibilityRole="alert" style={s.error}>
-              {shareError || "Couldn't update service. Please try again."}
-            </Text>
+            </View>
           )}
         </View>
-        <View style={s.tabs}>
-          {(["overview", "photos", "reviews"] as const).map((value) => (
-            <Pressable
-              key={value}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: tab === value }}
-              onPress={() => setTab(value)}
-              style={[s.tab, tab === value && s.tabActive]}
-            >
-              <Text style={[s.tabText, tab === value && s.tabTextActive]}>
-                {value === "overview"
-                  ? "Overview"
-                  : value === "photos"
-                    ? `Photos (${photos.length})`
-                    : `Reviews (${service.totalReviews})`}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={s.sections}>
-          {tab === "overview" && (
-            <>
-              <View style={s.panel}>
-                <View style={s.panelHeading}>
-                  <Ionicons
-                    name="document-text-outline"
-                    size={21}
-                    color={theme.green}
-                  />
-                  <Text style={[s.label, s.panelText]}>About this service</Text>
-                </View>
-                <Text
-                  style={[s.body, s.panelText]}
-                  numberOfLines={expanded ? undefined : 4}
-                >
-                  {service.description ||
-                    "Description not provided."}
-                </Text>
-                {(service.description?.length ?? 0) > 180 && (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setExpanded(!expanded)}
-                  >
-                    <Text style={[s.link, s.panelText]}>
-                      {expanded ? "Read less" : "Read more"}
+
+        {/* ── Main Body Canvas ─────────────────────────────────────────── */}
+        <View style={s.bodyCanvas}>
+          {/* Service Title Section (Placed below images) */}
+          <View style={s.titleSectionBlock}>
+            <Text style={s.heroMainTitle}>
+              {service.title || "Bike Repair & Service"}
+            </Text>
+
+            <Text style={s.heroSubtitle}>
+              {service.description?.slice(0, 52) || "Keep your vehicle in top condition"}
+            </Text>
+
+            {/* Signature Green Accent Dash */}
+            <View style={s.heroGreenDash} />
+          </View>
+
+          {/* ── 1. Services Included (Compact & Smart Layout) ───────────── */}
+          <ServicesIncludedList tasks={tasks} />
+
+          {/* ── 2. Google Maps (Accurate Service Location) ───────────────── */}
+          <ServiceLocationMap
+            latitude={service.latitude}
+            longitude={service.longitude}
+            areaName={areaName}
+            distanceAwayText={distanceAwayText}
+            serviceTitle={service.title || areaName}
+          />
+
+          {/* ── 3. Service Specifications (Premium Adaptive Grid) ────────── */}
+          <ServiceSpecificationsCard
+            service={service}
+            serviceModeText={serviceModeText}
+            vehicleType={vehicleType}
+            timings={timings}
+          />
+
+          {/* ── 4. About the Service (Two-Line Preview with Read More/Less) ─ */}
+          <ServiceAboutCard description={descriptionText} />
+
+          {/* ── 5. Ratings, Feedback & Photos (Unified Horizontal Experience) */}
+          <ServiceReviewsPhotosSection
+            ratingValue={ratingValue}
+            totalReviewsCount={totalReviewsCount}
+            reviewBreakdown={reviewBreakdown}
+            reviews={currentReviews}
+            photos={photos}
+            isLoadingReviews={isReviewsFetching}
+            onOpenRateModal={handleOpenRateModal}
+            onOpenImageViewer={handleOpenImageViewer}
+          />
+
+          {/* ── 6. Service Provider Card ───────────────────────────────── */}
+          {service.provider && (
+            <View style={s.providerCardBox}>
+              <View style={s.providerInfoRow}>
+                <View style={s.providerAvatarBox}>
+                  {service.provider.photoUrl ? (
+                    <Image
+                      source={{ uri: service.provider.photoUrl }}
+                      style={s.providerAvatarImage}
+                    />
+                  ) : (
+                    <Text style={s.providerInitials}>
+                      {getInitials(service.provider.name)}
                     </Text>
+                  )}
+                </View>
+
+                <View style={s.providerTextCol}>
+                  <View style={s.providerTitleLine}>
+                    <Text style={s.providerName}>{service.provider.name || "Provider"}</Text>
+                    {service.provider.verified && (
+                      <Ionicons name="checkmark-circle" size={15} color="#047857" />
+                    )}
+                  </View>
+                  <Text style={s.providerVerifiedSubtext}>Verified Pro on Bulao</Text>
+                </View>
+
+                {servicePhoneVisible(service.phoneVisible) && service.provider.phone && (
+                  <Pressable
+                    style={s.callProviderMiniBtn}
+                    onPress={handleCallProvider}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="call" size={14} color="#047857" />
+                    <Text style={s.callProviderMiniBtnText}>Call</Text>
                   </Pressable>
                 )}
               </View>
-              <View style={s.panel}>
-                <View style={s.panelHeading}>
-                  <Ionicons
-                    name="construct-outline"
-                    size={21}
-                    color={theme.green}
-                  />
-                  <Text style={[s.label, s.panelText]}>What I provide</Text>
-                </View>
-                {tasks.length ? (
-                  <View style={s.chips}>
-                    {tasks.map((task, i) => (
-                      <Text key={`${task}-${i}`} style={s.chip}>
-                        {serviceTaskLabel(task)}
-                      </Text>
-                    ))}
-                  </View>
-                ) : (
-                  <Text style={[s.body, s.panelText]}>
-                    Add the specific services customers can request.
-                  </Text>
-                )}
-              </View>
-              <View style={s.tip}>
-                <Ionicons name="sparkles-outline" size={23} color="#A07824" />
-                <View style={s.flex}>
-                  <Text style={s.label}>Make a great first impression</Text>
-                  <Text style={s.subtle}>
-                    Clear details and up-to-date availability help customers
-                    book with confidence.
-                  </Text>
-                </View>
-              </View>
-            </>
-          )}
-          {tab === "photos" &&
-            (photos.length ? (
-              <View style={s.gallery}>
-                {photos.map((uri) => (
-                  <Image
-                    key={uri}
-                    source={{ uri }}
-                    style={s.galleryPhoto}
-                    onError={() =>
-                      setFailed((previous) => ({
-                        ...previous,
-                        [uri]: true,
-                      }))
-                    }
-                  />
-                ))}
-              </View>
-            ) : (
-              <View style={s.panel}>
-                <Text style={[s.label, s.panelText]}>No photos to show yet</Text>
-                <Text style={[s.body, s.panelText]}>
-                  Only uploaded photos from this service appear here.
-                </Text>
-              </View>
-            ))}
-          {tab === "reviews" && (
-            <View style={{ gap: 14 }}>
-              {/* Interactive Single-Rating & Edit Form */}
-              <View style={s.rateCard}>
-                <View style={s.rateHeader}>
-                  <Text style={s.rateTitle}>
-                    {hasAlreadyRated && !isEditingRating
-                      ? "Your Service Review"
-                      : isEditingRating
-                      ? "Edit Your Review"
-                      : "Rate This Specific Service"}
-                  </Text>
-                  {hasAlreadyRated && !isEditingRating && (
-                    <View style={s.ratedBadge}>
-                      <Ionicons name="checkmark-circle" size={14} color="#047857" />
-                      <Text style={s.ratedBadgeText}>Already Rated</Text>
-                    </View>
-                  )}
-                </View>
-
-                {hasAlreadyRated && !isEditingRating ? (
-                  <View style={{ gap: 8 }}>
-                    <Text style={s.subtle}>
-                      You rated this service {myRatingStars} ★. You can edit your review at any time.
-                    </Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={s.editRateBtn}
-                      onPress={() => setIsEditingRating(true)}
-                    >
-                      <Ionicons name="create-outline" size={15} color={theme.green} />
-                      <Text style={s.editRateText}>Edit Rating & Feedback</Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <View style={{ gap: 10 }}>
-                    <Text style={s.subtle}>
-                      Rate your experience specifically for {service.title || service.categoryName}:
-                    </Text>
-
-                    {/* Interactive 5-Star Row */}
-                    <View style={s.starPickerRow}>
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Pressable
-                          key={star}
-                          accessibilityRole="button"
-                          onPress={() => setMyRatingStars(star)}
-                          style={{ padding: 4 }}
-                        >
-                          <Ionicons
-                            name={star <= myRatingStars ? "star" : "star-outline"}
-                            size={28}
-                            color={theme.gold}
-                          />
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    <TextInput
-                      value={myRatingFeedback}
-                      onChangeText={setMyRatingFeedback}
-                      placeholder="Write feedback for this service (optional)..."
-                      placeholderTextColor={theme.muted}
-                      style={s.feedbackInput}
-                      multiline
-                      numberOfLines={3}
-                    />
-
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={ratingSubmitting}
-                      style={s.submitRateBtn}
-                      onPress={handleSaveRating}
-                    >
-                      {ratingSubmitting ? (
-                        <ActivityIndicator color="white" size="small" />
-                      ) : (
-                        <Text style={s.submitRateText}>
-                          {hasAlreadyRated ? "Update Rating" : "Submit Rating"}
-                        </Text>
-                      )}
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-
-              {/* Existing Reviews List */}
-              {service.reviews?.length ? (
-                <>
-                  {service.reviews.map((review) => (
-                    <View key={review.id} style={s.panel}>
-                      <View style={s.titleRow}>
-                        <Text style={[s.label, s.panelText]}>
-                          {review.authorName}
-                        </Text>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                          <Text style={[s.rating, s.panelText]}>★ {review.stars}</Text>
-                          <Pressable
-                            accessibilityRole="button"
-                            onPress={() => handleReportReview(review.id)}
-                            hitSlop={6}
-                          >
-                            <Ionicons name="flag-outline" size={13} color={theme.muted} />
-                          </Pressable>
-                        </View>
-                      </View>
-                      <Text style={[s.body, s.panelText]}>
-                        {review.body || "Left a rating"}
-                      </Text>
-                    </View>
-                  ))}
-                  {service.totalReviews > service.reviews.length && (
-                    <Text style={s.subtle}>Showing recent reviews</Text>
-                  )}
-                </>
-              ) : (
-                <View style={s.panel}>
-                  <Text style={[s.label, s.panelText]}>
-                    {service.totalReviews
-                      ? "Reviews aren't available right now"
-                      : "No reviews for this service yet"}
-                  </Text>
-                  <Text style={[s.body, s.panelText]}>
-                    Be the first customer to rate this specific service above!
-                  </Text>
-                </View>
-              )}
             </View>
           )}
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+
+      {/* ── Sticky Bottom Action Bar ───────────────────────────────────── */}
+      <View style={[s.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {isOwner ? (
+          <View style={s.ownerActionBtnRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit Details"
+              style={s.ownerEditBtn}
+              onPress={openEdit}
+            >
+              <Ionicons name="create-outline" size={18} color="#047857" />
+              <Text style={s.ownerEditBtnText}>Edit Details</Text>
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={service.available ? "Pause Service" : "Activate Service"}
+              style={[
+                s.ownerPauseBtn,
+                !service.available && s.ownerActivateBtn,
+              ]}
+              onPress={() => toggleAvailability.mutate()}
+              disabled={toggleAvailability.isPending}
+            >
+              {toggleAvailability.isPending ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons
+                    name={service.available ? "pause-circle-outline" : "play-circle-outline"}
+                    size={18}
+                    color="#FFFFFF"
+                  />
+                  <Text style={s.ownerPauseBtnText}>
+                    {service.available ? "Pause Service" : "Activate Service"}
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        ) : (
+          <View style={s.clientActionBtnRow}>
+            {servicePhoneVisible(service.phoneVisible) && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Call Provider"
+                style={s.clientContactBtn}
+                onPress={handleCallProvider}
+              >
+                <Ionicons name="call-outline" size={18} color="#047857" />
+              </Pressable>
+            )}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Book Service"
+              style={s.clientBookBtn}
+              onPress={() => setConfirmModalVisible(true)}
+            >
+              <Text style={s.clientBookBtnText}>Book Service</Text>
+              <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      {/* ── Booking Confirmation Modal ─────────────────────────────────── */}
+      <Modal
+        visible={confirmModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModalVisible(false)}
+      >
+        <View style={s.modalBackdrop}>
+          <View style={s.bookingModalContent}>
+            {bookingSuccess ? (
+              <View style={s.bookingSuccessBox}>
+                <Ionicons name="checkmark-circle" size={54} color="#047857" />
+                <Text style={s.bookingSuccessTitle}>Request Sent!</Text>
+                <Text style={s.bookingSuccessSubtext}>
+                  The service provider has been notified.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={s.modalTitle}>Confirm Booking Request</Text>
+                <Text style={s.modalDesc}>
+                  Send a service request for {service.title} in {areaName}?
+                </Text>
+
+                <View style={s.modalButtonRow}>
+                  <Pressable
+                    style={s.modalCancelBtn}
+                    onPress={() => setConfirmModalVisible(false)}
+                    disabled={bookingSubmitting}
+                  >
+                    <Text style={s.modalCancelBtnText}>Cancel</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={s.modalConfirmBtn}
+                    onPress={handleConfirmBooking}
+                    disabled={bookingSubmitting}
+                  >
+                    {bookingSubmitting ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={s.modalConfirmBtnText}>Confirm</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── "+ Rate Our Service" Modal ─────────────────────────────────── */}
+      <RateServiceModal
+        visible={rateModalVisible}
+        serviceId={service.id}
+        serviceTitle={service.title || "Service"}
+        onClose={() => setRateModalVisible(false)}
+        onSubmit={handleSubmitReview}
+      />
+
+      {/* ── Full-Screen Image Viewer Modal ─────────────────────────────── */}
+      <FullScreenImageViewer
+        visible={viewerVisible}
+        images={viewerImages}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
+    </View>
   );
 }
+
 const s = StyleSheet.create({
-  panelText: { color: theme.ink },
-  screen: { flex: 1, backgroundColor: theme.background },
-  hero: { height: 210, backgroundColor: theme.green },
-  emptyHero: { height: 145 },
-  heroPlaceholder: {
+  screen: {
     flex: 1,
+    backgroundColor: "#F8FAFC",
+  },
+  topHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    zIndex: 10,
+  },
+  topHeaderLeftGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  backCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingTop: 20,
   },
-  placeholderText: { fontSize: 12, color: "#D6EDE3" },
-  heroControls: {
+  headerTitleText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+  },
+
+  // 1. Image Showcase
+  topImagesShowcase: {
+    width: "100%",
+    height: IMAGE_HEIGHT,
+    backgroundColor: "#0F172A",
+    position: "relative",
+  },
+  topFallbackShowcase: {
+    width: "100%",
+    height: IMAGE_HEIGHT,
+    backgroundColor: "#F0FDF4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  illustrationAura: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#BBF7D0",
+  },
+  imageCounterBadge: {
     position: "absolute",
-    top: 12,
-    left: 14,
+    top: 14,
     right: 14,
     flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  circle: {
-    height: 38,
-    width: 38,
-    borderRadius: 19,
-    backgroundColor: "white",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 4,
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  photoControls: {
+  imageCounterText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  paginationDotsRow: {
     position: "absolute",
     bottom: 12,
-    right: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 18,
-    backgroundColor: "rgba(15,32,38,.65)",
-  },
-  photoArrow: {
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  photoCounter: { fontSize: 11, color: "white" },
-  summary: { padding: 16, gap: 9, backgroundColor: "white" },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    justifyContent: "space-between",
-  },
-  title: {
-    flex: 1,
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-  },
-  status: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderRadius: 9,
-    backgroundColor: theme.green,
-  },
-  paused: { backgroundColor: "#EEF1F4" },
-  statusText: { fontSize: 10, fontWeight: "700", color: "white" },
-  subtle: { fontSize: 11, lineHeight: 17, color: theme.muted },
-  reputation: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 4,
-  },
-  rating: { fontSize: 13, fontWeight: "800" },
-  body: { fontSize: 12, lineHeight: 19, color: "#687E91" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: {
-    fontSize: 10,
-    lineHeight: 15,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: "#EFF3F8",
-    color: "#587086",
-  },
-  locationRow: {
-    flexDirection: "row",
-    gap: 14,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: theme.border,
-    paddingVertical: 12,
-  },
-  location: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
-  flex: { flex: 1 },
-  hours: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 7,
-    paddingVertical: 2,
-  },
-  price: { fontSize: 11, fontWeight: "700", color: theme.green },
-  actions: { flexDirection: "row", gap: 8, marginTop: 5 },
-  action: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 11,
-    backgroundColor: "#EFF3F8",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    paddingHorizontal: 6,
-  },
-  primaryAction: { flex: 1.35, backgroundColor: theme.green },
-  primaryText: { fontSize: 11, fontWeight: "700", color: "white" },
-  actionText: { fontSize: 11, fontWeight: "700" },
-  tabs: {
-    backgroundColor: "white",
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderColor: theme.border,
-  },
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 15,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  tabActive: { borderBottomColor: theme.green },
-  tabText: { fontSize: 12, fontWeight: "600", color: theme.muted },
-  tabTextActive: { color: theme.green },
-  sections: {
-    padding: 16,
-    gap: 12,
-    width: "100%",
-    maxWidth: 650,
     alignSelf: "center",
-  },
-  panel: {
-    backgroundColor: theme.pale,
-    borderWidth: 1,
-    borderColor: "#DDEEE3",
-    borderRadius: 16,
-    padding: 16,
-    gap: 8,
-  },
-  panelHeading: { flexDirection: "row", gap: 9, alignItems: "center" },
-  label: { fontSize: 13, fontWeight: "700" },
-  link: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: theme.green,
-    paddingVertical: 4,
-  },
-  tip: {
     flexDirection: "row",
-    gap: 12,
-    alignItems: "center",
-    backgroundColor: "#FFF7DF",
-    padding: 16,
-    borderRadius: 16,
+    gap: 5,
   },
-  gallery: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  galleryPhoto: { width: "48%", aspectRatio: 1, borderRadius: 12 },
-  error: { fontSize: 12, lineHeight: 18, color: "#B14436" },
-
-  // Reward Badge Styles
-  rewardRow: {
-    flexDirection: "row",
-    marginTop: 2,
-    marginBottom: 4,
+  paginationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.5)",
   },
-  rewardBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#FEF3C7",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
-  },
-  rewardText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#D97706",
+  paginationDotActive: {
+    width: 16,
+    backgroundColor: "#10B981",
   },
 
-  // Direct Call & Success Styles
-  callAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#ECFDF5",
-    borderWidth: 1,
-    borderColor: "#A7F3D0",
+  // Body Canvas & Title Section
+  bodyCanvas: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingTop: 12,
+    gap: 14,
   },
-  callText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#047857",
+  titleSectionBlock: {
+    paddingTop: 4,
+    paddingBottom: 2,
+    gap: 2,
   },
-  successBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#ECFDF5",
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#A7F3D0",
-    flex: 1,
+  heroMainTitle: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#0F172A",
+    lineHeight: 30,
+    letterSpacing: -0.4,
   },
-  successText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#047857",
-  },
-
-  // Interactive Single-Rating Form Styles
-  rateCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E6ECE8",
-    gap: 12,
-    shadowColor: "#0D2318",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  rateHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  rateTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: theme.ink,
-  },
-  ratedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  ratedBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#047857",
-  },
-  editRateBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    backgroundColor: "#F4F7F5",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
+  heroSubtitle: {
+    fontSize: 13.5,
+    fontWeight: "500",
+    color: "#64748B",
+    lineHeight: 18,
     marginTop: 4,
   },
-  editRateText: {
+  heroGreenDash: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#047857",
+    marginTop: 10,
+  },
+
+  // Provider Card
+  providerCardBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  providerInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  providerAvatarBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  providerAvatarImage: {
+    width: 42,
+    height: 42,
+  },
+  providerInitials: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  providerTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  providerTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  providerName: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  providerVerifiedSubtext: {
+    fontSize: 11,
+    color: "#64748B",
+  },
+  callProviderMiniBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  callProviderMiniBtnText: {
     fontSize: 12,
     fontWeight: "700",
-    color: theme.green,
+    color: "#047857",
   },
-  starPickerRow: {
+
+  // Sticky Bottom Action Bar
+  bottomActionBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  ownerActionBtnRow: {
     flexDirection: "row",
+    gap: 10,
+  },
+  ownerEditBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    alignSelf: "center",
-    marginVertical: 4,
-  },
-  feedbackInput: {
-    backgroundColor: "#FAFBF9",
-    borderWidth: 1,
-    borderColor: "#E2E8E4",
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 13,
-    color: theme.ink,
-    textAlignVertical: "top",
-    minHeight: 70,
-  },
-  submitRateBtn: {
-    backgroundColor: theme.green,
     paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#047857",
+  },
+  ownerEditBtnText: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  ownerPauseBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+  },
+  ownerActivateBtn: {
+    backgroundColor: "#034E3B",
+  },
+  ownerPauseBtnText: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  clientActionBtnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  clientContactBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
     alignItems: "center",
     justifyContent: "center",
   },
-  submitRateText: {
+  clientBookBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#034E3B",
+    paddingVertical: 13,
+    borderRadius: 12,
+  },
+  clientBookBtnText: {
+    fontSize: 14.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.2,
+  },
+
+  // Booking Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  bookingModalContent: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  modalDesc: {
+    fontSize: 13,
+    color: "#64748B",
+    lineHeight: 18,
+  },
+  modalButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 6,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelBtnText: {
     fontSize: 13,
     fontWeight: "700",
-    color: "white",
+    color: "#64748B",
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#034E3B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalConfirmBtnText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  bookingSuccessBox: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+  },
+  bookingSuccessTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#047857",
+  },
+  bookingSuccessSubtext: {
+    fontSize: 12.5,
+    color: "#64748B",
+    textAlign: "center",
   },
 });

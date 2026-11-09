@@ -1,8 +1,9 @@
+import { uploadImage } from '../../../api/uploadImage';
+import { AppImage as Image } from '../../../components/AppImage';
 import { useState, useEffect } from "react";
 import {
   View,
   Text,
-  Image,
   Pressable,
   StyleSheet,
   ActivityIndicator,
@@ -107,32 +108,7 @@ export function CommonIdentityCard({
       const photo = picked.assets[0];
       if (!photo) return false;
 
-      const bytes = photo.fileSize || 1024 * 1024;
-      const mimeType = photo.mimeType ?? "image/jpeg";
-
-      const signed = await api<{ url: string; fields: Record<string, string> }>(
-        "/images/authorize",
-        { mimeType, bytes },
-      );
-
-      const body = new FormData();
-      for (const [key, value] of Object.entries(signed.fields)) {
-        body.append(key, value);
-      }
-      body.append("file", {
-        uri: photo.uri,
-        name: photo.fileName ?? "avatar.jpg",
-        type: mimeType,
-      } as unknown as Blob);
-
-      const result = await fetch(signed.url, {
-        method: "POST",
-        body,
-        signal: AbortSignal.timeout(60000),
-      });
-      if (!result.ok) throw new Error("Failed to upload avatar");
-
-      await api("/images/confirm", { assetId: signed.fields.public_id });
+      await uploadImage(photo, 'profile');
       return true;
     },
     onSuccess: () => {
@@ -265,7 +241,7 @@ export function CommonIdentityCard({
             <Text style={[styles.nameText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 16, flexShrink: 1 }]} numberOfLines={1}>
               {profile.name || "Add Your Name"}
             </Text>
-            {(!compact || Boolean(profile.phoneVerified)) && <View style={[styles.verifiedShield, compact && { backgroundColor: "#034E3B" }]}>
+            {Boolean(profile.phoneVerified) && <View style={[styles.verifiedShield, compact && { backgroundColor: "#034E3B" }]}>
               <Ionicons name="shield-checkmark" size={12} color={compact ? "white" : "#034E3B"} />
             </View>}
           </View>
@@ -273,15 +249,15 @@ export function CommonIdentityCard({
           {/* Phone Row */}
           <View style={[styles.phoneRow, compact && { flexWrap: "wrap" }]}>
             <Ionicons name="call" size={13} color="#034E3B" />
-            <Text style={[styles.phoneText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 11 }]}>
+            <Text
+              style={[styles.phoneText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", fontSize: 11 }]}
+              numberOfLines={1}
+              ellipsizeMode="clip"
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+            >
               {formatPhoneNumber(activePhone || currentPhone || profile.phone)}
             </Text>
-            {Boolean(profile.phoneVerified ?? !compact) && (
-              <View style={[styles.verifiedChip, compact && { backgroundColor: "#034E3B" }]}>
-                <Ionicons name="checkmark-circle" size={11} color={compact ? "white" : "#034E3B"} />
-                <Text style={[styles.verifiedChipText, compact && { fontFamily: Platform.OS === "android" ? "sans-serif" : "System", color: "white" }]}>Verified</Text>
-              </View>
-            )}
           </View>
 
           {/* Location Picker Row */}
@@ -341,7 +317,7 @@ export function CommonIdentityCard({
             </>
           )}
           <Text style={styles.trustPillText}>
-            {profile.phoneVerified ? "KYC Verified" : "Verified Account"}
+            {profile.phoneVerified ? "Phone verified" : "Phone not verified"}
           </Text>
         </View>
         <Text style={styles.memberSinceText}>
@@ -662,7 +638,7 @@ const styles = StyleSheet.create({
   },
   detailsCol: {
     flex: 1,
-    gap: 3,
+    gap: 5,
   },
   nameRow: {
     flexDirection: "row",
@@ -683,28 +659,17 @@ const styles = StyleSheet.create({
   phoneRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginVertical: 1,
+    gap: 7,
+    marginVertical: 0,
+    minWidth: 0,
   },
   phoneText: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: colors.ink,
     fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-  verifiedChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    backgroundColor: "#E9F8EF",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  verifiedChipText: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#034E3B",
+    letterSpacing: 0.1,
+    flexShrink: 1,
+    includeFontPadding: false,
   },
   locationPill: {
     flexDirection: "row",
@@ -792,6 +757,11 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
     maxHeight: "85%",
+    shadowColor: "#173A2D",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 18,
   },
   modalHeader: {
     flexDirection: "row",

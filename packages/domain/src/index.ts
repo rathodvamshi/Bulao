@@ -28,16 +28,23 @@ export const savedPlaceSchema = locationSchema.extend({
   icon: z.enum(["home", "storefront", "business", "location"]).default("location"),
   address: z.string().trim().max(300).default(""),
 });
+const isCleanServiceLabel = (value: string) => {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length >= 3 &&
+    /^[\p{L}\p{N}][\p{L}\p{N}_ &'().,+\-/]*$/u.test(normalized) &&
+    !/(.)\1{4,}/u.test(normalized) &&
+    !/^(test|asdf|qwerty|none|n\/a|na|xxx+)$/i.test(normalized);
+};
 export const serviceSchema = locationSchema.extend({
   wizardState: z.record(z.unknown()).optional(),
   categoryId: z.string().min(1),
   radiusKm: z.number().min(1).max(50),
   experience: z.number().int().min(0).max(70),
   available: z.boolean().default(true),
-  title: z.string().trim().min(1).max(100),
+  title: z.string().trim().min(3).max(100).refine(isCleanServiceLabel, "Enter a clear service title, not a placeholder."),
   businessName: z.string().trim().max(100).optional().default(""),
   description: z.string().trim().max(2000).optional().default(""),
-  offeredServices: z.array(z.string().trim().min(1).max(150)).max(50).default([]),
+  offeredServices: z.array(z.string().trim().min(3).max(150).refine(isCleanServiceLabel, "Enter a clear service or task name.")).min(1, "Select at least one service or task.").max(50).default([]),
   serviceMode: z.enum(["doorstep", "at_center", "both"]),
   pricingModel: z.enum(["fixed", "hourly", "visit_quote"]),
   basePricePaise: z.number().int().min(0).optional(),
@@ -53,6 +60,7 @@ export const searchSchema = z.object({
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
   radiusKm: z.coerce.number().min(1).max(50).default(5),
+  all: z.coerce.boolean().optional(),
   categoryId: z.string().optional(),
   q: z.string().optional(),
   serviceMode: z.string().optional(),
@@ -73,6 +81,7 @@ export type State =
 export type Action =
   | "accept"
   | "reject"
+  | "reject_completion"
   | "withdraw"
   | "start"
   | "confirm"
@@ -90,7 +99,7 @@ export function transition(
     return "CANCELLED_BY_SEEKER";
   if (state === "ACCEPTED" && side === "owner" && action === "start")
     return "IN_PROGRESS";
-  if (state === "IN_PROGRESS" && action === "confirm") return "IN_PROGRESS";
+  if ((state === "ACCEPTED" || state === "IN_PROGRESS") && action === "confirm") return "IN_PROGRESS";
   if (
     (state === "PENDING" || state === "ACCEPTED" || state === "IN_PROGRESS") &&
     action === "cancel"
@@ -160,3 +169,6 @@ export function formatDirectPhone(phone?: string | null): string {
   return clean;
 }
 
+
+export * from "./services/types";
+export * from "./services/taxonomy";

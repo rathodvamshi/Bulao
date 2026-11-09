@@ -1,4 +1,4 @@
-import { View, StyleSheet, Animated, Easing } from "react-native";
+import { View, ScrollView, StyleSheet, Animated, Easing } from "react-native";
 import { useEffect, useRef } from "react";
 import { colors } from "./ui";
 
@@ -428,84 +428,74 @@ export function ActivityJobSkeleton() {
 }
 
 // ─── Job Detail Screen Skeleton ─────────────────────────────────────────────
-export function JobDetailSkeleton() {
+export function JobDetailSkeleton({ bottomInset = 0 }: { bottomInset?: number }) {
   return (
-    <View style={{ flex: 1, backgroundColor: "#F4F7F5" }}>
-      {/* Top Header Placeholder */}
-      <View style={{ height: 180, backgroundColor: "#075B43", padding: 20, justifyContent: "flex-end" }}>
-        <View style={{ gap: 8, opacity: 0.85 }}>
-          <Skeleton width={90} height={18} borderRadius={9} style={{ backgroundColor: "rgba(255,255,255,0.25)" }} />
-          <Skeleton width="75%" height={26} borderRadius={6} style={{ backgroundColor: "rgba(255,255,255,0.3)" }} />
-          <Skeleton width="45%" height={16} borderRadius={4} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
-        </View>
+    <View style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
+      <View style={{ height: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#03402D" }}>
+        <Skeleton width={36} height={36} borderRadius={18} style={{ backgroundColor: "rgba(255,255,255,0.22)" }} />
+        <Skeleton width={96} height={17} borderRadius={6} style={{ backgroundColor: "rgba(255,255,255,0.3)" }} />
+        <Skeleton width={36} height={36} borderRadius={18} style={{ backgroundColor: "rgba(255,255,255,0.22)" }} />
       </View>
-
-      {/* Content Container */}
-      <View style={{ padding: 16, gap: 16, marginTop: -20 }}>
-        {/* Main Details Card */}
-        <View
-          style={{
-            backgroundColor: colors.white,
-            borderRadius: 18,
-            padding: 18,
-            gap: 14,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.05,
-            shadowRadius: 8,
-            elevation: 2,
-          }}
-        >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 28, gap: 14 }}>
+        <View style={{ backgroundColor: colors.white, borderRadius: 18, padding: 16, gap: 15, borderWidth: 1, borderColor: "#E2E8F0" }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <View style={{ gap: 6 }}>
-              <Skeleton width={70} height={12} borderRadius={4} />
-              <Skeleton width={120} height={22} borderRadius={6} />
+            <Skeleton width={110} height={12} borderRadius={4} />
+            <Skeleton width={58} height={22} borderRadius={11} />
+          </View>
+          <View style={{ gap: 7 }}>
+            <Skeleton width="88%" height={24} borderRadius={6} />
+            <Skeleton width="62%" height={24} borderRadius={6} />
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Skeleton width={42} height={42} borderRadius={21} />
+            <View style={{ flex: 1, gap: 6 }}>
+              <Skeleton width="48%" height={14} borderRadius={5} />
+              <Skeleton width="32%" height={11} borderRadius={4} />
             </View>
-            <Skeleton width={100} height={36} borderRadius={18} />
-          </View>
-          <View style={{ height: 1, backgroundColor: "#EEF2F0", marginVertical: 4 }} />
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <Skeleton width="48%" height={40} borderRadius={8} />
-            <Skeleton width="48%" height={40} borderRadius={8} />
           </View>
         </View>
 
-        {/* Map / Location Placeholder */}
-        <View
-          style={{
-            backgroundColor: colors.white,
-            borderRadius: 18,
-            padding: 16,
-            gap: 12,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.05,
-            shadowRadius: 8,
-            elevation: 2,
-          }}
-        >
-          <Skeleton width={140} height={18} borderRadius={4} />
-          <Skeleton width="100%" height={130} borderRadius={12} />
+        <View style={{ backgroundColor: "#03402D", borderRadius: 18, padding: 16, gap: 10 }}>
+          <Skeleton width={74} height={10} borderRadius={4} style={{ backgroundColor: "rgba(255,255,255,0.25)" }} />
+          <Skeleton width={158} height={31} borderRadius={7} style={{ backgroundColor: "rgba(255,255,255,0.3)" }} />
+          <Skeleton width={118} height={12} borderRadius={4} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
         </View>
 
-        {/* Requirements Card */}
-        <View
-          style={{
-            backgroundColor: colors.white,
-            borderRadius: 18,
-            padding: 16,
-            gap: 10,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.05,
-            shadowRadius: 8,
-            elevation: 2,
-          }}
-        >
-          <Skeleton width={120} height={16} borderRadius={4} />
-          <Skeleton width="90%" height={14} borderRadius={4} />
-          <Skeleton width="80%" height={14} borderRadius={4} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+          {[0, 1, 2, 3].map((item) => (
+            <View key={item} style={{ width: "48%", minHeight: 82, padding: 12, gap: 9, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0" }}>
+              <Skeleton width="58%" height={10} borderRadius={4} />
+              <Skeleton width="76%" height={15} borderRadius={5} />
+              <Skeleton width="46%" height={10} borderRadius={4} />
+            </View>
+          ))}
         </View>
+
+        <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Skeleton width={72} height={19} borderRadius={5} />
+            <Skeleton width={112} height={22} borderRadius={11} />
+          </View>
+          <Skeleton width="100%" height={168} borderRadius={17} />
+          <View style={{ backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 14, flexDirection: "row", gap: 11, alignItems: "center" }}>
+            <Skeleton width={36} height={36} borderRadius={12} />
+            <View style={{ flex: 1, gap: 7 }}>
+              <Skeleton width="45%" height={14} borderRadius={5} />
+              <Skeleton width="82%" height={11} borderRadius={4} />
+            </View>
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 15, gap: 12 }}>
+          <Skeleton width={126} height={17} borderRadius={5} />
+          <Skeleton width="96%" height={13} borderRadius={4} />
+          <Skeleton width="82%" height={13} borderRadius={4} />
+          <Skeleton width="63%" height={13} borderRadius={4} />
+        </View>
+      </ScrollView>
+      <View style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 14 + bottomInset, backgroundColor: "#FFFFFF", borderTopWidth: 1, borderTopColor: "#E2E8F0", flexDirection: "row", gap: 10 }}>
+        <Skeleton width="52%" height={48} borderRadius={12} />
+        <Skeleton width="48%" height={48} borderRadius={12} />
       </View>
     </View>
   );

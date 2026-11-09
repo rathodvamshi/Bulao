@@ -1,10 +1,23 @@
 import { create } from "zustand";
+import { generateSmartTitle, CategoryDetails } from "../../utils/titleGenerator";
+import {
+  DynamicJobAnswers,
+  generateDynamicJobTitle,
+  sanitizeAnswersForSubcategory,
+  SubcategoryId,
+} from "./dynamicCategories";
 
 export type ExperienceLevel = "any" | "some" | "expert";
 export type Duration = "one" | "few" | "ongoing";
 export type Hours = "full" | "custom";
 export type PayUnit = "day" | "job" | "hour" | "month";
 export type PayWhen = "after" | "daily" | "weekly" | "monthly";
+
+export type WorkMode = "home" | "online" | "center" | "site" | "flexible";
+export type ScheduleType = "one_time" | "fixed_duration" | "recurring" | "ongoing";
+export type PayMode = "fixed" | "negotiable" | "discuss" | "demo_first";
+export type PayBasis = "hour" | "day" | "task" | "session" | "week" | "month" | "project";
+export type PaymentFrequency = "completion" | "session" | "daily" | "weekly" | "monthly" | "milestone";
 
 export type SavedPlace = {
   id: string;
@@ -25,23 +38,36 @@ export type PostWorkState = {
   role: string;
   roleName: string;
 
-  // Step 2 / Stage 3: What, how many, gender & experience
+  // Dynamic Specification Answers
+  dynamicAnswers: DynamicJobAnswers;
+
+  // Step 2 / Stage 3: Title, Dynamic Category Details & Universal Fields
   title: string;
+  suggestedTitle: string;
+  titleSource: "auto" | "manual";
+  categoryDetails: CategoryDetails;
   workers: number;
+  numberOfStudents: number;
   genderType: GenderType;
   maleWorkers: number;
   femaleWorkers: number;
   experience: ExperienceLevel;
   experiences: ExperienceLevel[];
+  languages: string[];
+  description: string;
 
-  // Step 3: Where
+  // Step 3 / Stage 4: Where + Work Mode
+  workMode: WorkMode;
   latitude: number | null;
   longitude: number | null;
   locality: string;
   address: string;
   savedPlaceId: string | null;
 
-  // Step 4: When
+  // Step 4 / Stage 5: When (Adaptive Schedule)
+  scheduleType: ScheduleType;
+  selectedDays: string[];
+  timeSlotPreset: string;
   startDate: Date;
   duration: Duration;
   endDate: Date | null;
@@ -49,24 +75,32 @@ export type PostWorkState = {
   startTime: string;
   endTime: string;
 
-  // Step 5: Pay + extras
+  // Step 5 / Stage 6: Pay + Terms + Benefits
   payAmount: string;
+  payMode: PayMode;
+  payBasis: PayBasis;
+  paymentFrequency: PaymentFrequency;
+  demoFeeTerms: string;
   payUnit: PayUnit;
   payWhen: PayWhen;
   extras: string[];
   benefits: string[];
   photoUrl: string | null;
-  description: string;
 
   // Editing mode
   editingJobId: string | null;
 
-  // Current step
+  // Current step (1 to 7)
   currentStep: number;
 
   // Actions
   setCategory: (id: string, name: string) => void;
   setRole: (id: string, name: string) => void;
+  setTitle: (title: string, source?: "auto" | "manual") => void;
+  resetToSuggestedTitle: () => void;
+  setCategoryDetails: (details: Partial<CategoryDetails>) => void;
+  setDynamicAnswers: (answers: Partial<DynamicJobAnswers>) => void;
+  setLanguages: (languages: string[]) => void;
   setDetails: (
     title: string,
     workers: number,
@@ -75,14 +109,19 @@ export type PostWorkState = {
     maleWorkers?: number,
     femaleWorkers?: number,
     description?: string,
-    experiences?: ExperienceLevel[]
+    experiences?: ExperienceLevel[],
+    categoryDetails?: Partial<CategoryDetails>,
+    numberOfStudents?: number,
+    languages?: string[]
   ) => void;
+  setWorkMode: (mode: WorkMode) => void;
   setLocation: (
     lat: number,
     lng: number,
     locality: string,
     address?: string,
-    savedPlaceId?: string
+    savedPlaceId?: string,
+    workMode?: WorkMode
   ) => void;
   setSchedule: (
     startDate: Date,
@@ -92,6 +131,16 @@ export type PostWorkState = {
     startTime: string,
     endTime: string
   ) => void;
+  setAdaptiveSchedule: (params: {
+    scheduleType: ScheduleType;
+    startDate: Date;
+    endDate?: Date | null;
+    selectedDays?: string[];
+    timeSlotPreset?: string;
+    hours?: Hours;
+    startTime?: string;
+    endTime?: string;
+  }) => void;
   setPay: (
     amount: string,
     unit: PayUnit,
@@ -101,6 +150,15 @@ export type PostWorkState = {
     photo: string | null,
     description: string
   ) => void;
+  setAdaptivePay: (params: {
+    payAmount: string;
+    payMode?: PayMode;
+    payBasis?: PayBasis;
+    paymentFrequency?: PaymentFrequency;
+    demoFeeTerms?: string;
+    extras?: string[];
+    benefits?: string[];
+  }) => void;
   nextStep: () => void;
   prevStep: () => void;
   goToStep: (step: number) => void;
@@ -114,46 +172,173 @@ const initialState = {
   categoryName: "",
   role: "",
   roleName: "",
+  dynamicAnswers: {} as DynamicJobAnswers,
   title: "",
+  suggestedTitle: "",
+  titleSource: "auto" as "auto" | "manual",
+  categoryDetails: {} as CategoryDetails,
   workers: 1,
+  numberOfStudents: 1,
   genderType: "any" as GenderType,
   maleWorkers: 1,
   femaleWorkers: 0,
-  experience: "any" as ExperienceLevel,
-  experiences: ["any"] as ExperienceLevel[],
-  latitude: null,
-  longitude: null,
+  experience: "some" as ExperienceLevel,
+  experiences: [] as ExperienceLevel[],
+  languages: [] as string[],
+  workMode: "" as unknown as WorkMode,
+  latitude: null as number | null,
+  longitude: null as number | null,
   locality: "",
   address: "",
-  savedPlaceId: null,
-  startDate: new Date(),
-  duration: "one" as Duration,
-  endDate: null,
-  hours: "full" as Hours,
-  startTime: "09:00",
-  endTime: "17:00",
+  savedPlaceId: null as string | null,
+  scheduleType: "" as unknown as ScheduleType,
+  selectedDays: [] as string[],
+  timeSlotPreset: "",
+  startDate: null as unknown as Date,
+  duration: "" as unknown as Duration,
+  endDate: null as Date | null,
+  hours: "" as unknown as Hours,
+  startTime: "",
+  endTime: "",
   payAmount: "",
-  payUnit: "day" as PayUnit,
-  payWhen: "after" as PayWhen,
-  extras: [],
-  benefits: [],
-  photoUrl: null,
+  payMode: "" as unknown as PayMode,
+  payBasis: "" as unknown as PayBasis,
+  paymentFrequency: "" as unknown as PaymentFrequency,
+  demoFeeTerms: "",
+  payUnit: "" as unknown as PayUnit,
+  payWhen: "" as unknown as PayWhen,
+  extras: [] as string[],
+  benefits: [] as string[],
+  photoUrl: null as string | null,
   description: "",
   currentStep: 1,
 };
 
-export const usePostWorkStore = create<PostWorkState>((set) => ({
+export const usePostWorkStore = create<PostWorkState>((set, get) => ({
   ...initialState,
 
   setCategory: (id, name) =>
-    set({ category: id, categoryName: name }),
+    set((state) => {
+      const categoryChanged = state.category !== id;
+      const newCategoryDetails = categoryChanged ? {} : state.categoryDetails;
+      const newDynamicAnswers = categoryChanged ? ({} as DynamicJobAnswers) : state.dynamicAnswers;
+      const newRole = categoryChanged ? "" : state.role;
+      const newRoleName = categoryChanged ? "" : state.roleName;
+
+      const suggested = newRole
+        ? generateDynamicJobTitle(id, newRole, newDynamicAnswers) ||
+          generateSmartTitle(id, name, newRole, newRoleName, newCategoryDetails)
+        : "";
+      const title = state.titleSource === "auto" ? suggested : state.title || suggested;
+
+      return {
+        category: id,
+        categoryName: name,
+        role: newRole,
+        roleName: newRoleName,
+        categoryDetails: newCategoryDetails,
+        dynamicAnswers: newDynamicAnswers,
+        suggestedTitle: suggested,
+        title,
+      };
+    }),
 
   setRole: (id, name) =>
+    set((state) => {
+      const sanitizedAnswers = sanitizeAnswersForSubcategory(
+        id as SubcategoryId,
+        state.dynamicAnswers
+      );
+      const suggested =
+        generateDynamicJobTitle(state.category, id, sanitizedAnswers) ||
+        generateSmartTitle(
+          state.category,
+          state.categoryName,
+          id,
+          name,
+          state.categoryDetails
+        );
+      const title = state.titleSource === "auto" ? suggested : state.title || suggested;
+
+      return {
+        role: id,
+        roleName: name,
+        dynamicAnswers: sanitizedAnswers,
+        suggestedTitle: suggested,
+        title,
+      };
+    }),
+
+  setDynamicAnswers: (partialAnswers) =>
+    set((state) => {
+      const merged: DynamicJobAnswers = {
+        ...state.dynamicAnswers,
+        ...partialAnswers,
+      };
+      const suggested =
+        generateDynamicJobTitle(state.category, state.role, merged) ||
+        state.suggestedTitle;
+      const title = state.titleSource === "auto" ? suggested : state.title || suggested;
+
+      return {
+        dynamicAnswers: merged,
+        suggestedTitle: suggested,
+        title,
+      };
+    }),
+
+  setTitle: (newTitle, source = "manual") =>
+    set({
+      title: newTitle,
+      titleSource: source,
+    }),
+
+  resetToSuggestedTitle: () =>
     set((state) => ({
-      role: id,
-      roleName: name,
-      title: `${name} needed`,
+      title: state.suggestedTitle,
+      titleSource: "auto",
     })),
+
+  setCategoryDetails: (newDetails) =>
+    set((state) => {
+      const updatedDetails = { ...state.categoryDetails, ...newDetails };
+      const suggested = generateSmartTitle(
+        state.category,
+        state.categoryName,
+        state.role,
+        state.roleName,
+        updatedDetails
+      );
+      const title = state.titleSource === "auto" ? suggested : state.title || suggested;
+
+      // Sync student count if present
+      const numberOfStudents =
+        updatedDetails.numberOfStudents !== undefined
+          ? updatedDetails.numberOfStudents
+          : state.numberOfStudents;
+
+      // Sync teaching format to workMode if changed
+      let workMode = state.workMode;
+      if (updatedDetails.teachingFormat) {
+        if (updatedDetails.teachingFormat === "online") workMode = "online";
+        else if (updatedDetails.teachingFormat === "center") workMode = "center";
+        else if (updatedDetails.teachingFormat === "home") workMode = "home";
+        else if (updatedDetails.teachingFormat === "flexible") workMode = "flexible";
+      }
+
+      return {
+        categoryDetails: updatedDetails,
+        suggestedTitle: suggested,
+        title,
+        numberOfStudents,
+        workMode,
+      };
+    }),
+
+  setLanguages: (languages) =>
+    set({
+      languages,
+    }),
 
   setDetails: (
     title,
@@ -163,27 +348,65 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
     maleWorkers = 1,
     femaleWorkers = 0,
     description = "",
-    experiences = ["any"]
+    experiences = ["any"],
+    categoryDetails,
+    numberOfStudents,
+    languages
   ) =>
-    set((state) => ({
-      title,
-      workers,
-      experience,
-      experiences,
-      genderType,
-      maleWorkers,
-      femaleWorkers,
-      description: description !== undefined ? description : state.description,
-    })),
+    set((state) => {
+      const updatedCatDetails = categoryDetails
+        ? { ...state.categoryDetails, ...categoryDetails }
+        : state.categoryDetails;
+      const suggested = generateSmartTitle(
+        state.category,
+        state.categoryName,
+        state.role,
+        state.roleName,
+        updatedCatDetails
+      );
 
-  setLocation: (lat, lng, locality, address = "", savedPlaceId?: string | null) =>
-    set({
+      return {
+        title: title || state.title || suggested,
+        suggestedTitle: suggested,
+        workers,
+        numberOfStudents: numberOfStudents !== undefined ? numberOfStudents : state.numberOfStudents,
+        experience,
+        experiences,
+        languages: languages !== undefined ? languages : state.languages,
+        genderType,
+        maleWorkers,
+        femaleWorkers,
+        description: description !== undefined ? description : state.description,
+        categoryDetails: updatedCatDetails,
+      };
+    }),
+
+  setWorkMode: (mode) =>
+    set((state) => {
+      let formatVal: "home" | "center" | "online" | "flexible" = "home";
+      if (mode === "online") formatVal = "online";
+      else if (mode === "center") formatVal = "center";
+      else if (mode === "flexible") formatVal = "flexible";
+
+      const updatedDetails = {
+        ...state.categoryDetails,
+        teachingFormat: formatVal,
+      };
+      return {
+        workMode: mode,
+        categoryDetails: updatedDetails,
+      };
+    }),
+
+  setLocation: (lat, lng, locality, address = "", savedPlaceId?: string | null, workMode?: WorkMode) =>
+    set((state) => ({
       latitude: lat,
       longitude: lng,
       locality,
       address,
       savedPlaceId: savedPlaceId || null,
-    }),
+      workMode: workMode || state.workMode,
+    })),
 
   setSchedule: (startDate, duration, endDate, hours, startTime, endTime) =>
     set({
@@ -193,6 +416,28 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
       hours,
       startTime,
       endTime,
+    }),
+
+  setAdaptiveSchedule: ({
+    scheduleType,
+    startDate,
+    endDate = null,
+    selectedDays = [],
+    timeSlotPreset = "",
+    hours = "" as unknown as Hours,
+    startTime = "",
+    endTime = "",
+  }) =>
+    set({
+      scheduleType,
+      startDate,
+      endDate,
+      selectedDays,
+      timeSlotPreset,
+      hours,
+      startTime,
+      endTime,
+      duration: scheduleType === "one_time" ? "one" : scheduleType === "fixed_duration" ? "few" : scheduleType === "ongoing" ? "ongoing" : ("" as unknown as Duration),
     }),
 
   setPay: (amount, unit, when, extras, benefits, photo, description) =>
@@ -206,14 +451,50 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
       description,
     }),
 
+  setAdaptivePay: ({
+    payAmount,
+    payMode = "" as unknown as PayMode,
+    payBasis = "" as unknown as PayBasis,
+    paymentFrequency = "" as unknown as PaymentFrequency,
+    demoFeeTerms = "",
+    extras = [],
+    benefits = [],
+  }) => {
+    // Map payBasis to payUnit
+    let payUnit: PayUnit = "" as unknown as PayUnit;
+    if (payBasis === "month") payUnit = "month";
+    else if (payBasis === "hour") payUnit = "hour";
+    else if (payBasis === "task" || payBasis === "session" || payBasis === "project") payUnit = "job";
+    else if (payBasis === "day") payUnit = "day";
+
+    // Map paymentFrequency to payWhen
+    let payWhen: PayWhen = "" as unknown as PayWhen;
+    if (paymentFrequency === "monthly") payWhen = "monthly";
+    else if (paymentFrequency === "weekly") payWhen = "weekly";
+    else if (paymentFrequency === "daily") payWhen = "daily";
+    else if (paymentFrequency === "completion") payWhen = "after";
+
+    set({
+      payAmount,
+      payMode,
+      payBasis,
+      paymentFrequency,
+      demoFeeTerms,
+      payUnit,
+      payWhen,
+      extras,
+      benefits,
+    });
+  },
+
   nextStep: () =>
-    set((state) => ({ currentStep: Math.min(6, state.currentStep + 1) })),
+    set((state) => ({ currentStep: Math.min(7, state.currentStep + 1) })),
 
   prevStep: () =>
     set((state) => ({ currentStep: Math.max(1, state.currentStep - 1) })),
 
   goToStep: (step) =>
-    set({ currentStep: Math.max(1, Math.min(6, step)) }),
+    set({ currentStep: Math.max(1, Math.min(7, step)) }),
 
   initForEdit: (job: any) => {
     const rawExtras: string[] = Array.isArray(job.extras)
@@ -274,7 +555,8 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
     const rawPaidWhen = (job.paidWhen || job.payWhen) ? String(job.paidWhen || job.payWhen).toLowerCase() : "after";
     const payWhen: PayWhen = ["after", "daily", "weekly", "monthly"].includes(rawPaidWhen) ? (rawPaidWhen as PayWhen) : "after";
 
-    const rawGender = (job.gender || job.genderType) ? String(job.gender || job.genderType).toLowerCase() : "any";
+    const genderFromDetails = String(job.details || "").match(/gender preference:\s*(male|female|any gender)/i)?.[1];
+    const rawGender = String(job.gender || job.genderType || genderFromDetails || "any").toLowerCase();
     const genderType: GenderType = rawGender === "male" ? "male" : rawGender === "female" ? "female" : "any";
 
     const categoryId = job.categoryId || job.category || "";
@@ -286,6 +568,14 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
     const locality = job.area || job.locality || "";
     const address = job.address || "";
 
+    // Parse categoryDetails if stored in details or as structured object
+    let categoryDetails: CategoryDetails = {};
+    if (job.categoryDetails && typeof job.categoryDetails === "object") {
+      categoryDetails = job.categoryDetails;
+    } else if (job.metadata && typeof job.metadata === "object") {
+      categoryDetails = job.metadata;
+    }
+
     set({
       ...initialState,
       editingJobId: job.id || null,
@@ -294,6 +584,9 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
       role: roleId,
       roleName,
       title,
+      suggestedTitle: title,
+      titleSource: "manual",
+      categoryDetails,
       workers,
       genderType,
       maleWorkers: workers,
@@ -324,4 +617,3 @@ export const usePostWorkStore = create<PostWorkState>((set) => ({
 
   resetFlow: () => set(initialState),
 }));
-

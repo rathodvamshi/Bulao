@@ -11,8 +11,9 @@
 import { useEffect, useState } from "react";
 import { router, useRootNavigationState } from "expo-router";
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
-import { SplashScreen } from "../src/components/SplashScreen";
 import { useAuth } from "../src/auth";
+import { markStartupMilestone } from "../src/utils/startupMetrics";
+import { BulaoWordmark } from "../src/components/BulaoWordmark";
 
 const COLORS = {
   green: "#176B58",
@@ -23,7 +24,6 @@ const COLORS = {
 };
 
 export default function Index() {
-  const [showSplash, setShowSplash] = useState(true);
   const [hasNavigated, setHasNavigated] = useState(false);
   const auth = useAuth();
   const rootNavigationState = useRootNavigationState();
@@ -32,15 +32,15 @@ export default function Index() {
   const navigationReady = rootNavigationState?.key != null;
 
   useEffect(() => {
+    if (navigationReady && auth.status !== 'bootstrapping') {
+      markStartupMilestone('startup-prerequisites-ready');
+    }
+  }, [navigationReady, auth.status]);
+
+  useEffect(() => {
     // Don't navigate until everything is ready
     if (!navigationReady) {
       console.log('Index: Navigation not ready');
-      return;
-    }
-
-    // Wait for splash to complete before routing
-    if (showSplash) {
-      console.log('Index: Showing splash');
       return;
     }
 
@@ -49,6 +49,8 @@ export default function Index() {
       console.log('Index: Auth bootstrapping');
       return;
     }
+
+    markStartupMilestone('route-handoff-ready');
 
     // Prevent multiple navigations
     if (hasNavigated) {
@@ -74,22 +76,15 @@ export default function Index() {
       router.replace('/auth');
     }
     // If error, stay on this screen to show error + retry
-  }, [navigationReady, showSplash, auth.status, auth.user?.name, hasNavigated]);
-
-  // Show splash screen during initial animation
-  if (showSplash) {
-    return <SplashScreen onComplete={() => {
-      console.log('Index: Splash completed');
-      setShowSplash(false);
-    }} />;
-  }
+  }, [navigationReady, auth.status, auth.user?.name, hasNavigated]);
 
   // Splash complete - show bootstrap status
   if (auth.status === 'bootstrapping') {
     return (
       <View style={styles.container}>
+        <BulaoWordmark size={34} color={COLORS.green} withSignal />
         <ActivityIndicator color={COLORS.green} size="large" />
-        <Text style={styles.loadingText}>Loading...</Text>
+        <Text style={styles.loadingText}>Getting Bulao ready…</Text>
       </View>
     );
   }

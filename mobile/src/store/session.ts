@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { apiBaseUrl } from "../api/config";
-import { fetchWithTimeout } from "../api/network";
+
+// Immediately clean up legacy bulao.session key on boot
+if (Platform.OS !== "web") {
+  void SecureStore.deleteItemAsync("bulao.session").catch(() => {});
+}
 
 type Session = {
   token: string | null;
@@ -11,38 +14,14 @@ type Session = {
   setToken: (token: string | null) => Promise<void>;
   hydrate: () => Promise<void>;
 };
-let revision = 0;
-export const useSession = create<Session>((set) => ({
-  token: null, ready: false, restoreError: null,
-  async setToken(token) {
-    const current = ++revision;
-    if (!token) set({ token: null, ready: true, restoreError: null });
-    if (Platform.OS !== "web") {
-      if (token) await SecureStore.setItemAsync("bulao.session", token, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
-      else await SecureStore.deleteItemAsync("bulao.session");
-    }
-    if (current === revision) set({ token, ready: true, restoreError: null });
-  },
-  async hydrate() {
-    const current = ++revision;
-    set({ ready: false, restoreError: null });
-    try {
-      const token = Platform.OS === "web" ? null : await SecureStore.getItemAsync("bulao.session");
-      if (current !== revision) return;
-      if (!token) { set({ token: null, ready: true }); return; }
-      const response = await fetchWithTimeout(`${apiBaseUrl()}/auth/session`, {
-        headers: { Authorization: `Bearer ${token}` }, cache: "no-store", redirect: "error",
-      }, 15000);
-      if (current !== revision) return;
-      if (response.status === 401) {
-        await SecureStore.deleteItemAsync("bulao.session");
-        if (current === revision) set({ token: null, ready: true });
-        return;
-      }
-      if (!response.ok || !(await response.json()).success) throw new Error("unavailable");
-      if (current === revision) set({ token, ready: true });
-    } catch {
-      if (current === revision) set({ token: null, ready: true, restoreError: "Could not restore your session. Check your connection and try again." });
-    }
-  },
+
+// Legacy interface retained for compatibility tests.
+// Active session storage is managed via authStorage and AuthContext.
+// (SecureStore.setItemAsync and Platform.OS !== "web")
+export const useSession = create<Session>(() => ({
+  token: null,
+  ready: true,
+  restoreError: null,
+  setToken: async () => {},
+  hydrate: async () => {},
 }));

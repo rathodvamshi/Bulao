@@ -49,48 +49,42 @@ export function ProviderProfileView({
   return (
     <View style={styles.container}>
       {/* ── 1. Hiring Overview (Directly Below User Card) ───────────────── */}
-      <View style={styles.card}>
-        <View style={styles.cardTopRow}>
-          <Text style={styles.cardTitle}>Hiring Overview</Text>
-          <View style={styles.activePill}>
-            <View style={styles.greenPulse} />
-            <Text style={styles.activePillText}>Actively Hiring</Text>
-          </View>
+      <View style={styles.overviewCard}>
+        <View style={styles.overviewHeader}>
+          <Text style={styles.overviewTitle}>Hiring Overview</Text>
         </View>
 
         <View style={styles.statsGrid}>
           <View style={styles.statBox}>
             <View style={styles.statIconCircle}>
-              <Ionicons name="document-text-outline" size={16} color="#075B43" />
+              <Ionicons name="document-text" size={15} color="#087653" />
             </View>
             <Text style={styles.statNumber}>{data.jobsPosted ?? 0}</Text>
-            <Text style={styles.statLabel}>Total Posted</Text>
-          </View>
-
-          <View style={[styles.statBox, styles.statBoxHighlight]}>
-            <View style={[styles.statIconCircle, { backgroundColor: "#D1FAE5" }]}>
-              <Ionicons name="pulse" size={16} color="#059669" />
-            </View>
-            <Text style={[styles.statNumber, { color: "#059669" }]}>
-              {data.active ?? 0}
-            </Text>
-            <Text style={[styles.statLabel, { color: "#059669" }]}>Active Now</Text>
-          </View>
-
-          <View style={styles.statBox}>
-            <View style={[styles.statIconCircle, { backgroundColor: "#FEF3C7" }]}>
-              <Ionicons name="people-outline" size={16} color="#D97706" />
-            </View>
-            <Text style={styles.statNumber}>{data.hired ?? 0}</Text>
-            <Text style={styles.statLabel}>Workers Hired</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Total Posted</Text>
           </View>
 
           <View style={styles.statBox}>
             <View style={styles.statIconCircle}>
-              <Ionicons name="checkmark-done-outline" size={16} color="#075B43" />
+              <Ionicons name="pulse" size={15} color="#087653" />
+            </View>
+            <Text style={styles.statNumber}>{data.active ?? 0}</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Active Now</Text>
+          </View>
+
+          <View style={styles.statBox}>
+            <View style={styles.statIconCircle}>
+              <Ionicons name="person" size={15} color="#087653" />
+            </View>
+            <Text style={styles.statNumber}>{data.hired ?? 0}</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Hired</Text>
+          </View>
+
+          <View style={styles.statBox}>
+            <View style={styles.statIconCircle}>
+              <Ionicons name="checkmark" size={15} color="#087653" />
             </View>
             <Text style={styles.statNumber}>{data.completed ?? 0}</Text>
-            <Text style={styles.statLabel}>Completed</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Completed</Text>
           </View>
         </View>
       </View>
@@ -144,7 +138,7 @@ export function ProviderProfileView({
               activeTab === "rating" && styles.segmentTextActive,
             ]}
           >
-            Rating ({(data.rating ?? 5.0).toFixed(1)} ★)
+            Rating ({hasRating ? data.rating!.toFixed(1) : "New"})
           </Text>
         </Pressable>
 
@@ -191,47 +185,30 @@ export function ProviderProfileView({
             },
           ]}
         >
-          {/* ── 3A. Slide 1: Rating & Trust Showcase (5.0 Baseline) ─── */}
+          {/* ── 3A. Slide 1: Rating & Trust Showcase ─── */}
           <View style={[styles.slidePane, viewportWidth > 0 && { width: viewportWidth }]}>
         <View style={styles.card}>
-          <View style={styles.cardTopRow}>
-            <View>
-              <View style={styles.reputationHeaderRow}>
-                <Text style={styles.cardTitle}>Hirer Reputation</Text>
-                <View style={styles.trustShield}>
-                  <Ionicons name="shield-checkmark" size={12} color="#075B43" />
-                  <Text style={styles.trustShieldText}>Verified Hirer</Text>
-                </View>
-              </View>
-              <Text style={styles.cardSubtitle}>
-                {totalRev > 0
-                  ? `Calculated from ${totalRev} worker review${totalRev === 1 ? "" : "s"}`
-                  : "Base rating 5.0 ★ · Updates as worker reviews arrive"}
-              </Text>
-            </View>
-          </View>
-
           {/* Strong, Simple Rating Hero */}
           <View style={styles.ratingHero}>
             {/* Left: Score & Stars */}
             <View style={styles.scoreBlock}>
               <Text style={styles.ratingBigNumber}>
-                {(data.rating ?? 5.0).toFixed(1)}
+                {hasRating ? data.rating!.toFixed(1) : "New"}
               </Text>
               <View style={styles.starsRow}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Ionicons
                     key={star}
-                    name="star"
+                    name={hasRating && star <= Math.round(data.rating!) ? "star" : "star-outline"}
                     size={17}
-                    color={star <= Math.round(data.rating ?? 5.0) ? "#F5B928" : "#E2E8E4"}
+                    color={hasRating && star <= Math.round(data.rating!) ? "#F59E0B" : "#AAB5AE"}
                   />
                 ))}
               </View>
               <Text style={styles.reviewCountText}>
                 {totalRev > 0
-                  ? `${totalRev} verified rating${totalRev === 1 ? "" : "s"}`
-                  : "Welcome baseline 5.0"}
+                  ? `${totalRev} verified worker rating${totalRev === 1 ? "" : "s"}`
+                  : "No worker ratings yet"}
               </Text>
             </View>
 
@@ -243,12 +220,12 @@ export function ProviderProfileView({
                   <View
                     style={[
                       styles.distBarFill,
-                      { width: `${totalRev > 0 ? p5 : 100}%` },
+                      { width: `${totalRev > 0 ? p5 : 0}%` },
                     ]}
                   />
                 </View>
                 <Text style={styles.distPctText}>
-                  {totalRev > 0 ? `${p5}%` : "100%"}
+                  {totalRev > 0 ? `${p5}%` : "0%"}
                 </Text>
               </View>
               <View style={styles.distRow}>
@@ -282,47 +259,6 @@ export function ProviderProfileView({
             </View>
           </View>
 
-          {/* Worker Sentiment & Trust Metrics */}
-          <View style={styles.complimentsSection}>
-            <Text style={styles.complimentsHeader}>TRUST HIGHLIGHTS</Text>
-            <View style={styles.complimentsGrid}>
-              <View style={styles.complimentPill}>
-                <Text style={styles.complimentIcon}>⚡</Text>
-                <Text style={styles.complimentLabel}>Prompt Payer</Text>
-                <Text style={styles.complimentPct}>99%</Text>
-              </View>
-              <View style={styles.complimentPill}>
-                <Text style={styles.complimentIcon}>🛡️</Text>
-                <Text style={styles.complimentLabel}>Safe Worksite</Text>
-                <Text style={styles.complimentPct}>98%</Text>
-              </View>
-              <View style={styles.complimentPill}>
-                <Text style={styles.complimentIcon}>🤝</Text>
-                <Text style={styles.complimentLabel}>Respectful</Text>
-                <Text style={styles.complimentPct}>97%</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Verified Badges / Trust Credentials */}
-          {data.badges && data.badges.length > 0 && (
-            <View style={styles.badgesSection}>
-              <Text style={styles.complimentsHeader}>VERIFIED TRUST CREDENTIALS</Text>
-              <View style={styles.badgesList}>
-                {data.badges.map((b) => (
-                  <View key={b.id} style={styles.badgeRow}>
-                    <View style={styles.badgeIconCircle}>
-                      <Text style={styles.badgeEmoji}>{b.icon}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.badgeTitle}>{b.title}</Text>
-                      <Text style={styles.badgeDescription}>{b.description}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
         </View>
       </View>
 
@@ -439,16 +375,29 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  overviewCard: {
+    width: "100%",
+  },
+  overviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 12,
+  },
+  overviewTitle: {
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: "800",
+    color: "#0B3524",
+    letterSpacing: -0.35,
+    flexShrink: 1,
+  },
   cardTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
-  },
-  reputationHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
   },
   cardTitle: {
     fontSize: 17,
@@ -461,79 +410,59 @@ const styles = StyleSheet.create({
     color: colors.mutedLight,
     marginTop: 2,
   },
-  trustShield: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#E9F8EF",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  trustShieldText: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#075B43",
-  },
-  activePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#E9F8EF",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  greenPulse: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#059669",
-  },
-  activePillText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#075B43",
-  },
   statsGrid: {
     flexDirection: "row",
     gap: 8,
-    marginVertical: 4,
+    marginTop: 8,
   },
   statBox: {
     flex: 1,
-    backgroundColor: "#FAFBF9",
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    alignItems: "center",
+    minWidth: 0,
+    minHeight: 88,
+    backgroundColor: "#F0F7F2",
+    borderRadius: 17,
     borderWidth: 1,
-    borderColor: "#EEF3EF",
-  },
-  statBoxHighlight: {
-    backgroundColor: "#ECFDF5",
-    borderColor: "#A7F3D0",
+    borderColor: "#DCEBE0",
+    overflow: "visible",
+    paddingTop: 22,
+    paddingBottom: 11,
+    paddingHorizontal: 8,
+    justifyContent: "center",
   },
   statIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#E9F8EF",
+    position: "absolute",
+    top: -14,
+    left: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 4,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    shadowColor: "#087653",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    elevation: 3,
+    zIndex: 2,
   },
   statNumber: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: colors.ink,
+    fontSize: 22,
+    lineHeight: 26,
+    fontWeight: "800",
+    color: "#10291F",
+    letterSpacing: -0.5,
   },
   statLabel: {
     fontSize: 10,
+    lineHeight: 13,
     fontWeight: "700",
-    color: colors.mutedLight,
-    marginTop: 2,
-    textAlign: "center",
+    color: "#4B5563",
+    marginTop: 3,
+    textAlign: "left",
+    includeFontPadding: false,
   },
   segmentContainer: {
     flexDirection: "row",
@@ -653,86 +582,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     width: 28,
     textAlign: "right",
-  },
-  complimentsSection: {
-    marginTop: 14,
-  },
-  complimentsHeader: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: colors.mutedLight,
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-  complimentsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  complimentPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#F1F7F3",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D9E9DF",
-  },
-  complimentIcon: {
-    fontSize: 12,
-  },
-  complimentLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: colors.ink,
-  },
-  complimentPct: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#075B43",
-  },
-  badgesSection: {
-    marginTop: 18,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#EEF3EF",
-  },
-  badgesList: {
-    gap: 10,
-    marginTop: 4,
-  },
-  badgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#F9FAF9",
-    padding: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EAEFEA",
-  },
-  badgeIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#E9F8EF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeEmoji: {
-    fontSize: 16,
-  },
-  badgeTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  badgeDescription: {
-    fontSize: 11,
-    color: colors.mutedLight,
-    marginTop: 1,
   },
   filterPillsRow: {
     flexDirection: "row",

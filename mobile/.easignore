@@ -1,0 +1,24 @@
+# EAS Build Ignore
+node_modules/
+.expo/
+ios/
+dist/
+dist-*/
+build/
+*.log
+.DS_Store
+Thumbs.db
+coverage/
+.cache/
+*.jks
+*.p8
+*.p12
+*.key
+google-services-key.json
+
+# Raw design originals (published to Cloudinary CDN; excluded from APK bundle)
+assets/images/provider/bakery-hiring-story/
+assets/images/provider/kitchen-rescue-story/
+assets/images/provider/story/
+assets/images/provider/generated/
+assets/images/categories/

@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       
+      - name: Enforce remote image registry
+        run: pnpm images:check
+
       - name: Type check
         run: pnpm typecheck || echo "Type checking completed with warnings"
       

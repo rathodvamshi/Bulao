@@ -1,0 +1,239 @@
+[
+  {
+    "id": "hire-someone",
+    "folder": "bakery-hiring-story",
+    "scenes": [
+      {
+        "id": "01-need-temporary-worker",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/01-need-temporary-worker.png",
+        "label": "A bakery owner needs a temporary worker",
+        "sortOrder": 0,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "02-provider-posts-job",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/02-provider-posts-job.png",
+        "label": "The provider posts a packing job",
+        "sortOrder": 1,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "03-worker-views-job",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/03-worker-views-job.png",
+        "label": "A worker views the shift and pay details",
+        "sortOrder": 2,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "04-worker-applies",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/04-worker-applies.png",
+        "label": "The worker sends an application",
+        "sortOrder": 3,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "05-provider-accepts-application",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/05-provider-accepts-application.png",
+        "label": "The provider accepts the application",
+        "sortOrder": 4,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "06-contact-and-share-location",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/06-contact-and-share-location.png",
+        "label": "They contact each other and share the work location",
+        "sortOrder": 5,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "07-worker-follows-map",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/07-worker-follows-map.png",
+        "label": "The worker follows the map to the bakery",
+        "sortOrder": 6,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "08-worker-arrives",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/08-worker-arrives.png",
+        "label": "The worker arrives for the shift",
+        "sortOrder": 7,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "09-provider-assigns-work",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/09-provider-assigns-work.png",
+        "label": "The provider explains the packing work",
+        "sortOrder": 8,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "10-worker-does-work",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/10-worker-does-work.png",
+        "label": "The worker packs the orders",
+        "sortOrder": 9,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "11-provider-checks-completed-work",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/11-provider-checks-completed-work.png",
+        "label": "The provider checks the completed work",
+        "sortOrder": 10,
+        "fit": "cover",
+        "scale": 1.08,
+        "offset": 0.183
+      },
+      {
+        "id": "12-provider-pays-worker",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/12-provider-pays-worker.png",
+        "label": "The provider pays the worker for the shift",
+        "sortOrder": 11,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "13-provider-rates-worker",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/13-provider-rates-worker.png",
+        "label": "The provider rates the worker",
+        "sortOrder": 12,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "14-worker-rates-provider",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/14-worker-rates-provider.png",
+        "label": "The worker rates the provider",
+        "sortOrder": 13,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      },
+      {
+        "id": "15-job-completed",
+        "file": "mobile/assets/images/provider/bakery-hiring-story/15-job-completed.png",
+        "label": "Job completed. A happy provider and worker",
+        "sortOrder": 14,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.22
+      }
+    ]
+  },
+  {
+    "id": "request-service",
+    "folder": "kitchen-rescue-story",
+    "scenes": [
+      {
+        "id": "01-kitchen-leak",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/01-kitchen-leak.png",
+        "label": "A leaking sink right before family lunch",
+        "sortOrder": 0,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "02-neighbor-suggests",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/02-neighbor-suggests.png",
+        "label": "A neighbor suggests finding a plumber on Bulao",
+        "sortOrder": 1,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "03-download-bulao",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/03-download-bulao.png",
+        "label": "Downloading Bulao to find help",
+        "sortOrder": 2,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "04-find-plumber",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/04-find-plumber.png",
+        "label": "Selecting a nearby verified plumber",
+        "sortOrder": 3,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "05-plumber-accepts",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/05-plumber-accepts.png",
+        "label": "The plumber accepts the service request",
+        "sortOrder": 4,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "06-plumber-arrives",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/06-plumber-arrives.png",
+        "label": "The plumber arrives on time with tools",
+        "sortOrder": 5,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "07-repair-in-progress",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/07-repair-in-progress.png",
+        "label": "The plumber finds and fixes the leaking pipe",
+        "sortOrder": 6,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "08-repair-checked",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/08-repair-checked.png",
+        "label": "The repair is checked and dry — no more leaks",
+        "sortOrder": 7,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "09-worker-paid",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/09-worker-paid.png",
+        "label": "The homeowner pays the plumber for the service",
+        "sortOrder": 8,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      },
+      {
+        "id": "10-family-lunch-recommendation",
+        "file": "mobile/assets/images/provider/kitchen-rescue-story/10-family-lunch-recommendation.png",
+        "label": "Family lunch saved! Recommending Bulao to guests",
+        "sortOrder": 9,
+        "fit": "contain",
+        "scale": 1,
+        "offset": 0.18
+      }
+    ]
+  }
+]

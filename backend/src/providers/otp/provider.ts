@@ -4,8 +4,8 @@ import { Msg91OtpProvider } from "./msg91";
 
 export interface OtpProvider {
   send(phone: string): Promise<string>;
-  verify(phone: string, code: string): Promise<boolean>;
-  resend(phone: string): Promise<void>;
+  verify(phone: string, code: string, msg91RequestId?: string): Promise<boolean>;
+  resend(phone: string, msg91RequestId?: string): Promise<void>;
 }
 
 export function otpProvider(env: Env, requestId?: string): OtpProvider {
@@ -14,5 +14,13 @@ export function otpProvider(env: Env, requestId?: string): OtpProvider {
     console.log("MSG91_INIT_FAIL", "secret_present:", !!env.MSG91_AUTH_KEY, "template_present:", !!env.MSG91_TEMPLATE_ID, "env:", env.APP_ENV, "provider:", env.OTP_PROVIDER);
     throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
   }
-  return new Msg91OtpProvider(env.MSG91_AUTH_KEY, env.MSG91_TEMPLATE_ID, undefined, requestId, env);
+  return new Msg91OtpProvider(
+    env.MSG91_AUTH_KEY,
+    env.MSG91_TEMPLATE_ID,
+    undefined,
+    requestId,
+    env,
+    env.MSG91_WIDGET_ID,
+    env.MSG91_TOKEN_AUTH,
+  );
 }

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../src/api/client";
-import { useSession } from "../../src/store/session";
+import { useAuth } from "../../src/auth";
 import { useLocation } from "../../src/store/location";
 import { Screen, Copy, Field, Button, Failure } from "../../src/components/ui";
 import { t } from "../../src/i18n/en";
@@ -16,15 +16,20 @@ export default function Request() {
   const [details, setDetails] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [days, setDays] = useState(0);
-  const token = useSession((x) => x.token);
-  const location = useLocation((x) => x.location);
+  const { session } = useAuth();
+  const token = session?.token || null;
+    const location = useLocation((x) => x.location);
   const client = useQueryClient();
   const request = useMutation({
     mutationFn: () => {
       if (!location) throw new Error("Choose your location first.");
       return serviceApi.request(id, location, details, Math.floor(Date.now() / 1000) + days * 86400);
     },
-    onSuccess: () => invalidateServiceQueries(client),
+    onSuccess: () => {
+      void invalidateServiceQueries(client);
+      void client.invalidateQueries({ queryKey: ["activity"] });
+      void client.invalidateQueries({ queryKey: ["activity-interactions"] });
+    },
   });
   return (
     <Screen title={t(request.isSuccess ? "requestSent" : "request")} back>

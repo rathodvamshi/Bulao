@@ -20,7 +20,10 @@ export default function Review() {
   const client = useQueryClient();
   const review = useMutation({
     mutationFn: () => api("/reviews", { interactionId: id, stars, body }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["activity"] }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["activity"] });
+      void client.invalidateQueries({ queryKey: ["received-rating", id] });
+    },
   });
   return (
     <Screen title={t("review")} back>

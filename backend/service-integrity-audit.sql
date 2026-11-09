@@ -17,3 +17,12 @@ SELECT id,'legacy_defaults_require_provenance_review' AS issue FROM service_prof
  WHERE wizard_state='{}' AND (operating_hours='9:00 AM - 7:00 PM' OR (pricing_model='fixed' AND base_price_paise=0));
 SELECT r.id,'rating_without_completed_request' AS issue FROM service_ratings r
  WHERE NOT EXISTS(SELECT 1 FROM interactions i WHERE i.service_id=r.service_id AND i.worker_id=r.customer_id AND i.status='COMPLETED');
+SELECT r.id,'job_review_without_verified_completion' AS issue
+ FROM reviews r JOIN interactions i ON i.id=r.interaction_id
+ WHERE i.kind='job' AND (i.status!='COMPLETED' OR i.owner_confirmed_at IS NULL OR i.worker_confirmed_at IS NULL);
+SELECT r.id,'job_review_participant_mismatch' AS issue
+ FROM reviews r JOIN interactions i ON i.id=r.interaction_id
+ WHERE i.kind='job' AND NOT (
+   (r.author_id=i.owner_id AND r.target_id=i.worker_id) OR
+   (r.author_id=i.worker_id AND r.target_id=i.owner_id)
+ );

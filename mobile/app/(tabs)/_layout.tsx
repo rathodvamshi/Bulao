@@ -1,17 +1,28 @@
+import { useContext } from "react";
+import { AppFontsContext, appFontFamily } from "../../src/components/AppText";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { View, ActivityIndicator } from "react-native";
-import { t } from "../../src/i18n/en";
 import { colors } from "../../src/components/ui";
 import { useRequireAuth } from "../../src/auth";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabsLayout() {
+  const fontsLoaded = useContext(AppFontsContext);
+  const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading } = useRequireAuth();
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.paper }}>
-        <ActivityIndicator size="large" color={colors.green} />
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: colors.paper,
+        }}
+      >
+        <ActivityIndicator size="large" color="#03402D" />
       </View>
     );
   }
@@ -24,50 +35,77 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.green,
-        tabBarInactiveTintColor: colors.muted,
+        tabBarActiveTintColor: colors.marketplaceGreen,
+        tabBarInactiveTintColor: colors.marketplaceMuted,
         tabBarStyle: {
-          height: 78,
-          paddingTop: 9,
-          paddingBottom: 15,
-          backgroundColor: "#FAFAF5",
+          height: 64 + insets.bottom,
+          paddingTop: 6,
+          paddingBottom: Math.max(8, insets.bottom),
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+          backgroundColor: "#FFFFFF",
+          borderTopColor: "#E5ECE7",
+          borderTopWidth: 1,
         },
-        tabBarLabelStyle: { fontSize: 12 },
+        tabBarLabelStyle: {
+          fontFamily: fontsLoaded ? "Bulao-SemiBold" : appFontFamily,
+          fontSize: 11.5,
+          fontWeight: fontsLoaded ? "normal" : "600",
+          letterSpacing: -0.2,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: t("home"),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" color={color} size={size} />
+          title: "Home",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? "home" : "home-outline"}
+              color={color}
+              size={22}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: t("explore"),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="compass-outline" color={color} size={size} />
+          href: null,
+          title: "Jobs",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? "briefcase" : "briefcase-outline"}
+              color={color}
+              size={22}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="activity"
         options={{
-          title: t("activity"),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="layers-outline" color={color} size={size} />
+          href: null,
+          title: "Applications",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? "document-text" : "document-text-outline"}
+              color={color}
+              size={22}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: t("profile"),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" color={color} size={size} />
+          title: "Profile",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? "person" : "person-outline"}
+              color={color}
+              size={22}
+            />
           ),
         }}
       />

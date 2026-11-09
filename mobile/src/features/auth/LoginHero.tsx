@@ -1,9 +1,9 @@
 import React from "react";
-import { Image, StyleSheet, View, useWindowDimensions } from "react-native";
+import { StyleSheet, View, useWindowDimensions } from "react-native";
+import { AppImage as Image } from '../../components/AppImage';
 import { loginTheme as theme } from "./loginTheme";
 import { BulaoWordmark } from "../../components/BulaoWordmark";
 
-const heroImageSource = require("../../../assets/images/login-hero.jpg");
 const heroImageDimensions = { width: 1024, height: 1024 };
 
 type Props = {
@@ -27,7 +27,8 @@ export function LoginHero({ width, step, keyboardOpen }: Props) {
   return (
     <View style={[styles.hero, { height }]}>
       <Image
-        source={heroImageSource}
+        assetId="login-hero"
+        priority="high"
         accessible={false}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"

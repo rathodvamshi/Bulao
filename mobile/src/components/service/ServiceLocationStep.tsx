@@ -18,7 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ExpoLocation from "expo-location";
-import MapView, { Marker, Circle, PROVIDER_GOOGLE } from "react-native-maps";
+import { UniversalMap, UniversalMapHandle } from "../map/UniversalMap";
 import { useQuery } from "@tanstack/react-query";
 import { locationApi, type LocationSearchResult } from "../../api/locationApi";
 import { useLocation } from "../../store/location";
@@ -151,7 +151,7 @@ function LocationPickerModal({
     longitude: number;
   }>(currentLocation || DEFAULT_COORDS);
 
-  const modalMapRef = useRef<MapView>(null);
+  const modalMapRef = useRef<UniversalMapHandle>(null);
 
   useEffect(() => {
     if (visible && currentLocation) {
@@ -256,58 +256,18 @@ function LocationPickerModal({
       <View style={styles.fullScreenModalContainer}>
         {/* 1. Full-Screen 100% Map Background */}
         {Platform.OS !== "web" ? (
-          <MapView
+          <UniversalMap
             ref={modalMapRef}
-            provider={PROVIDER_GOOGLE}
             style={StyleSheet.absoluteFillObject}
-            initialRegion={modalRegion}
-            showsUserLocation={true}
-            showsMyLocationButton={false}
-            showsCompass={true}
-            mapType="standard"
-            scrollEnabled={true}
-            zoomEnabled={true}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            onPress={(e) => {
-              Keyboard.dismiss();
-              handleSetCoords(e.nativeEvent.coordinate);
+            latitude={selectedItem.latitude}
+            longitude={selectedItem.longitude}
+            radiusKm={showRadius ? radiusKm : undefined}
+            showMarker={true}
+            interactive={true}
+            onLocationSelect={(lat, lng) => {
+              handleSetCoords({ latitude: lat, longitude: lng });
             }}
-          >
-            {/* Radius Circle in Big Look */}
-            {showRadius && (
-              <Circle
-                center={{ latitude: selectedItem.latitude, longitude: selectedItem.longitude }}
-                radius={radiusKm * 1000}
-                fillColor="rgba(21, 128, 61, 0.16)"
-                strokeColor={GREEN}
-                strokeWidth={2.5}
-              />
-            )}
-
-            {/* Draggable Red Marker Pin */}
-            <Marker
-              coordinate={{ latitude: selectedItem.latitude, longitude: selectedItem.longitude }}
-              draggable={true}
-              onDragEnd={(e) => handleSetCoords(e.nativeEvent.coordinate)}
-              tracksViewChanges={false}
-              title={pinLabel}
-              description="Move pin or tap anywhere to place"
-            >
-              <View style={styles.pinContainer}>
-                <View style={styles.pinCalloutPill}>
-                  <Text style={styles.pinCalloutText} numberOfLines={1}>
-                    {selectedItem.area ? selectedItem.area.split(",")[0] : pinLabel}
-                  </Text>
-                </View>
-                <View style={styles.pinPulseRing} />
-                <View style={styles.pinSquircle}>
-                  <Ionicons name="location" size={32} color="#DC2626" />
-                </View>
-                <View style={styles.pinShadow} />
-              </View>
-            </Marker>
-          </MapView>
+          />
         ) : (
           <View style={styles.mockMapArea}>
             <View style={[styles.mockMapPin, { backgroundColor: "#FEE2E2" }]}>
@@ -483,7 +443,7 @@ export function ServiceLocationStep({
   const [geocoding, setGeocoding] = useState(false);
 
   const cardFade = useRef(new Animated.Value(1)).current;
-  const inlineMapRef = useRef<MapView>(null);
+  const inlineMapRef = useRef<UniversalMapHandle>(null);
 
   const appGlobalLocation = useLocation((x) => x.location);
   const auth = useAuth();
@@ -946,59 +906,18 @@ export function ServiceLocationStep({
 
           {/* Map Surface */}
           {Platform.OS !== "web" ? (
-            <MapView
+            <UniversalMap
               ref={inlineMapRef}
-              provider={PROVIDER_GOOGLE}
               style={styles.map}
-              initialRegion={getRegionForCoordinates(
-                effectiveCoords.latitude,
-                effectiveCoords.longitude,
-                radiusKm,
-                serviceMode !== "at_center"
-              )}
-              showsUserLocation={true}
-              showsMyLocationButton={false}
-              showsCompass={true}
-              mapType="standard"
-              onPress={(e) => {
-                const { latitude, longitude } = e.nativeEvent.coordinate;
-                handleMapTap(latitude, longitude);
+              latitude={effectiveCoords.latitude}
+              longitude={effectiveCoords.longitude}
+              radiusKm={serviceMode !== "at_center" ? radiusKm : undefined}
+              showMarker={true}
+              interactive={true}
+              onLocationSelect={(lat, lng) => {
+                handleMapTap(lat, lng);
               }}
-            >
-              {/* Coverage Circle */}
-              {serviceMode !== "at_center" && (
-                <Circle
-                  center={{ latitude: effectiveCoords.latitude, longitude: effectiveCoords.longitude }}
-                  radius={radiusKm * 1000}
-                  fillColor="rgba(21, 128, 61, 0.16)"
-                  strokeColor={GREEN}
-                  strokeWidth={2}
-                />
-              )}
-
-              {/* Red Location Pin */}
-              <Marker
-                coordinate={{ latitude: effectiveCoords.latitude, longitude: effectiveCoords.longitude }}
-                draggable={true}
-                onDragEnd={(e) => handleMapTap(e.nativeEvent.coordinate.latitude, e.nativeEvent.coordinate.longitude)}
-                tracksViewChanges={false}
-                title={serviceMode === "at_center" ? "Shop Location" : "Service Base Pin"}
-                description="Move pin or tap anywhere to place"
-              >
-                <View style={styles.pinContainer}>
-                  <View style={styles.pinCalloutPill}>
-                    <Text style={styles.pinCalloutText} numberOfLines={1}>
-                      {location?.area ? location.area.split(",")[0] : (serviceMode === "at_center" ? "Shop Location" : "Base Pin")}
-                    </Text>
-                  </View>
-                  <View style={styles.pinPulseRing} />
-                  <View style={styles.pinSquircle}>
-                    <Ionicons name="location" size={32} color="#DC2626" />
-                  </View>
-                  <View style={styles.pinShadow} />
-                </View>
-              </Marker>
-            </MapView>
+            />
           ) : (
             <View style={styles.webMapFallback}>
               <View style={styles.webRoadGrid}>

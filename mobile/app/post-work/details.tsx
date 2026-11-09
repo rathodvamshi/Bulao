@@ -1,5 +1,5 @@
-import { router } from "expo-router";
-import React, { useState, useMemo } from "react";
+import { router, Redirect } from "expo-router";
+import React, { useState, useMemo, useEffect, useRef, useImperativeHandle } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   StyleSheet,
   TextInput,
   ScrollView,
-  useWindowDimensions,
+  Animated,
+  LayoutChangeEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,189 +17,702 @@ import {
   PostWorkHeader,
   StageProgressIndicator,
   PostWorkFooter,
+  PostWorkAnimatedContent,
   ExitModal,
+  POST_WORK_TYPOGRAPHY,
 } from "../../src/components/PostWorkUI";
 import {
   usePostWorkStore,
-  ExperienceLevel,
-  GenderType,
+  WorkMode,
 } from "../../src/features/post-work/store";
 import {
-  verifyJobTitle,
-  verifyJobDescription,
-  getExperienceOptionsForRole,
-  getRoleGenderIcons,
-  getTitleSuggestionsForRole,
-  getExactRoleIcon,
-} from "../../src/utils/nameVerification";
+  SubcategoryId,
+  DynamicJobAnswers,
+  TEACHING_MODES,
+  TUTOR_EXPERIENCES,
+  SCHOOL_CLASSES,
+  SCHOOL_BOARDS,
+  SCHOOL_SUBJECTS,
+  COLLEGE_COURSES,
+  COLLEGE_BRANCHES,
+  COLLEGE_SEMESTERS,
+  COLLEGE_SUBJECTS,
+  COMPETITIVE_EXAMS,
+  EXAM_SUBJECT_FOCUS,
+  TARGET_YEARS,
+  PREPARATION_LEVELS,
+  IT_COURSES,
+  IT_SKILL_LEVELS,
+  IT_LEARNING_GOALS,
+  VOCATIONAL_SKILLS,
+  VOCATIONAL_OBJECTIVES,
+  VOCATIONAL_EXPERIENCE,
+  CREATIVE_LANGUAGES,
+  CREATIVE_PROFICIENCY,
+  CREATIVE_GOALS,
+  validateSubcategoryAnswers,
+  generateDynamicJobTitle,
+  generateDynamicJobDescription,
+} from "../../src/features/post-work/dynamicCategories";
 
-export default function PostWorkDetailsScreen() {
+// ────────────────────────────────────────────────────────────
+// REUSABLE VISUAL CARD CONTAINER
+// ────────────────────────────────────────────────────────────
+interface SectionCardProps {
+  stepNumber?: number;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle?: string;
+  required?: boolean;
+  count?: number;
+  onLayout?: (event: LayoutChangeEvent) => void;
+  children: React.ReactNode;
+}
+
+function SectionCard({
+  stepNumber,
+  icon,
+  title,
+  subtitle,
+  required,
+  count,
+  onLayout,
+  children,
+}: SectionCardProps) {
+  return (
+    <View style={cardStyles.card} onLayout={onLayout}>
+      <View style={cardStyles.headerRow}>
+        <View style={cardStyles.iconWrap}>
+          <Ionicons name={icon} size={18} color="#03402D" />
+        </View>
+        <View style={cardStyles.headerTextWrap}>
+          <View style={cardStyles.titleRow}>
+            {stepNumber !== undefined && (
+              <Text style={cardStyles.stepPrefix}>{stepNumber}. </Text>
+            )}
+            <Text style={cardStyles.title}>{title}</Text>
+            {count !== undefined && count > 0 ? (
+              <View style={cardStyles.countPill}>
+                <Text style={cardStyles.countPillText}>{count} selected</Text>
+              </View>
+            ) : required ? (
+              <View style={cardStyles.requiredPill}>
+                <Text style={cardStyles.requiredPillText}>Required</Text>
+              </View>
+            ) : (
+              <View style={cardStyles.optionalPill}>
+                <Text style={cardStyles.optionalPillText}>Optional</Text>
+              </View>
+            )}
+          </View>
+          {subtitle ? <Text style={cardStyles.subtitle}>{subtitle}</Text> : null}
+        </View>
+      </View>
+      <View style={cardStyles.content}>{children}</View>
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// REUSABLE SINGLE-SELECT WRAPPING CHIPS (NO DROPDOWN, NO SCROLL)
+// ────────────────────────────────────────────────────────────
+interface SingleSelectChipsProps {
+  options: readonly string[] | string[];
+  value?: string;
+  onSelect: (val: string) => void;
+  customValue?: string;
+  onCustomChange?: (val: string) => void;
+  customPlaceholder?: string;
+}
+
+function SingleSelectChips({
+  options,
+  value,
+  onSelect,
+  customValue,
+  onCustomChange,
+  customPlaceholder,
+}: SingleSelectChipsProps) {
+  return (
+    <View style={chipStyles.container}>
+      <View style={chipStyles.wrapRow}>
+        {options.map((opt) => {
+          const isSelected = value === opt;
+          return (
+            <Pressable
+              key={opt}
+              onPress={() => onSelect(isSelected ? "" : opt)}
+              style={[chipStyles.chip, isSelected && chipStyles.chipActive]}
+            >
+              {isSelected && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={15}
+                  color="#FFFFFF"
+                  style={chipStyles.chipIcon}
+                />
+              )}
+              <Text
+                style={[
+                  chipStyles.chipText,
+                  isSelected && chipStyles.chipTextActive,
+                ]}
+              >
+                {opt}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Inline custom input when "Other" is chosen */}
+      {value === "Other" && (
+        <View style={chipStyles.customInputBox}>
+          <Ionicons name="create-outline" size={16} color="#03402D" />
+          <TextInput
+            value={customValue || ""}
+            onChangeText={onCustomChange}
+            placeholder={customPlaceholder || "Specify detail..."}
+            placeholderTextColor="#94A3B8"
+            style={chipStyles.customTextInput}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// REUSABLE MULTI-SELECT WRAPPING CHIPS (NO DROPDOWN, NO SCROLL)
+// ────────────────────────────────────────────────────────────
+interface MultiSelectChipsProps {
+  options: readonly string[] | string[];
+  selected: string[];
+  onToggle: (val: string) => void;
+  layout?: "chips" | "grid";
+  customValue?: string;
+  onCustomChange?: (val: string) => void;
+  customPlaceholder?: string;
+}
+
+function MultiSelectChips({
+  options,
+  selected,
+  onToggle,
+  layout = "chips",
+  customValue,
+  onCustomChange,
+  customPlaceholder,
+}: MultiSelectChipsProps) {
+  return (
+    <View style={chipStyles.container}>
+      <View style={layout === "grid" ? chipStyles.multiGrid : chipStyles.wrapRow}>
+        {options.map((opt) => {
+          const isSelected = selected.includes(opt);
+          return (
+            <Pressable
+              key={opt}
+              onPress={() => onToggle(opt)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: isSelected }}
+              style={[
+                chipStyles.multiChip,
+                layout === "grid" && chipStyles.multiChipGrid,
+                isSelected && chipStyles.multiChipActive,
+              ]}
+            >
+              <View
+                style={[
+                  chipStyles.checkboxDot,
+                  isSelected && chipStyles.checkboxDotActive,
+                ]}
+              >
+                {isSelected && (
+                  <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+                )}
+              </View>
+              <Text
+                style={[
+                  chipStyles.multiChipText,
+                  layout === "grid" && chipStyles.multiChipTextGrid,
+                  isSelected && chipStyles.multiChipTextActive,
+                ]}
+              >
+                {opt}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Inline custom input when "Other" is chosen */}
+      {selected.includes("Other") && (
+        <View style={chipStyles.customInputBox}>
+          <Ionicons name="create-outline" size={16} color="#03402D" />
+          <TextInput
+            value={customValue || ""}
+            onChangeText={onCustomChange}
+            placeholder={customPlaceholder || "Specify other subject or topic..."}
+            placeholderTextColor="#94A3B8"
+            style={chipStyles.customTextInput}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// COMPACT NESTED FLEX GRIDS FOR SCHOOL CLASSES (AUTO-ADJUSTING)
+// ────────────────────────────────────────────────────────────
+interface SchoolClassGridProps {
+  selected: string[];
+  onToggle: (cls: string) => void;
+}
+
+const CLASS_TIERS = [
+  {
+    tierName: "Pre-Primary",
+    badge: "Play & KG",
+    items: [
+      { id: "Nursery", label: "Nursery" },
+      { id: "LKG", label: "LKG" },
+      { id: "UKG", label: "UKG" },
+    ],
+  },
+  {
+    tierName: "Primary School",
+    badge: "Classes 1 – 5",
+    items: [
+      { id: "Class 1", label: "1st" },
+      { id: "Class 2", label: "2nd" },
+      { id: "Class 3", label: "3rd" },
+      { id: "Class 4", label: "4th" },
+      { id: "Class 5", label: "5th" },
+    ],
+  },
+  {
+    tierName: "Middle School",
+    badge: "Classes 6 – 8",
+    items: [
+      { id: "Class 6", label: "6th" },
+      { id: "Class 7", label: "7th" },
+      { id: "Class 8", label: "8th" },
+    ],
+  },
+  {
+    tierName: "Secondary School",
+    badge: "Classes 9 – 10",
+    items: [
+      { id: "Class 9", label: "9th Class" },
+      { id: "Class 10", label: "10th / SSC" },
+    ],
+  },
+  {
+    tierName: "Higher Secondary / Inter",
+    badge: "Classes 11 – 12",
+    items: [
+      { id: "Class 11 / Inter 1st Year", label: "11th / Inter 1st Yr" },
+      { id: "Class 12 / Inter 2nd Year", label: "12th / Inter 2nd Yr" },
+    ],
+  },
+];
+
+function SchoolClassGrid({ selected, onToggle }: SchoolClassGridProps) {
+  return (
+    <View style={classGridStyles.container}>
+      {CLASS_TIERS.map((tier) => (
+        <View key={tier.tierName} style={classGridStyles.tierBlock}>
+          <View style={classGridStyles.tierHeader}>
+            <Text style={classGridStyles.tierTitle}>{tier.tierName}</Text>
+            <View style={classGridStyles.tierBadge}>
+              <Text style={classGridStyles.tierBadgeText}>{tier.badge}</Text>
+            </View>
+          </View>
+          <View style={classGridStyles.tierRow}>
+            {tier.items.map((item) => {
+              const isSelected = selected.includes(item.id);
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => onToggle(item.id)}
+                  style={[
+                    classGridStyles.tile,
+                    isSelected && classGridStyles.tileActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      classGridStyles.tileText,
+                      isSelected && classGridStyles.tileTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.label}
+                  </Text>
+                  {isSelected && (
+                    <View style={classGridStyles.activeBadge}>
+                      <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// 2x2 TEACHING MODE CARDS (NO DROPDOWN, NO SCROLL)
+// ────────────────────────────────────────────────────────────
+interface TeachingModeGridProps {
+  value?: "home" | "center" | "online" | "hybrid";
+  onSelect: (val: "home" | "center" | "online" | "hybrid") => void;
+}
+
+function TeachingModeGrid({ value, onSelect }: TeachingModeGridProps) {
+  const modeSubtitles: Record<string, string> = {
+    home: "Tutor visits student",
+    center: "Learner visits tutor",
+    online: "Live video classes",
+    hybrid: "Online & offline mix",
+  };
+
+  return (
+    <View style={modeGridStyles.grid}>
+      {TEACHING_MODES.map((mode) => {
+        const isSelected = value === mode.id;
+        return (
+          <Pressable
+            key={mode.id}
+            onPress={() => onSelect(mode.id)}
+            style={[
+              modeGridStyles.card,
+              isSelected && modeGridStyles.cardActive,
+            ]}
+          >
+            <View
+              style={[
+                modeGridStyles.iconBox,
+                isSelected && modeGridStyles.iconBoxActive,
+              ]}
+            >
+              <Ionicons
+                name={mode.icon}
+                size={22}
+                color={isSelected ? "#03402D" : "#475569"}
+              />
+            </View>
+            <View style={modeGridStyles.textWrap}>
+              <Text
+                style={[
+                  modeGridStyles.title,
+                  isSelected && modeGridStyles.titleActive,
+                ]}
+                numberOfLines={1}
+              >
+                {mode.label}
+              </Text>
+              <Text
+                style={[
+                  modeGridStyles.subtitle,
+                  isSelected && modeGridStyles.subtitleActive,
+                ]}
+                numberOfLines={1}
+              >
+                {modeSubtitles[mode.id] || "Flexible"}
+              </Text>
+            </View>
+            <View
+              style={[
+                modeGridStyles.radioCircle,
+                isSelected && modeGridStyles.radioCircleActive,
+              ]}
+            >
+              {isSelected && (
+                <View style={modeGridStyles.radioInner} />
+              )}
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+type MissingDetail = { label: string; target: string };
+
+function getMissingRequiredDetails(subcategoryId: SubcategoryId, answers: DynamicJobAnswers): MissingDetail[] {
+  switch (subcategoryId) {
+    case "school-tuition": {
+      const missing: MissingDetail[] = [];
+      if (!answers.schoolClasses?.length) missing.push({ label: "Class / Grade", target: "schoolClasses" });
+      if (!answers.schoolSubjects?.length) missing.push({ label: "Subject(s)", target: "schoolSubjects" });
+      else if (answers.schoolSubjects.includes("Other") && !answers.customSchoolSubject?.trim()) missing.push({ label: "Custom subject", target: "schoolSubjects" });
+      return missing;
+    }
+    case "college-tuition": {
+      const missing: MissingDetail[] = [];
+      if (!answers.collegeCourse || (answers.collegeCourse === "Other" && !answers.customCollegeCourse?.trim())) missing.push({ label: "Course / Degree", target: "collegeCourse" });
+      if (!answers.collegeSubjects?.length) missing.push({ label: "Subject(s)", target: "collegeSubjects" });
+      else if (answers.collegeSubjects.includes("Other") && !answers.customCollegeSubject?.trim()) missing.push({ label: "Custom subject", target: "collegeSubjects" });
+      return missing;
+    }
+    case "competitive-exams":
+      if (!answers.examName || (answers.examName === "Other" && !answers.customExamName?.trim())) return [{ label: "Target Examination", target: "examName" }];
+      return [];
+    case "computer-it-courses":
+      if (!answers.itCourse || (answers.itCourse === "Other" && !answers.customItCourse?.trim())) return [{ label: "Course / Technology", target: "itCourse" }];
+      return [];
+    case "vocational-skills":
+      if (!answers.vocationalSkill || (answers.vocationalSkill === "Other" && !answers.customVocationalSkill?.trim())) return [{ label: "Skill or Course", target: "vocationalSkill" }];
+      return [];
+    case "languages-creative":
+      if (!answers.creativeSkill || (answers.creativeSkill === "Other" && !answers.customCreativeSkill?.trim())) return [{ label: "Language or Creative Skill", target: "creativeSkill" }];
+      return [];
+    default:
+      return [];
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// MAIN STAGE 3 SCREEN (SIMPLE, CLEAR, NO DROPDOWNS, NO SCROLL)
+// ────────────────────────────────────────────────────────────
+export interface PostWorkDetailsHandle {
+  validateAndSave: () => boolean;
+}
+
+export interface PostWorkDetailsProps {
+  embedded?: boolean;
+}
+
+export const PostWorkDetailsScreen = React.forwardRef<PostWorkDetailsHandle, PostWorkDetailsProps>(
+  function PostWorkDetailsScreen({ embedded = false }, ref) {
   const {
     category,
     categoryName,
     role,
     roleName,
-    title,
-    workers,
-    genderType: savedGenderType,
-    maleWorkers: savedMaleWorkers,
-    femaleWorkers: savedFemaleWorkers,
-    experience,
-    experiences: savedExperiences,
-    description: savedDescription,
-    setDetails,
+    dynamicAnswers: savedAnswers,
+    workMode: storeWorkMode,
+    setDynamicAnswers,
+    setWorkMode,
+    setLocation,
+    setCategoryDetails,
+    setTitle,
     resetFlow,
   } = usePostWorkStore();
 
   const [showExitModal, setShowExitModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showStickyPreview, setShowStickyPreview] = useState(false);
+  const [stickyPreviewTop, setStickyPreviewTop] = useState(0);
+  const stickyPreviewAnim = useRef(new Animated.Value(0)).current;
+  const validationAnim = useRef(new Animated.Value(0)).current;
+  const detailsScrollRef = useRef<ScrollView>(null);
+  const formGroupTop = useRef(0);
+  const sectionPositions = useRef<Record<string, number>>({});
 
-  // 1. Job Title State & Default Auto-population
-  const defaultTitle = title.trim() || `${roleName || "Worker"} needed`;
-  const [localTitle, setLocalTitle] = useState(defaultTitle);
+  useEffect(() => {
+    Animated.timing(stickyPreviewAnim, {
+      toValue: showStickyPreview ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [showStickyPreview, stickyPreviewAnim]);
 
-  // 2. Job Description State
-  const [localDescription, setLocalDescription] = useState(savedDescription || "");
-
-  // 3. Gender & Worker Count Strategy State
-  const [localGenderType, setLocalGenderType] = useState<GenderType>(savedGenderType || "any");
-  const [localWorkers, setLocalWorkers] = useState<number>(workers || 1);
-  const [localMaleWorkers, setLocalMaleWorkers] = useState<number>(savedMaleWorkers ?? 1);
-  const [localFemaleWorkers, setLocalFemaleWorkers] = useState<number>(savedFemaleWorkers ?? 0);
-
-  // Dynamic Contextual Experience Options tailored for the selected Category & Role
-  const dynamicExperienceOptions = useMemo(
-    () => getExperienceOptionsForRole(role, roleName, category),
-    [role, roleName, category]
-  );
-
-  // 4. Multi-Select Experience Level (Default: Top one is selected, at least one mandatory)
-  const [localExperiences, setLocalExperiences] = useState<ExperienceLevel[]>(() => {
-    if (savedExperiences && savedExperiences.length > 0) return savedExperiences;
-    if (experience) return [experience];
-    return [dynamicExperienceOptions[0]?.value || "any"];
-  });
-
-  // Auto-seed and sync store data whenever editing or store values change
-  React.useEffect(() => {
-    if (title) setLocalTitle(title);
-    if (savedDescription) setLocalDescription(savedDescription);
-    if (workers) setLocalWorkers(workers);
-    if (savedGenderType) setLocalGenderType(savedGenderType);
-    if (savedMaleWorkers !== undefined) setLocalMaleWorkers(savedMaleWorkers);
-    if (savedFemaleWorkers !== undefined) setLocalFemaleWorkers(savedFemaleWorkers);
-    if (savedExperiences && savedExperiences.length > 0) {
-      setLocalExperiences(savedExperiences);
-    } else if (experience) {
-      setLocalExperiences([experience]);
+  useEffect(() => {
+    if (errorMessage) {
+      validationAnim.setValue(0);
+      Animated.spring(validationAnim, {
+        toValue: 1,
+        speed: 20,
+        bounciness: 4,
+        useNativeDriver: true,
+      }).start();
+      const dismissTimer = setTimeout(() => setErrorMessage(null), 3000);
+      return () => clearTimeout(dismissTimer);
     }
-  }, [
-    title,
-    savedDescription,
-    workers,
-    savedGenderType,
-    savedMaleWorkers,
-    savedFemaleWorkers,
-    savedExperiences,
-    experience,
-  ]);
+  }, [errorMessage, validationAnim]);
 
-  const { width } = useWindowDimensions();
+  // Active subcategory ID
+  const subcatId = (role || "school-tuition") as SubcategoryId;
 
-  // Verification Results
-  const titleVerification = useMemo(
-    () => verifyJobTitle(localTitle, categoryName, roleName),
-    [localTitle, categoryName, roleName]
-  );
+  // Local state for dynamic answers initialized from store
+  const [answers, setAnswers] = useState<DynamicJobAnswers>(() => ({
+    teachingMode: (storeWorkMode as any) || savedAnswers?.teachingMode || "home",
+    additionalRequirements: savedAnswers?.additionalRequirements || "",
+    tutorGender: savedAnswers?.tutorGender || "any",
+    tutorCount: savedAnswers?.tutorCount || 1,
+    tutorGenders: savedAnswers?.tutorGenders || (savedAnswers?.tutorGender === "both" ? ["male", "female"] : savedAnswers?.tutorGender && savedAnswers.tutorGender !== "any" ? [savedAnswers.tutorGender] : []),
+    maleTutorCount: savedAnswers?.maleTutorCount || savedAnswers?.tutorCount || 1,
+    femaleTutorCount: savedAnswers?.femaleTutorCount || savedAnswers?.tutorCount || 1,
+    anyTutorCount: savedAnswers?.anyTutorCount || savedAnswers?.tutorCount || 1,
+    tutorExperience: savedAnswers?.tutorExperience || "any",
+    ...savedAnswers,
+  }));
+  const activeTutorGenders = answers.tutorGenders || (answers.tutorGender === "both" ? ["male", "female"] : answers.tutorGender && answers.tutorGender !== "any" ? [answers.tutorGender] : []);
+  const requestedTutorCount = activeTutorGenders.length > 0
+    ? (activeTutorGenders.includes("male") ? (answers.maleTutorCount || answers.tutorCount || 1) : 0) +
+      (activeTutorGenders.includes("female") ? (answers.femaleTutorCount || answers.tutorCount || 1) : 0)
+    : (answers.anyTutorCount || answers.tutorCount || 1);
 
-  const descriptionVerification = useMemo(
-    () => verifyJobDescription(localDescription),
-    [localDescription]
-  );
+  // Update a single answer field
+  const updateField = <K extends keyof DynamicJobAnswers>(
+    key: K,
+    val: DynamicJobAnswers[K]
+  ) => {
+    setErrorMessage(null);
+    setAnswers((prev) => ({
+      ...prev,
+      [key]: val,
+    }));
+  };
 
-  // Exact Role Icon for Job Title & Role matching
-  const exactRoleIcon = useMemo(
-    () => getExactRoleIcon(role, roleName, category),
-    [role, roleName, category]
-  );
-
-  // Role-Specific Gender Avatars (Matching work dress codes: e.g. Hardhats for construction, Chef hats for cooks, etc.)
-  const genderIcons = useMemo(
-    () => getRoleGenderIcons(role, roleName, category),
-    [role, roleName, category]
-  );
-
-  // Smart Context Suggestion Cards with matching icons & badges
-  const titleSuggestions = useMemo(
-    () => getTitleSuggestionsForRole(role, roleName, category, categoryName),
-    [role, roleName, category, categoryName]
-  );
-
-  // Compute Total Active Workers based on Gender strategy
-  const computedTotalWorkers = useMemo(() => {
-    if (localGenderType === "custom") {
-      return localMaleWorkers + localFemaleWorkers;
-    }
-    return localWorkers;
-  }, [localGenderType, localWorkers, localMaleWorkers, localFemaleWorkers]);
-
-  const isFormValid =
-    titleVerification.isValid &&
-    descriptionVerification.isValid &&
-    computedTotalWorkers >= 1 &&
-    localExperiences.length >= 1;
-
-  // Handle Multi-Select Experience Toggle (Mandatory minimum 1)
-  const handleToggleExperience = (expVal: ExperienceLevel) => {
-    setLocalExperiences((prev) => {
-      if (prev.includes(expVal)) {
-        // Only remove if there's at least 1 other item selected
-        if (prev.length > 1) {
-          return prev.filter((item) => item !== expVal);
-        }
-        return prev; // Keep selected if it's the only one
-      } else {
-        return [...prev, expVal];
-      }
+  const selectTutorGender = (gender: "any" | "male" | "female" | "both") => {
+    setErrorMessage(null);
+    const tutorGenders: Array<"male" | "female"> = gender === "both" ? ["male", "female"] : gender === "any" ? [] : gender === "male" || gender === "female" ? [gender] : [];
+    setAnswers((previous) => {
+      const maleCount = previous.maleTutorCount || previous.tutorCount || 1;
+      const femaleCount = previous.femaleTutorCount || previous.tutorCount || 1;
+      return {
+        ...previous,
+        tutorGender: gender,
+        tutorGenders,
+        ...(gender === "both" && maleCount + femaleCount > 100
+          ? { maleTutorCount: Math.min(maleCount, 99), femaleTutorCount: Math.min(femaleCount, 100 - Math.min(maleCount, 99)) }
+          : {}),
+      };
     });
   };
 
-  // Handle Gender Tab Selection
-  const handleSelectGenderType = (type: GenderType) => {
-    setLocalGenderType(type);
-    if (type === "custom") {
-      const male = localMaleWorkers > 0 ? localMaleWorkers : 1;
-      const female = localFemaleWorkers > 0 ? localFemaleWorkers : 1;
-      setLocalMaleWorkers(male);
-      setLocalFemaleWorkers(female);
-    } else {
-      if (localWorkers < 1) setLocalWorkers(1);
+  const setTutorCount = (gender: "male" | "female" | "any", count: number) => {
+    if (gender === "any") {
+      updateField("anyTutorCount", Math.max(1, Math.min(100, count)));
+      return;
     }
+    const selected = answers.tutorGenders || (answers.tutorGender === "both" ? ["male", "female"] : answers.tutorGender && answers.tutorGender !== "any" ? [answers.tutorGender] : []);
+    const otherGender = gender === "male" ? "female" : "male";
+    const otherCount = otherGender === "male" ? answers.maleTutorCount || 1 : answers.femaleTutorCount || 1;
+    const maxCount = selected.includes(otherGender) ? Math.max(1, 100 - otherCount) : 100;
+    updateField(gender === "male" ? "maleTutorCount" : "femaleTutorCount", Math.max(1, Math.min(maxCount, count)));
   };
 
-  const handleNext = () => {
-    if (!isFormValid) return;
+  const getTutorMaxCount = (gender: "male" | "female" | "any") => {
+    if (gender === "any") return 100;
+    const selected = answers.tutorGenders || (answers.tutorGender === "both" ? ["male", "female"] : answers.tutorGender && answers.tutorGender !== "any" ? [answers.tutorGender] : []);
+    const otherGender = gender === "male" ? "female" : "male";
+    const otherCount = otherGender === "male" ? answers.maleTutorCount || 1 : answers.femaleTutorCount || 1;
+    return selected.includes(otherGender) ? Math.max(1, 100 - otherCount) : 100;
+  };
 
-    const primaryExperience = localExperiences[0] || "any";
+  // Multi-select toggle helper
+  const toggleMultiSelect = (
+    key: "schoolClasses" | "schoolSubjects" | "collegeSubjects" | "examFocus",
+    item: string
+  ) => {
+    setErrorMessage(null);
+    setAnswers((prev) => {
+      const current = prev[key] || [];
+      const exists = current.includes(item);
+      const updated = exists
+        ? current.filter((x) => x !== item)
+        : [...current, item];
+      return {
+        ...prev,
+        [key]: updated,
+      };
+    });
+  };
 
-    setDetails(
-      titleVerification.sanitizedName,
-      computedTotalWorkers,
-      primaryExperience,
-      localGenderType,
-      localGenderType === "custom"
-        ? localMaleWorkers
-        : localGenderType === "male"
-        ? localWorkers
-        : 0,
-      localGenderType === "custom"
-        ? localFemaleWorkers
-        : localGenderType === "female"
-        ? localWorkers
-        : 0,
-      descriptionVerification.sanitizedName,
-      localExperiences
+  // Compute live generated title and description preview
+  const liveTitle = useMemo(() => {
+    return generateDynamicJobTitle(category, role, answers);
+  }, [category, role, answers]);
+  const previewTitle = liveTitle.replace(/^wanted:\s*/i, "").trim();
+
+  const liveDescription = useMemo(() => {
+    return generateDynamicJobDescription(
+      categoryName || (category === "tuition" ? "Tuition" : "Education & Training"),
+      roleName || "Tuition",
+      answers
     );
+  }, [category, categoryName, roleName, answers]);
 
+  // Keep parent store in sync with answers for title generation
+  useEffect(() => {
+    setTitle(liveTitle, "auto");
+  }, [liveTitle, setTitle]);
+
+  const validateAndSave = (): boolean => {
+    const validation = validateSubcategoryAnswers(subcatId, answers);
+    if (!validation.valid) {
+      const missing = getMissingRequiredDetails(subcatId, answers);
+      const missingLabels = missing.length > 0
+        ? missing.map((item) => item.label)
+        : [validation.error || "Required details"];
+      setErrorMessage(`Please complete: ${missingLabels.join(", ")}`);
+      const target = missing[0]?.target;
+      const sectionY = target ? sectionPositions.current[target] : undefined;
+      requestAnimationFrame(() => {
+        detailsScrollRef.current?.scrollTo({
+          y: Math.max(0, (sectionY !== undefined ? formGroupTop.current + sectionY : 0) - 12),
+          animated: true,
+        });
+      });
+      return false;
+    }
+
+    setErrorMessage(null);
+
+    // Persist in store
+    setDynamicAnswers(answers);
+    const modeForFormat =
+      answers.teachingMode === "hybrid"
+        ? "flexible"
+        : answers.teachingMode || "home";
+    setWorkMode(modeForFormat as WorkMode);
+
+    setCategoryDetails({
+      educationLevel: answers.schoolClasses,
+      board: answers.schoolBoard === "Other" ? answers.customSchoolBoard : answers.schoolBoard,
+      subjects: answers.schoolSubjects || answers.collegeSubjects,
+      customSubject: answers.customSchoolSubject || answers.customCollegeSubject,
+      stream: answers.collegeBranch === "Other" ? answers.customCollegeBranch : answers.collegeBranch,
+      exam: answers.examName === "Other" ? answers.customExamName : answers.examName,
+      degree: answers.collegeCourse === "Other" ? answers.customCollegeCourse : answers.collegeCourse,
+      teachingFormat: modeForFormat as "home" | "online" | "center" | "flexible",
+      specialRequirements: answers.additionalRequirements ? [answers.additionalRequirements] : [],
+    });
+
+    setTitle(liveTitle, "auto");
+
+    // If online class is selected, no location selection is needed
+    if (answers.teachingMode === "online") {
+      setLocation(
+        17.3850,
+        78.4867,
+        "Online / Remote",
+        "Online / Remote Sessions (No physical address)",
+        undefined,
+        "online"
+      );
+    }
+    return true;
+  };
+
+  useImperativeHandle(ref, () => ({
+    validateAndSave,
+  }));
+
+  const handleNext = () => {
+    if (!validateAndSave()) return;
+    if (answers.teachingMode === "online") {
+      router.push("/post-work/schedule");
+      return;
+    }
     router.push("/post-work/location");
   };
 
@@ -208,1149 +722,1271 @@ export default function PostWorkDetailsScreen() {
     router.replace("/provider-home");
   };
 
+  const ContainerComponent = embedded ? View : SafeAreaView;
+
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Top Header with ← Exit */}
-      <PostWorkHeader
-        title="Job Details"
-        currentStep={3}
-        totalSteps={7}
-        onExit={() => setShowExitModal(true)}
-      />
-
-      {/* Connected Stage Progress Indicator */}
-      <StageProgressIndicator
-        currentStep={3}
-        onStepPress={(step) => {
-          if (step === 1 || step === 2) router.push("/post-work");
-        }}
-      />
-
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.stageTag}>STAGE 3 OF 7</Text>
-        <Text style={styles.question}>Tell us about the work</Text>
-        <Text style={styles.subtitle}>
-          Set a clear job title, how many workers you need, gender preference, and their experience level.
-        </Text>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* SECTION 1: JOB TITLE WITH ROLE ICON & CONTEXT VERIFICATION       */}
-        {/* ---------------------------------------------------------------- */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionIconCircle}>
-              <Text style={styles.sectionIconEmoji}>{exactRoleIcon}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Job Title</Text>
-              <Text style={styles.sectionSubtitle}>
-                Clear title for {roleName || "workers"} in {categoryName || "your category"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Job Title Input with Role Icon on the left & Verified Check on the right */}
-          <View style={styles.inputWrapper}>
-            <View style={styles.inputIconLeft}>
-              <Text style={styles.inputEmojiLeft}>{exactRoleIcon}</Text>
-            </View>
-            <TextInput
-              value={localTitle}
-              onChangeText={setLocalTitle}
-              placeholder={`${roleName || "Worker"} needed`}
-              placeholderTextColor={colors.mutedLight}
-              maxLength={80}
-              style={[
-                styles.inputWithIcon,
-                !titleVerification.isValid && localTitle.trim().length > 0 && styles.inputError,
-                titleVerification.isValid && styles.inputSuccess,
-              ]}
-              returnKeyType="done"
-            />
-            {titleVerification.isValid && (
-              <View style={styles.verifiedIconBadge}>
-                <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-              </View>
-            )}
-          </View>
-
-          {/* Validation Feedback: Only show error banner if title is invalid */}
-          {localTitle.trim().length > 0 && !titleVerification.isValid && (
-            <View style={styles.errorBanner}>
-              <Ionicons name="alert-circle-outline" size={16} color="#E53E3E" />
-              <Text style={styles.errorBannerText}>{titleVerification.errorReason}</Text>
-            </View>
-          )}
-
-          {/* Smart Title Suggestion Cards (Structured 2x2 Grid with Increased Height & Clean Proportions) */}
-          <Text style={styles.suggestionHeader}>Quick Title Suggestions:</Text>
-          <View style={styles.suggestionGrid}>
-            {titleSuggestions.map((item) => {
-              const isSelected = localTitle === item.text;
-              return (
-                <Pressable
-                  key={item.text}
-                  onPress={() => setLocalTitle(item.text)}
-                  style={[
-                    styles.suggestionCard,
-                    isSelected && styles.suggestionCardActive,
-                  ]}
-                >
-                  <View style={styles.suggestionCardTop}>
-                    <View
-                      style={[
-                        styles.suggestionIconCircle,
-                        isSelected && styles.suggestionIconCircleActive,
-                      ]}
-                    >
-                      <Text style={styles.suggestionIconText}>{item.icon}</Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.suggestionTag,
-                        isSelected && styles.suggestionTagActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.suggestionTagText,
-                          isSelected && styles.suggestionTagTextActive,
-                        ]}
-                      >
-                        {item.badge}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text
-                    style={[
-                      styles.suggestionCardText,
-                      isSelected && styles.suggestionCardTextActive,
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {item.text}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* SECTION 2: OPTIONAL JOB DESCRIPTION BOX                          */}
-        {/* ---------------------------------------------------------------- */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionIconCircle}>
-              <Ionicons name="document-text-outline" size={20} color={colors.green} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={styles.sectionTitle}>Job Description</Text>
-                <View style={styles.optionalBadge}>
-                  <Text style={styles.optionalBadgeText}>Optional</Text>
-                </View>
-              </View>
-              <Text style={styles.sectionSubtitle}>
-                Add specific tasks, tools, or instructions (phone number allowed)
-              </Text>
-            </View>
-          </View>
-
-          <TextInput
-            value={localDescription}
-            onChangeText={setLocalDescription}
-            placeholder="e.g. Need help with kitchen plumbing repair and pipe fitting. Bring basic tools. Contact: 9876543210"
-            placeholderTextColor={colors.mutedLight}
-            multiline
-            numberOfLines={3}
-            maxLength={500}
-            style={[
-              styles.textArea,
-              !descriptionVerification.isValid && styles.inputError,
-            ]}
+    <ContainerComponent style={screenStyles.container} {...(!embedded ? { edges: ["top" as const] } : {})}>
+      {!embedded && (
+        <View
+          onLayout={(event) => {
+            const nextTop = event.nativeEvent.layout.height;
+            setStickyPreviewTop((current) => current === nextTop ? current : nextTop);
+          }}
+        >
+          <PostWorkHeader
+            title="Job Details"
+            currentStep={3}
+            totalSteps={7}
+            onExit={() => setShowExitModal(true)}
           />
 
-          <View style={styles.descriptionFooterRow}>
-            {localDescription.trim().length > 0 && !descriptionVerification.isValid ? (
-              <Text style={styles.descErrorText}>⚠️ {descriptionVerification.errorReason}</Text>
-            ) : (
-              <View style={{ flex: 1 }} />
-            )}
-            <Text style={styles.charCountText}>{localDescription.length}/500</Text>
+          <StageProgressIndicator
+            currentStep={3}
+            onStepPress={(step) => {
+              if (step <= 2) {
+                router.push({
+                  pathname: "/post-work",
+                  params: { stage: String(step), preserveDraft: "1" },
+                });
+              }
+            }}
+          />
+        </View>
+      )}
+
+      <Animated.View
+        pointerEvents="none"
+        accessibilityElementsHidden={!showStickyPreview}
+        importantForAccessibility={showStickyPreview ? "yes" : "no-hide-descendants"}
+        accessibilityLiveRegion="polite"
+        style={[
+          screenStyles.stickyPreview,
+          {
+            position: "absolute",
+            top: stickyPreviewTop,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            elevation: 8,
+            height: stickyPreviewAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 46] }),
+            borderTopWidth: stickyPreviewAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+            borderBottomWidth: stickyPreviewAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+            transform: [{ translateY: stickyPreviewAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+          },
+        ]}
+      >
+        <View style={screenStyles.stickyTitleAccent} />
+        <Text style={screenStyles.stickyPreviewTitle} numberOfLines={1} ellipsizeMode="tail">
+          {previewTitle}
+        </Text>
+      </Animated.View>
+
+      {errorMessage && (
+        <Animated.View
+          style={[
+            screenStyles.validationBanner,
+            {
+              opacity: validationAnim,
+              transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+            },
+          ]}
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+        >
+          <Ionicons name="alert-circle" size={19} color="#B42318" />
+          <View style={{ flex: 1 }}>
+            <Text style={screenStyles.validationTitle}>Complete these details</Text>
+            <Text style={screenStyles.validationText}>{errorMessage}</Text>
+          </View>
+          <Pressable onPress={() => setErrorMessage(null)} hitSlop={8} accessibilityLabel="Dismiss message">
+            <Ionicons name="close" size={18} color="#8B1D16" />
+          </Pressable>
+        </Animated.View>
+      )}
+
+      <PostWorkAnimatedContent>
+      <ScrollView
+        ref={detailsScrollRef}
+        style={screenStyles.content}
+        contentContainerStyle={screenStyles.contentContainer}
+        showsVerticalScrollIndicator={true}
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          const shouldShow = event.nativeEvent.contentOffset.y > 150;
+          setShowStickyPreview((visible) => visible === shouldShow ? visible : shouldShow);
+        }}
+      >
+        {/* Compact, editable job-title suggestion */}
+        <View style={screenStyles.previewBanner}>
+          <View style={screenStyles.previewIconWrap}>
+            <Ionicons name="sparkles" size={17} color={colors.greenDark} />
+          </View>
+          <View style={screenStyles.previewCopy}>
+          <View style={screenStyles.previewHeader}>
+              <Text style={screenStyles.previewLabel}>Suggested job title</Text>
+              <Text style={screenStyles.autoGeneratedHint}>AUTO</Text>
+            </View>
+            <Text style={screenStyles.previewTitleText}>{previewTitle}</Text>
           </View>
         </View>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* SECTION 3: WORKER COUNT & GENDER PREFERENCE STRATEGY             */}
-        {/* ---------------------------------------------------------------- */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionIconCircle}>
-              <Ionicons name="people-outline" size={20} color={colors.green} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Workers & Gender Preference</Text>
-              <Text style={styles.sectionSubtitle}>
-                Select required workers for {roleName || "work"}
-              </Text>
-            </View>
+        {/* ============================================================ */}
+        {/* A. SCHOOL TUITION                                            */}
+        {/* ============================================================ */}
+        {subcatId === "school-tuition" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Class / Grade */}
+            <SectionCard
+              stepNumber={1}
+              icon="school-outline"
+              title="Class / Grade"
+              subtitle="Select all applicable grades (tap to select):"
+              required
+              count={(answers.schoolClasses || []).length}
+              onLayout={(event) => { sectionPositions.current.schoolClasses = event.nativeEvent.layout.y; }}
+            >
+              <SchoolClassGrid
+                selected={answers.schoolClasses || []}
+                onToggle={(cls) => toggleMultiSelect("schoolClasses", cls)}
+              />
+            </SectionCard>
+
+            {/* 2. Board / Syllabus */}
+            <SectionCard
+              stepNumber={2}
+              icon="book-outline"
+              title="Board / Syllabus"
+              subtitle="Choose the school curriculum:"
+            >
+              <SingleSelectChips
+                options={SCHOOL_BOARDS}
+                value={answers.schoolBoard}
+                onSelect={(val) => updateField("schoolBoard", val)}
+                customValue={answers.customSchoolBoard}
+                onCustomChange={(val) => updateField("customSchoolBoard", val)}
+                customPlaceholder="Type board name (e.g. Cambridge, State Board)..."
+              />
+            </SectionCard>
+
+            {/* 3. Subjects */}
+            <SectionCard
+              stepNumber={3}
+              icon="library-outline"
+              title="Subject(s)"
+              subtitle="Select subjects you want taught (choose multiple):"
+              required
+              count={(answers.schoolSubjects || []).length}
+              onLayout={(event) => { sectionPositions.current.schoolSubjects = event.nativeEvent.layout.y; }}
+            >
+              <MultiSelectChips
+                options={SCHOOL_SUBJECTS}
+                selected={answers.schoolSubjects || []}
+                onToggle={(item) => toggleMultiSelect("schoolSubjects", item)}
+                layout="grid"
+                customValue={answers.customSchoolSubject}
+                onCustomChange={(val) => updateField("customSchoolSubject", val)}
+                customPlaceholder="Specify other subject..."
+              />
+            </SectionCard>
           </View>
+        )}
 
-          {/* Gender Selector Tabs with Role-Specific Dress Code Avatars */}
-          <View style={styles.genderTabsRow}>
-            <Pressable
-              onPress={() => handleSelectGenderType("any")}
-              style={[
-                styles.genderTab,
-                localGenderType === "any" && styles.genderTabActive,
-              ]}
+        {/* ============================================================ */}
+        {/* B. COLLEGE & UNIVERSITY TUITION                              */}
+        {/* ============================================================ */}
+        {subcatId === "college-tuition" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Degree / Course */}
+            <SectionCard
+              stepNumber={1}
+              icon="school-outline"
+              title="Course / Degree"
+              subtitle="Select the learner's degree:"
+              required
+              onLayout={(event) => { sectionPositions.current.collegeCourse = event.nativeEvent.layout.y; }}
             >
-              <Text style={styles.genderTabIcon}>{genderIcons.anyIcon}</Text>
-              <Text
-                style={[
-                  styles.genderTabText,
-                  localGenderType === "any" && styles.genderTabTextActive,
-                ]}
-              >
-                Any Gender
-              </Text>
-            </Pressable>
+              <SingleSelectChips
+                options={COLLEGE_COURSES}
+                value={answers.collegeCourse}
+                onSelect={(val) => updateField("collegeCourse", val)}
+                customValue={answers.customCollegeCourse}
+                onCustomChange={(val) => updateField("customCollegeCourse", val)}
+                customPlaceholder="Type degree name (e.g. B.Tech Mechanical, B.Sc Nursing)..."
+              />
+            </SectionCard>
 
-            <Pressable
-              onPress={() => handleSelectGenderType("male")}
-              style={[
-                styles.genderTab,
-                localGenderType === "male" && styles.genderTabActive,
-              ]}
+            {/* 2. Branch / Specialization */}
+            <SectionCard
+              stepNumber={2}
+              icon="git-branch-outline"
+              title="Branch / Specialization"
+              subtitle="Select branch or department:"
             >
-              <Text style={styles.genderTabIcon}>{genderIcons.maleIcon}</Text>
-              <Text
-                style={[
-                  styles.genderTabText,
-                  localGenderType === "male" && styles.genderTabTextActive,
-                ]}
-              >
-                Men Only
-              </Text>
-            </Pressable>
+              <SingleSelectChips
+                options={COLLEGE_BRANCHES}
+                value={answers.collegeBranch}
+                onSelect={(val) => updateField("collegeBranch", val)}
+                customValue={answers.customCollegeBranch}
+                onCustomChange={(val) => updateField("customCollegeBranch", val)}
+                customPlaceholder="Type branch or specialization..."
+              />
+            </SectionCard>
 
-            <Pressable
-              onPress={() => handleSelectGenderType("female")}
-              style={[
-                styles.genderTab,
-                localGenderType === "female" && styles.genderTabActive,
-              ]}
+            {/* 3. Year / Semester */}
+            <SectionCard
+              stepNumber={3}
+              icon="calendar-outline"
+              title="Academic Year / Semester"
+              subtitle="Select current academic year:"
             >
-              <Text style={styles.genderTabIcon}>{genderIcons.femaleIcon}</Text>
-              <Text
-                style={[
-                  styles.genderTabText,
-                  localGenderType === "female" && styles.genderTabTextActive,
-                ]}
-              >
-                Women Only
-              </Text>
-            </Pressable>
+              <SingleSelectChips
+                options={COLLEGE_SEMESTERS}
+                value={answers.collegeSemester}
+                onSelect={(val) => updateField("collegeSemester", val)}
+              />
+            </SectionCard>
 
-            <Pressable
-              onPress={() => handleSelectGenderType("custom")}
-              style={[
-                styles.genderTab,
-                localGenderType === "custom" && styles.genderTabActive,
-              ]}
+            {/* 4. College Subjects */}
+            <SectionCard
+              stepNumber={4}
+              icon="documents-outline"
+              title="Subject(s)"
+              subtitle="Select required college subjects (choose multiple):"
+              required
+              count={(answers.collegeSubjects || []).length}
+              onLayout={(event) => { sectionPositions.current.collegeSubjects = event.nativeEvent.layout.y; }}
             >
-              <Text style={styles.genderTabIcon}>{genderIcons.customIcon}</Text>
-              <Text
-                style={[
-                  styles.genderTabText,
-                  localGenderType === "custom" && styles.genderTabTextActive,
-                ]}
-              >
-                Custom Mix
-              </Text>
-            </Pressable>
+              <MultiSelectChips
+                options={COLLEGE_SUBJECTS}
+                selected={answers.collegeSubjects || []}
+                onToggle={(item) => toggleMultiSelect("collegeSubjects", item)}
+                layout="grid"
+                customValue={answers.customCollegeSubject}
+                onCustomChange={(val) => updateField("customCollegeSubject", val)}
+                customPlaceholder="Type subject name..."
+              />
+            </SectionCard>
           </View>
+        )}
 
-          {/* Worker Counter UI: Single Stepper for Any / Men Only / Women Only */}
-          {localGenderType !== "custom" ? (
-            <View style={styles.counterSection}>
-              <View style={styles.stepperContainer}>
-                <Pressable
-                  onPress={() => setLocalWorkers(Math.max(1, localWorkers - 1))}
-                  style={[
-                    styles.stepperBtn,
-                    localWorkers <= 1 && styles.stepperBtnDisabled,
-                  ]}
-                  disabled={localWorkers <= 1}
-                >
-                  <Text style={styles.stepperBtnText}>−</Text>
-                </Pressable>
+        {/* ============================================================ */}
+        {/* C. COMPETITIVE EXAM COACHING                                 */}
+        {/* ============================================================ */}
+        {subcatId === "competitive-exams" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Target Exam */}
+            <SectionCard
+              stepNumber={1}
+              icon="trophy-outline"
+              title="Target Examination"
+              subtitle="Select the competitive exam:"
+              required
+              onLayout={(event) => { sectionPositions.current.examName = event.nativeEvent.layout.y; }}
+            >
+              <SingleSelectChips
+                options={COMPETITIVE_EXAMS}
+                value={answers.examName}
+                onSelect={(val) => updateField("examName", val)}
+                customValue={answers.customExamName}
+                onCustomChange={(val) => updateField("customExamName", val)}
+                customPlaceholder="Type competitive exam name..."
+              />
+            </SectionCard>
 
-                <View style={styles.stepperValue}>
-                  <Text style={styles.stepperValueText}>{localWorkers}</Text>
-                  <Text style={styles.stepperValueLabel}>
-                    {localGenderType === "male"
-                      ? localWorkers === 1
-                        ? `Male ${roleName || "Worker"}`
-                        : `Male ${roleName || "Workers"}`
-                      : localGenderType === "female"
-                      ? localWorkers === 1
-                        ? `Female ${roleName || "Worker"}`
-                        : `Female ${roleName || "Workers"}`
-                      : localWorkers === 1
-                      ? "Worker (Any)"
-                      : "Workers (Any)"}
-                  </Text>
-                </View>
+            {/* 2. Preparation Focus */}
+            <SectionCard
+              stepNumber={2}
+              icon="locate-outline"
+              title="Preparation Focus"
+              subtitle="Select preparation areas (choose multiple):"
+              count={(answers.examFocus || []).length}
+            >
+              <MultiSelectChips
+                options={EXAM_SUBJECT_FOCUS}
+                selected={answers.examFocus || []}
+                onToggle={(item) => toggleMultiSelect("examFocus", item)}
+                customValue={answers.customExamFocus}
+                onCustomChange={(val) => updateField("customExamFocus", val)}
+                customPlaceholder="Type specific focus area..."
+              />
+            </SectionCard>
 
-                <Pressable
-                  onPress={() => setLocalWorkers(Math.min(50, localWorkers + 1))}
-                  style={[
-                    styles.stepperBtn,
-                    localWorkers >= 50 && styles.stepperBtnDisabled,
-                  ]}
-                  disabled={localWorkers >= 50}
-                >
-                  <Text style={styles.stepperBtnText}>+</Text>
-                </Pressable>
-              </View>
+            {/* 3. Target Year */}
+            <SectionCard
+              stepNumber={3}
+              icon="calendar-outline"
+              title="Target Year"
+              subtitle="When will you appear for the exam?"
+            >
+              <SingleSelectChips
+                options={TARGET_YEARS}
+                value={answers.targetYear}
+                onSelect={(val) => updateField("targetYear", val)}
+              />
+            </SectionCard>
 
-              <Text style={styles.genderCaptionText}>
-                {localGenderType === "male"
-                  ? `✓ Only male ${roleName || "workers"} will receive job alerts`
-                  : localGenderType === "female"
-                  ? `✓ Only female ${roleName || "workers"} will receive job alerts`
-                  : `✓ ${roleName || "Workers"} of any gender can accept this job`}
-              </Text>
-            </View>
-          ) : (
-            /* Custom Split Stepper: Men count + Women count with Role-Specific Dress Code Avatars */
-            <View style={styles.splitCounterContainer}>
-              <View style={styles.splitCard}>
-                <View style={styles.splitCardHeader}>
-                  <Text style={styles.splitIcon}>{genderIcons.maleIcon}</Text>
-                  <Text style={styles.splitTitle}>Men ({roleName || "Worker"})</Text>
-                </View>
-
-                <View style={styles.miniStepperRow}>
-                  <Pressable
-                    onPress={() => setLocalMaleWorkers(Math.max(0, localMaleWorkers - 1))}
-                    style={[
-                      styles.miniStepperBtn,
-                      localMaleWorkers <= 0 && styles.miniStepperBtnDisabled,
-                    ]}
-                    disabled={localMaleWorkers <= 0}
-                  >
-                    <Text style={styles.miniStepperBtnText}>−</Text>
-                  </Pressable>
-                  <Text style={styles.miniStepperCount}>{localMaleWorkers}</Text>
-                  <Pressable
-                    onPress={() => setLocalMaleWorkers(Math.min(25, localMaleWorkers + 1))}
-                    style={[
-                      styles.miniStepperBtn,
-                      localMaleWorkers >= 25 && styles.miniStepperBtnDisabled,
-                    ]}
-                    disabled={localMaleWorkers >= 25}
-                  >
-                    <Text style={styles.miniStepperBtnText}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.splitCard}>
-                <View style={styles.splitCardHeader}>
-                  <Text style={styles.splitIcon}>{genderIcons.femaleIcon}</Text>
-                  <Text style={styles.splitTitle}>Women ({roleName || "Worker"})</Text>
-                </View>
-
-                <View style={styles.miniStepperRow}>
-                  <Pressable
-                    onPress={() => setLocalFemaleWorkers(Math.max(0, localFemaleWorkers - 1))}
-                    style={[
-                      styles.miniStepperBtn,
-                      localFemaleWorkers <= 0 && styles.miniStepperBtnDisabled,
-                    ]}
-                    disabled={localFemaleWorkers <= 0}
-                  >
-                    <Text style={styles.miniStepperBtnText}>−</Text>
-                  </Pressable>
-                  <Text style={styles.miniStepperCount}>{localFemaleWorkers}</Text>
-                  <Pressable
-                    onPress={() => setLocalFemaleWorkers(Math.min(25, localFemaleWorkers + 1))}
-                    style={[
-                      styles.miniStepperBtn,
-                      localFemaleWorkers >= 25 && styles.miniStepperBtnDisabled,
-                    ]}
-                    disabled={localFemaleWorkers >= 25}
-                  >
-                    <Text style={styles.miniStepperBtnText}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Live Total Badge for Custom Split */}
-          {localGenderType === "custom" && (
-            <View style={styles.totalPill}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.green} />
-              <Text style={styles.totalPillText}>
-                Total: <Text style={styles.totalPillBold}>{computedTotalWorkers} Workers</Text> (
-                {localMaleWorkers} Men + {localFemaleWorkers} Women)
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* SECTION 4: MULTI-SELECT ROLE & CATEGORY-BASED EXPERIENCE LEVELS  */}
-        {/* ---------------------------------------------------------------- */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionIconCircle}>
-              <Ionicons name="ribbon-outline" size={20} color={colors.green} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Experience Level</Text>
-              <Text style={styles.sectionSubtitle}>
-                Select one or more acceptable levels for {roleName || "selected role"}
-              </Text>
-            </View>
+            {/* 4. Preparation Level */}
+            <SectionCard
+              stepNumber={4}
+              icon="speedometer-outline"
+              title="Current Preparation Level"
+              subtitle="Where are you currently in your prep?"
+            >
+              <SingleSelectChips
+                options={PREPARATION_LEVELS}
+                value={answers.prepLevel}
+                onSelect={(val) => updateField("prepLevel", val)}
+              />
+            </SectionCard>
           </View>
+        )}
 
-          <View style={styles.dynamicExpList}>
-            {dynamicExperienceOptions.map((opt) => {
-              const isSelected = localExperiences.includes(opt.value);
-              return (
-                <Pressable
-                  key={opt.value}
-                  onPress={() => handleToggleExperience(opt.value)}
-                  style={[
-                    styles.dynamicExpCard,
-                    isSelected && styles.dynamicExpCardActive,
-                  ]}
-                >
-                  <View
+        {/* ============================================================ */}
+        {/* D. COMPUTER & IT COURSES                                     */}
+        {/* ============================================================ */}
+        {subcatId === "computer-it-courses" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Technology / Course */}
+            <SectionCard
+              stepNumber={1}
+              icon="laptop-outline"
+              title="Course / Technology"
+              subtitle="Select the language or tech stack to learn:"
+              required
+              onLayout={(event) => { sectionPositions.current.itCourse = event.nativeEvent.layout.y; }}
+            >
+              <SingleSelectChips
+                options={IT_COURSES}
+                value={answers.itCourse}
+                onSelect={(val) => updateField("itCourse", val)}
+                customValue={answers.customItCourse}
+                onCustomChange={(val) => updateField("customItCourse", val)}
+                customPlaceholder="Type technology name (e.g. Flutter, Rust)..."
+              />
+            </SectionCard>
+
+            {/* 2. Current Skill Level */}
+            <SectionCard
+              stepNumber={2}
+              icon="bar-chart-outline"
+              title="Current Skill Level"
+              subtitle="What is your current knowledge level?"
+            >
+              <SingleSelectChips
+                options={IT_SKILL_LEVELS}
+                value={answers.itSkillLevel}
+                onSelect={(val) => updateField("itSkillLevel", val)}
+              />
+            </SectionCard>
+
+            {/* 3. Learning Goal */}
+            <SectionCard
+              stepNumber={3}
+              icon="flag-outline"
+              title="Learning Goal"
+              subtitle="What do you want to achieve?"
+            >
+              <SingleSelectChips
+                options={IT_LEARNING_GOALS}
+                value={answers.itLearningGoal}
+                onSelect={(val) => updateField("itLearningGoal", val)}
+                customValue={answers.customItLearningGoal}
+                onCustomChange={(val) => updateField("customItLearningGoal", val)}
+                customPlaceholder="Type your learning goal..."
+              />
+            </SectionCard>
+          </View>
+        )}
+
+        {/* ============================================================ */}
+        {/* E. PROFESSIONAL & VOCATIONAL SKILLS                          */}
+        {/* ============================================================ */}
+        {subcatId === "vocational-skills" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Skill or Course */}
+            <SectionCard
+              stepNumber={1}
+              icon="briefcase-outline"
+              title="Skill or Course"
+              subtitle="Select the vocational skill:"
+              required
+              onLayout={(event) => { sectionPositions.current.vocationalSkill = event.nativeEvent.layout.y; }}
+            >
+              <SingleSelectChips
+                options={VOCATIONAL_SKILLS}
+                value={answers.vocationalSkill}
+                onSelect={(val) => updateField("vocationalSkill", val)}
+                customValue={answers.customVocationalSkill}
+                onCustomChange={(val) => updateField("customVocationalSkill", val)}
+                customPlaceholder="Type skill or vocation..."
+              />
+            </SectionCard>
+
+            {/* 2. Learning Objective */}
+            <SectionCard
+              stepNumber={2}
+              icon="rocket-outline"
+              title="Learning Objective"
+              subtitle="Why are you learning this skill?"
+            >
+              <SingleSelectChips
+                options={VOCATIONAL_OBJECTIVES}
+                value={answers.vocationalObjective}
+                onSelect={(val) => updateField("vocationalObjective", val)}
+              />
+            </SectionCard>
+
+            {/* 3. Experience Level */}
+            <SectionCard
+              stepNumber={3}
+              icon="trending-up-outline"
+              title="Experience Level"
+              subtitle="Your previous experience with this skill:"
+            >
+              <SingleSelectChips
+                options={VOCATIONAL_EXPERIENCE}
+                value={answers.vocationalExperience}
+                onSelect={(val) => updateField("vocationalExperience", val)}
+              />
+            </SectionCard>
+          </View>
+        )}
+
+        {/* ============================================================ */}
+        {/* F. LANGUAGES & CREATIVE SKILLS                               */}
+        {/* ============================================================ */}
+        {subcatId === "languages-creative" && (
+          <View style={screenStyles.formGroup} onLayout={(event) => { formGroupTop.current = event.nativeEvent.layout.y; }}>
+            {/* 1. Language or Creative Skill */}
+            <SectionCard
+              stepNumber={1}
+              icon="color-palette-outline"
+              title="Language or Creative Skill"
+              subtitle="Select the language or art form:"
+              required
+              onLayout={(event) => { sectionPositions.current.creativeSkill = event.nativeEvent.layout.y; }}
+            >
+              <SingleSelectChips
+                options={CREATIVE_LANGUAGES}
+                value={answers.creativeSkill}
+                onSelect={(val) => updateField("creativeSkill", val)}
+                customValue={answers.customCreativeSkill}
+                onCustomChange={(val) => updateField("customCreativeSkill", val)}
+                customPlaceholder="Type language or creative skill..."
+              />
+            </SectionCard>
+
+            {/* 2. Current Proficiency */}
+            <SectionCard
+              stepNumber={2}
+              icon="chatbubble-ellipses-outline"
+              title="Current Proficiency"
+              subtitle="Your current speaking or skill level:"
+            >
+              <SingleSelectChips
+                options={CREATIVE_PROFICIENCY}
+                value={answers.creativeProficiency}
+                onSelect={(val) => updateField("creativeProficiency", val)}
+              />
+            </SectionCard>
+
+            {/* 3. Learning Goal */}
+            <SectionCard
+              stepNumber={3}
+              icon="bulb-outline"
+              title="Learning Goal"
+              subtitle="What is your main reason for learning?"
+            >
+              <SingleSelectChips
+                options={CREATIVE_GOALS}
+                value={answers.creativeGoal}
+                onSelect={(val) => updateField("creativeGoal", val)}
+              />
+            </SectionCard>
+          </View>
+        )}
+
+        {/* ============================================================ */}
+        {/* COMMON SECTIONS: TEACHING MODE, TIMING, PREFERENCES          */}
+        {/* ============================================================ */}
+
+        {/* Teaching Mode (Required) */}
+        <SectionCard
+          icon="navigate-outline"
+          title="Teaching Mode"
+          subtitle="Where should lessons be conducted?"
+          required
+        >
+          <TeachingModeGrid
+            value={answers.teachingMode}
+            onSelect={(val) => updateField("teachingMode", val)}
+          />
+        </SectionCard>
+
+
+        {/* Tutor Preferences (Tuition Only) */}
+        {(subcatId === "school-tuition" || subcatId === "college-tuition") && (
+          <SectionCard
+            icon="person-outline"
+            title="Tutor Preferences"
+            subtitle="Choose who you need and how many"
+          >
+            {/* Tutor Gender */}
+            <Text style={screenStyles.subLabel}>Tutor Gender</Text>
+            <View style={screenStyles.genderRow}>
+              {([
+                { id: "any", label: "Any gender" },
+                { id: "male", label: "Male" },
+                { id: "female", label: "Female" },
+                { id: "both", label: "Both" },
+              ] as const).map((option) => {
+                const isSelected = answers.tutorGender === option.id || (option.id === "both" && activeTutorGenders.length === 2);
+                const iconName: keyof typeof Ionicons.glyphMap =
+                  option.id === "female"
+                    ? isSelected
+                      ? "woman"
+                      : "woman-outline"
+                    : option.id === "male"
+                    ? isSelected
+                      ? "man"
+                      : "man-outline"
+                    : isSelected
+                    ? "people"
+                    : "people-outline";
+
+                return (
+                  <Pressable
+                    key={option.id}
+                    onPress={() => selectTutorGender(option.id)}
                     style={[
-                      styles.dynamicExpIconContainer,
-                      isSelected && styles.dynamicExpIconContainerActive,
+                      screenStyles.genderBtn,
+                      isSelected && screenStyles.genderBtnActive,
                     ]}
                   >
-                    <Text style={styles.dynamicExpEmoji}>{opt.icon}</Text>
-                  </View>
+                    <Ionicons
+                      name={iconName}
+                      size={18}
+                      color={isSelected ? "#FFFFFF" : "#475569"}
+                      style={screenStyles.genderIcon}
+                    />
+                    <Text
+                      style={[
+                        screenStyles.genderBtnText,
+                        isSelected && screenStyles.genderBtnTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.dynamicExpBadgeRow}>
-                      <Text
-                        style={[
-                          styles.dynamicExpLabel,
-                          isSelected && styles.dynamicExpLabelActive,
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                      <View
-                        style={[
-                          styles.dynamicExpBadge,
-                          isSelected && styles.dynamicExpBadgeActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.dynamicExpBadgeText,
-                            isSelected && styles.dynamicExpBadgeTextActive,
-                          ]}
-                        >
-                          {opt.badge}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.dynamicExpSubtext}>{opt.subtext}</Text>
-                  </View>
+            <View style={{ marginTop: 14, marginBottom: 2, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={screenStyles.subLabel}>How many tutors are needed?</Text>
+              <View style={{ paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: "#EAF5EE" }}>
+                <Text style={{ fontSize: 12, fontWeight: "700", color: "#03402D" }}>Total: {requestedTutorCount}</Text>
+              </View>
+            </View>
+            {((activeTutorGenders).length > 0
+              ? activeTutorGenders
+              : ["any" as const]).map((gender) => (
+              <View key={gender} style={{ marginTop: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#DCEFE5", backgroundColor: "#F7FCF9", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[screenStyles.subLabel, { marginBottom: 0 }]}>{gender === "any" ? "Tutors needed" : `${gender === "female" ? "Female" : "Male"} tutors needed`}</Text>
+                  <Text style={{ fontSize: 12, color: "#64748B", marginTop: 3 }}>{gender === "any" ? "Any gender" : "Choose the number you need"}</Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 4, borderRadius: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E2E8F0" }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Reduce ${gender} tutor quantity`}
+                    disabled={((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) <= 1}
+                    onPress={() => setTutorCount(gender, ((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) - 1)}
+                    style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "#F1F5F9", alignItems: "center", justifyContent: "center", opacity: ((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) <= 1 ? 0.45 : 1 }}
+                  >
+                    <Ionicons name="remove" size={18} color="#03402D" />
+                  </Pressable>
+                  <Text style={{ minWidth: 24, textAlign: "center", fontSize: 16, fontWeight: "800", color: "#03402D" }}>{(gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Increase ${gender} tutor quantity`}
+                    disabled={((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) >= getTutorMaxCount(gender)}
+                    onPress={() => setTutorCount(gender, ((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) + 1)}
+                    style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "#EAF5EE", alignItems: "center", justifyContent: "center", opacity: ((gender === "male" ? answers.maleTutorCount : gender === "female" ? answers.femaleTutorCount : answers.anyTutorCount) || 1) >= getTutorMaxCount(gender) ? 0.45 : 1 }}
+                  >
+                    <Ionicons name="add" size={18} color="#03402D" />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
 
-                  {/* Checkbox Icon for Multi-Select */}
-                  <View
+            {/* Minimum Experience */}
+            <Text style={[screenStyles.subLabel, { marginTop: 12 }]}>
+              Minimum Experience
+            </Text>
+            <View style={chipStyles.wrapRow}>
+              {TUTOR_EXPERIENCES.map((exp) => {
+                const isSelected = answers.tutorExperience === exp.id;
+                return (
+                  <Pressable
+                    key={exp.id}
+                    onPress={() => updateField("tutorExperience", exp.id)}
                     style={[
-                      styles.dynamicExpCheckbox,
-                      isSelected && styles.dynamicExpCheckboxActive,
+                      chipStyles.chip,
+                      isSelected && chipStyles.chipActive,
                     ]}
                   >
                     {isSelected && (
-                      <Ionicons name="checkmark" size={16} color={colors.white} />
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={14}
+                        color="#FFFFFF"
+                        style={chipStyles.chipIcon}
+                      />
                     )}
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* LIVE SUMMARY CARD                                                */}
-        {/* ---------------------------------------------------------------- */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTopRow}>
-            <View style={styles.summaryIconCircle}>
-              <Ionicons name="checkmark-done-circle" size={24} color={colors.green} />
+                    <Text
+                      style={[
+                        chipStyles.chipText,
+                        isSelected && chipStyles.chipTextActive,
+                      ]}
+                    >
+                      {exp.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.summaryCardTitle}>
-                {titleVerification.isValid ? localTitle : `${roleName || "Worker"} needed`}
-              </Text>
-              {localDescription.trim().length > 0 && descriptionVerification.isValid && (
-                <Text style={styles.summaryDescPreview} numberOfLines={2}>
-                  "{localDescription.trim()}"
-                </Text>
-              )}
-            </View>
-          </View>
+          </SectionCard>
+        )}
 
-          <View style={styles.summaryDivider} />
+        {/* Special Instructions / Notes */}
+        <SectionCard
+          icon="create-outline"
+          title="Special Instructions"
+          subtitle="Any specific requirements or syllabus topics (optional):"
+        >
+          <TextInput
+            value={answers.additionalRequirements || ""}
+            onChangeText={(text) => updateField("additionalRequirements", text)}
+            placeholder="e.g. Focus on Organic Chemistry, need 3 classes a week..."
+            placeholderTextColor="#94A3B8"
+            multiline
+            numberOfLines={3}
+            style={screenStyles.textArea}
+          />
+        </SectionCard>
 
-          <View style={styles.summaryPillsRow}>
-            <View style={styles.summaryPill}>
-              <Text style={styles.summaryPillEmoji}>
-                {localGenderType === "male"
-                  ? genderIcons.maleIcon
-                  : localGenderType === "female"
-                  ? genderIcons.femaleIcon
-                  : localGenderType === "custom"
-                  ? genderIcons.customIcon
-                  : genderIcons.anyIcon}
-              </Text>
-              <Text style={styles.summaryPillText}>
-                {localGenderType === "custom"
-                  ? `${computedTotalWorkers} (${localMaleWorkers}M, ${localFemaleWorkers}W)`
-                  : localGenderType === "male"
-                  ? `${localWorkers} Men`
-                  : localGenderType === "female"
-                  ? `${localWorkers} Women`
-                  : `${localWorkers} Any`}
-              </Text>
-            </View>
-
-            <View style={styles.summaryPill}>
-              <Text style={styles.summaryPillEmoji}>🎖️</Text>
-              <Text style={styles.summaryPillText}>
-                {localExperiences.length > 1
-                  ? `${localExperiences.length} Exp Levels`
-                  : dynamicExperienceOptions.find((e) => e.value === localExperiences[0])?.label || "Any Exp"}
-              </Text>
-            </View>
-
-            <View style={styles.summaryPill}>
-              <Text style={styles.summaryPillEmoji}>{exactRoleIcon}</Text>
-              <Text style={styles.summaryPillText}>{roleName || "Role"}</Text>
-            </View>
-          </View>
-        </View>
+        <View style={{ height: 32 }} />
       </ScrollView>
+      </PostWorkAnimatedContent>
 
-      {/* Bottom Nav Buttons */}
-      <PostWorkFooter
-        onBack={() => router.back()}
-        onNext={handleNext}
-        nextDisabled={!isFormValid}
-      />
+      {!embedded && (
+        <>
+          {/* Persistent Bottom Action Footer */}
+          <PostWorkFooter
+            onBack={() => router.back()}
+            onNext={handleNext}
+            nextLabel="Next"
+          />
 
-      {/* Exit Confirmation Modal */}
-      <ExitModal
-        visible={showExitModal}
-        onClose={() => setShowExitModal(false)}
-        onExit={handleConfirmExit}
-      />
-    </SafeAreaView>
+          {/* Exit Modal */}
+          <ExitModal
+            visible={showExitModal}
+            onClose={() => setShowExitModal(false)}
+            onExit={handleConfirmExit}
+          />
+        </>
+      )}
+    </ContainerComponent>
   );
+});
+
+export default function PostWorkDetailsRoute() {
+  return <Redirect href={{ pathname: "/post-work", params: { stage: "3" } }} />;
 }
 
-const styles = StyleSheet.create({
+// ────────────────────────────────────────────────────────────
+// STYLES
+// ────────────────────────────────────────────────────────────
+
+const screenStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.paper,
+    backgroundColor: "#F8FAFC",
   },
   content: {
     flex: 1,
   },
   contentContainer: {
-    padding: 20,
-    paddingBottom: 40,
-    maxWidth: 640,
-    width: "100%",
-    alignSelf: "center",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 28,
+  },
+  headerBlock: {
+    marginBottom: 12,
   },
   stageTag: {
     fontSize: 11,
     fontWeight: "800",
-    color: colors.green,
-    letterSpacing: 1,
+    color: "#03402D",
+    letterSpacing: 1.2,
     marginBottom: 4,
   },
-  question: {
-    fontSize: 24,
+  questionTitle: {
+    fontSize: POST_WORK_TYPOGRAPHY.screenHeading,
     fontWeight: "800",
-    color: colors.ink,
+    color: "#0F172A",
+    letterSpacing: -0.4,
     marginBottom: 4,
-    letterSpacing: -0.5,
   },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: colors.muted,
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-
-  // Section Cards
-  sectionCard: {
-    backgroundColor: colors.white,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.line,
-    shadowColor: "#0D2318",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  sectionHeaderRow: {
+  previewBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 11,
+    backgroundColor: "#03402D",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#03402D",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
     marginBottom: 14,
   },
-  sectionIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: colors.greenLight,
+  previewIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.greenLight,
   },
-  sectionIconEmoji: {
-    fontSize: 20,
+  previewCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: colors.muted,
-    marginTop: 1,
-  },
-
-  // Inputs
-  inputWrapper: {
-    position: "relative",
-    justifyContent: "center",
-  },
-  inputIconLeft: {
-    position: "absolute",
-    left: 14,
-    zIndex: 1,
-  },
-  inputEmojiLeft: {
-    fontSize: 20,
-  },
-  inputWithIcon: {
-    backgroundColor: colors.paper,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    paddingLeft: 46,
-    paddingRight: 44,
-    paddingVertical: 13,
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.ink,
-  },
-  inputError: {
-    borderColor: "#E53E3E",
-    backgroundColor: "#FFF5F5",
-  },
-  inputSuccess: {
-    borderColor: colors.green,
-  },
-  verifiedIconBadge: {
-    position: "absolute",
-    right: 14,
-  },
-
-  errorBanner: {
+  stickyPreview: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#FFF5F5",
+    justifyContent: "flex-start",
+    gap: 10,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "#FED7D7",
+    overflow: "hidden",
+    backgroundColor: "#03402D",
+    borderColor: "#03402D",
   },
-  errorBannerText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#C53030",
+  stickyTitleAccent: {
+    width: 3,
+    height: 22,
+    borderRadius: 2,
+    backgroundColor: colors.lime,
+  },
+  stickyPreviewTitle: {
     flex: 1,
-  },
-
-  // Quick Suggestion Cards Grid (2x2 Structure with Increased Height & Balanced Proportions)
-  suggestionHeader: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.muted,
-    marginTop: 14,
-    marginBottom: 8,
-  },
-  suggestionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  suggestionCard: {
-    width: "48.5%",
-    backgroundColor: colors.paper,
-    borderRadius: 14,
-    padding: 10,
-    minHeight: 64,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    justifyContent: "space-between",
-  },
-  suggestionCardActive: {
-    backgroundColor: colors.greenLight,
-    borderColor: colors.green,
-  },
-  suggestionCardTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  suggestionIconCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  suggestionIconCircleActive: {
-    backgroundColor: colors.green,
-  },
-  suggestionIconText: {
-    fontSize: 14,
-  },
-  suggestionTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  suggestionTagActive: {
-    backgroundColor: colors.green,
-    borderColor: colors.green,
-  },
-  suggestionTagText: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: colors.muted,
-    letterSpacing: 0.5,
-  },
-  suggestionTagTextActive: {
-    color: colors.white,
-  },
-  suggestionCardText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.ink,
-    lineHeight: 16,
-  },
-  suggestionCardTextActive: {
-    color: colors.green,
-  },
-
-  // Description Box
-  optionalBadge: {
-    backgroundColor: colors.paper,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  optionalBadgeText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.muted,
-  },
-  textArea: {
-    backgroundColor: colors.paper,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    fontWeight: "500",
-    color: colors.ink,
-    minHeight: 80,
-    textAlignVertical: "top",
-  },
-  descriptionFooterRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 6,
-    paddingHorizontal: 4,
-  },
-  descErrorText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#E53E3E",
-    flex: 1,
-  },
-  charCountText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.mutedLight,
-  },
-
-  // Gender Selection Tabs
-  genderTabsRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginBottom: 16,
-  },
-  genderTab: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 2,
-    borderRadius: 12,
-    backgroundColor: colors.paper,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  genderTabActive: {
-    backgroundColor: colors.greenLight,
-    borderColor: colors.green,
-  },
-  genderTabIcon: {
-    fontSize: 20,
-  },
-  genderTabText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.muted,
-    textAlign: "center",
-  },
-  genderTabTextActive: {
-    color: colors.green,
-  },
-
-  // Counter UI
-  counterSection: {
-    alignItems: "center",
-  },
-  stepperContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.paper,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    padding: 6,
-    alignSelf: "center",
-  },
-  stepperBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: colors.green,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepperBtnDisabled: {
-    backgroundColor: colors.line,
-    opacity: 0.5,
-  },
-  stepperBtnText: {
-    fontSize: 26,
-    fontWeight: "700",
-    color: colors.white,
-    lineHeight: 28,
-  },
-  stepperValue: {
-    alignItems: "center",
-    paddingHorizontal: 28,
-  },
-  stepperValueText: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  stepperValueLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.muted,
-    marginTop: 2,
-  },
-  genderCaptionText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: colors.green,
-    marginTop: 10,
-    textAlign: "center",
-  },
-
-  // Custom Split Counters
-  splitCounterContainer: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  splitCard: {
-    flex: 1,
-    backgroundColor: colors.paper,
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    alignItems: "center",
-  },
-  splitCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginBottom: 10,
-  },
-  splitIcon: {
-    fontSize: 18,
-  },
-  splitTitle: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  miniStepperRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  miniStepperBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.green,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  miniStepperBtnDisabled: {
-    backgroundColor: colors.line,
-    opacity: 0.5,
-  },
-  miniStepperBtnText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.white,
-  },
-  miniStepperCount: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: colors.ink,
-    minWidth: 24,
-    textAlign: "center",
-  },
-  totalPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: colors.greenLight,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginTop: 14,
-  },
-  totalPillText: {
+    width: "100%",
     fontSize: 13,
-    fontWeight: "600",
-    color: colors.ink,
-  },
-  totalPillBold: {
-    fontWeight: "800",
-    color: colors.green,
-  },
-
-  // Dynamic Experience Cards (Multi-Select Support)
-  dynamicExpList: {
-    gap: 10,
-  },
-  dynamicExpCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.paper,
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    gap: 12,
-  },
-  dynamicExpCardActive: {
-    backgroundColor: colors.greenLight,
-    borderColor: colors.green,
-  },
-  dynamicExpIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dynamicExpIconContainerActive: {
-    backgroundColor: colors.white,
-  },
-  dynamicExpEmoji: {
-    fontSize: 22,
-  },
-  dynamicExpBadgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 2,
-  },
-  dynamicExpLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: colors.ink,
-  },
-  dynamicExpLabelActive: {
-    color: colors.green,
-  },
-  dynamicExpBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  dynamicExpBadgeActive: {
-    backgroundColor: colors.green,
-    borderColor: colors.green,
-  },
-  dynamicExpBadgeText: {
-    fontSize: 10,
+    lineHeight: 17,
     fontWeight: "700",
-    color: colors.muted,
-  },
-  dynamicExpBadgeTextActive: {
     color: colors.white,
+    letterSpacing: -0.1,
+    textAlign: "left",
   },
-  dynamicExpSubtext: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: colors.muted,
-  },
-  dynamicExpCheckbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.line,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.white,
-  },
-  dynamicExpCheckboxActive: {
-    borderColor: colors.green,
-    backgroundColor: colors.green,
-  },
-
-  // Summary Card
-  summaryCard: {
-    backgroundColor: colors.white,
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: colors.green,
-    marginTop: 8,
-    shadowColor: colors.green,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  summaryTopRow: {
+  validationBanner: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 12,
-  },
-  summaryIconCircle: {
-    width: 38,
-    height: 38,
+    gap: 10,
+    marginHorizontal: 14,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: colors.greenLight,
-    alignItems: "center",
-    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#FECDC9",
+    backgroundColor: "#FFF5F4",
   },
-  summaryCardTitle: {
-    fontSize: 16,
+  validationTitle: {
+    fontSize: 13,
     fontWeight: "800",
-    color: colors.ink,
+    color: "#912018",
+    marginBottom: 2,
   },
-  summaryDescPreview: {
+  validationText: {
     fontSize: 12,
+    lineHeight: 17,
     fontWeight: "500",
-    color: colors.muted,
-    fontStyle: "italic",
-    marginTop: 3,
+    color: "#7A271A",
   },
-  summaryDivider: {
-    height: 1,
-    backgroundColor: colors.line,
-    marginVertical: 12,
+  previewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
-  summaryPillsRow: {
+  previewLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.greenLight,
+  },
+  autoGeneratedHint: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    color: colors.greenDark,
+    flexShrink: 1,
+    textAlign: "right",
+    backgroundColor: colors.greenLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  previewTitleText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.white,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 14,
+    gap: 8,
+  },
+  errorText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#DC2626",
+    flex: 1,
+  },
+  formGroup: {
+    gap: 0,
+  },
+  subLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  genderRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-  summaryPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: colors.paper,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  genderBtn: {
+    width: "48%",
+    paddingVertical: 10,
+    backgroundColor: "#F1F5F9",
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
   },
-  summaryPillEmoji: {
-    fontSize: 14,
+  genderIcon: {
+    marginTop: 0,
   },
-  summaryPillText: {
-    fontSize: 12,
+  genderBtnActive: {
+    backgroundColor: "#03402D",
+    borderColor: "#03402D",
+  },
+  genderBtnText: {
+    fontSize: 13,
     fontWeight: "700",
-    color: colors.ink,
+    color: "#475569",
+  },
+  genderBtnTextActive: {
+    color: "#FFFFFF",
+  },
+  textArea: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: "#0F172A",
+    textAlignVertical: "top",
+    minHeight: 68,
   },
 });
 
+const cardStyles = StyleSheet.create({
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 12,
+    gap: 10,
+  },
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  headerTextWrap: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    width: "100%",
+    gap: 5,
+  },
+  stepPrefix: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#03402D",
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+    flex: 1,
+    flexShrink: 1,
+  },
+  subtitle: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 2,
+  },
+  requiredPill: {
+    backgroundColor: "#FEE2E2",
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 5,
+    marginLeft: "auto",
+    marginTop: 1,
+  },
+  requiredPillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#DC2626",
+    textTransform: "uppercase",
+  },
+  optionalPill: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  optionalPillText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  countPill: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  countPillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#03402D",
+  },
+  content: {
+    paddingTop: 2,
+  },
+});
+
+const chipStyles = StyleSheet.create({
+  container: {
+    width: "100%",
+  },
+  wrapRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  multiGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    columnGap: 7,
+    rowGap: 7,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  chipActive: {
+    backgroundColor: "#03402D",
+    borderColor: "#03402D",
+  },
+  chipIcon: {
+    marginRight: 5,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  chipTextActive: {
+    color: "#FFFFFF",
+  },
+  multiChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    gap: 6,
+  },
+  multiChipGrid: {
+    width: "31.5%",
+    minHeight: 40,
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+    borderRadius: 9,
+    gap: 5,
+  },
+  multiChipActive: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#059669",
+  },
+  checkboxDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    borderWidth: 1.2,
+    borderColor: "#94A3B8",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  checkboxDotActive: {
+    backgroundColor: "#03402D",
+    borderColor: "#03402D",
+  },
+  multiChipText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  multiChipTextGrid: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 11.5,
+    lineHeight: 14,
+    flexWrap: "wrap",
+  },
+  multiChipTextActive: {
+    color: "#03402D",
+    fontWeight: "700",
+  },
+  customInputBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1.2,
+    borderColor: "#86EFAC",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    marginTop: 10,
+    gap: 8,
+  },
+  customTextInput: {
+    flex: 1,
+    height: 38,
+    fontSize: 13,
+    color: "#0F172A",
+  },
+});
+
+const classGridStyles = StyleSheet.create({
+  container: {
+    width: "100%",
+    gap: 8,
+  },
+  tierBlock: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 8,
+  },
+  tierHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  tierTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  tierBadge: {
+    backgroundColor: "#E2E8F0",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  tierBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  tierRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    width: "100%",
+  },
+  tile: {
+    flex: 1,
+    height: 38,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.2,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    paddingHorizontal: 2,
+  },
+  tileActive: {
+    backgroundColor: "#03402D",
+    borderColor: "#03402D",
+  },
+  tileText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E293B",
+    textAlign: "center",
+  },
+  tileTextActive: {
+    color: "#FFFFFF",
+  },
+  activeBadge: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#10B981",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
+const modeGridStyles = StyleSheet.create({
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  card: {
+    width: "48.5%", // 2 columns
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.2,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    padding: 10,
+    position: "relative",
+  },
+  cardActive: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#059669",
+  },
+  iconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  iconBoxActive: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#BBF7D0",
+  },
+  textWrap: {
+    paddingRight: 16,
+  },
+  title: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#1E293B",
+    marginBottom: 2,
+  },
+  titleActive: {
+    color: "#03402D",
+  },
+  subtitle: {
+    fontSize: 10.5,
+    fontWeight: "500",
+    color: "#64748B",
+  },
+  subtitleActive: {
+    color: "#059669",
+  },
+  radioCircle: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#94A3B8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioCircleActive: {
+    borderColor: "#03402D",
+  },
+  radioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#03402D",
+  },
+});

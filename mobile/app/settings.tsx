@@ -7,12 +7,37 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../src/auth";
 import { colors } from "../src/components/ui";
 import { useLocation } from "../src/store/location";
+import { enableAndroidPush } from "../src/notifications/registration";
 
 export default function SettingsScreen() {
   const auth = useAuth();
   const insets = useSafeAreaInsets();
   const client = useQueryClient();
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [pushSetupPending, setPushSetupPending] = useState(false);
+
+  const enablePush = async () => {
+    if (pushSetupPending) return;
+    setPushSetupPending(true);
+    const result = await enableAndroidPush();
+    setPushSetupPending(false);
+    if (result.status === "enabled") {
+      Alert.alert("Notifications enabled", "Bulao will alert you about important job and service updates.");
+    } else if (result.status === "expo_go") {
+      Alert.alert("Android push needs an app build", "Remote push notifications are not supported in Expo Go. Install a development build or the Play Store version to enable them.");
+    } else if (result.status === "denied") {
+      Alert.alert("Notifications are off", "Allow Bulao notifications in Android Settings to receive important updates.", [
+        { text: "Not now", style: "cancel" },
+        { text: "Open settings", onPress: () => void Linking.openSettings() },
+      ]);
+    } else if (result.status === "not_configured") {
+      Alert.alert("Push setup incomplete", "This app build is missing its Expo project configuration. Please install a configured Android build.");
+    } else if (result.status === "unsupported") {
+      Alert.alert("Android device required", "Push notification setup is available on an Android phone or tablet.");
+    } else {
+      Alert.alert("Could not enable notifications", "Check your connection and try again.");
+    }
+  };
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
@@ -126,16 +151,16 @@ export default function SettingsScreen() {
 
           <View style={styles.divider} />
 
-          <View style={styles.row}>
+          <Pressable accessibilityRole="button" onPress={() => void enablePush()} disabled={pushSetupPending} style={styles.row}>
             <View style={styles.iconCircle}>
               <Ionicons name="notifications-outline" size={18} color="#075B43" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>Job &amp; Applicant Alerts</Text>
-              <Text style={styles.rowSub}>Push notifications &amp; SMS active</Text>
+              <Text style={styles.rowTitle}>Push notifications</Text>
+              <Text style={styles.rowSub}>Get alerts for important job and service updates</Text>
             </View>
-            <Ionicons name="checkmark-circle" size={18} color="#075B43" />
-          </View>
+            <Text style={styles.actionText}>{pushSetupPending ? "Enabling…" : "Enable"}</Text>
+          </Pressable>
         </View>
 
         {/* ── 4. Safety & Support ── */}

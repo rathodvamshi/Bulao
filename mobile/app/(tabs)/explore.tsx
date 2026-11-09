@@ -18,6 +18,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../../src/api/client";
 import type { Catalog, Job, Professional } from "../../src/api/types";
 import { useLocation } from "../../src/store/location";
+import { formatJobTitle } from "../../src/utils/jobTitle";
 
 const THEME = {
   green: "#176B58",
@@ -36,7 +37,7 @@ const THEME = {
   amberLight: "#FEF3C7",
 };
 
-const RADIUS_OPTIONS = [3, 5, 10, 25, 50] as const;
+const RADIUS_OPTIONS = [10, 25, 50, 100, 500] as const;
 
 export default function Explore() {
   const params = useLocalSearchParams<{ kind?: string }>();
@@ -44,7 +45,7 @@ export default function Explore() {
   const location = useLocation((x) => x.location);
   const setLocationSheetVisible = useLocation((x) => x.setLocationSheetVisible);
 
-  const [radius, setRadius] = useState<number>(5);
+  const [radius, setRadius] = useState<number>(50);
   const [category, setCategory] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -55,13 +56,17 @@ export default function Explore() {
     staleTime: 86400000,
   });
 
+  const userLat = location?.latitude ?? 17.3850;
+  const userLng = location?.longitude ?? 78.4867;
+
   const list = useInfiniteQuery({
-    queryKey: ["nearby", kind, location?.latitude, location?.longitude, radius, category],
-    enabled: !!location,
+    queryKey: ["nearby", kind, userLat, userLng, radius, category],
+    enabled: true,
+    refetchInterval: 12000,
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       api<{ items: (Job & Professional)[]; nextCursor: number | null }>(
-        `/${kind === "job" ? "jobs" : "services"}?latitude=${location!.latitude}&longitude=${location!.longitude}&radiusKm=${radius}&cursor=${pageParam}${category ? `&categoryId=${encodeURIComponent(category)}` : ""}`,
+        `/${kind === "job" ? "jobs" : "services"}?latitude=${userLat}&longitude=${userLng}&radiusKm=${radius}&cursor=${pageParam}${category ? `&categoryId=${encodeURIComponent(category)}` : ""}`,
       ),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
@@ -486,7 +491,7 @@ export default function Explore() {
                   <View style={styles.jobHeaderRow}>
                     <View style={{ flex: 1, paddingRight: 10 }}>
                       <Text style={styles.jobTitle} numberOfLines={2}>
-                        {item.title || "Work Opportunity"}
+                        {formatJobTitle(item.title) || "Work Opportunity"}
                       </Text>
                       <View style={styles.jobRoleBadge}>
                         <Text style={styles.jobRoleText}>
@@ -497,7 +502,7 @@ export default function Explore() {
 
                     <View style={styles.payBadge}>
                       <Text style={styles.payBadgeText}>
-                        ₹{payRupees}
+                        ₹{payRupees.toLocaleString("en-IN")}
                       </Text>
                       <Text style={styles.payBadgeUnit}>
                         /{item.payUnit || "day"}

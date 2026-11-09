@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { serviceApi } from "../src/api/serviceApi";
 import { View, ActivityIndicator, Pressable } from "react-native";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../src/auth";
 import { api } from "../src/api/client";
 import type { ServiceItem } from "../src/features/profile/types";
@@ -13,13 +13,14 @@ import {
 } from "../src/features/profile/components/serviceProfileTheme";
 export default function ServiceDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const { session, user } = useAuth();
   const query = useQuery({
     queryKey: ["service-detail", id, session?.token],
     enabled: !!id,
     queryFn: () => serviceApi.detail(id),
   });
-  useFocusEffect(useCallback(() => { if (id) void query.refetch(); }, [id, query.refetch]));
+  useFocusEffect(useCallback(() => { if (id) void queryClient.invalidateQueries({ queryKey: ["service-detail", id] }); }, [id, queryClient]));
   const service = query.isError ? undefined : query.data;
   if (service)
     return (
