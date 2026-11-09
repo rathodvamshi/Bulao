@@ -177,24 +177,48 @@ export const UniversalMap = forwardRef<UniversalMapHandle, UniversalMapProps>(
             zoomAnimation: true,
             inertia: true,
             maxZoom: 19,
-            minZoom: 5
+            minZoom: 4
           }).setView([lat, lng], 15);
+          window.map = map;
 
-          // Fast, modern, high-contrast CartoDB Voyager tiles (CDN edge accelerated in India)
-          var primaryLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          // OpenStreetMap primary layer
+          var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            subdomains: ['a', 'b', 'c'],
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+          });
+
+          // Fast CDN-backed Carto Voyager fallback
+          var cartoLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             subdomains: 'abcd',
             maxZoom: 19
-          }).addTo(map);
+          });
 
-          // Graceful fallback to standard OpenStreetMap if Carto tile fails
-          primaryLayer.on('tileerror', function() {
-            if (!window._usedFallback) {
-              window._usedFallback = true;
-              L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19
-              }).addTo(map);
+          // Add primary OpenStreetMap tiles
+          osmLayer.addTo(map);
+
+          // Graceful fallback to Carto if OSM tile fails
+          var hasFallenBack = false;
+          osmLayer.on('tileerror', function() {
+            if (!hasFallenBack) {
+              hasFallenBack = true;
+              cartoLayer.addTo(map);
             }
           });
+
+          // Guarantee Leaflet recalculates dimensions when container mounts
+          function forceMapResize() {
+            if (map) {
+              map.invalidateSize(true);
+            }
+          }
+          window.forceMapResize = forceMapResize;
+          window.addEventListener('resize', forceMapResize);
+          window.addEventListener('load', forceMapResize);
+          setTimeout(forceMapResize, 60);
+          setTimeout(forceMapResize, 250);
+          setTimeout(forceMapResize, 700);
+          setTimeout(forceMapResize, 1500);
 
           var marker = null;
           ${
@@ -275,10 +299,12 @@ export const UniversalMap = forwardRef<UniversalMapHandle, UniversalMapProps>(
             }
             if (marker) marker.setLatLng([newLat, newLng]);
             if (window.radiusCircle) window.radiusCircle.setLatLng([newLat, newLng]);
+            if (window.forceMapResize) window.forceMapResize();
           };
 
           // Notify React Native that map is ready
           setTimeout(function() {
+            if (window.forceMapResize) window.forceMapResize();
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
             }
@@ -299,7 +325,14 @@ export const UniversalMap = forwardRef<UniversalMapHandle, UniversalMapProps>(
           domStorageEnabled={true}
           overScrollMode="never"
           androidLayerType={Platform.OS === "android" ? "hardware" : "none"}
-          onLoadEnd={() => setIsMapLoaded(true)}
+          originWhitelist={["*"]}
+          mixedContentMode="always"
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          onLoadEnd={() => {
+            setIsMapLoaded(true);
+            webViewRef.current?.injectJavaScript("if (window.forceMapResize) { window.forceMapResize(); } true;");
+          }}
           onMessage={(event) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);

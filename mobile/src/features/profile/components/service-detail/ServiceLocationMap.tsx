@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from "react";
+import React from "react";
 import { View, Text, StyleSheet, Pressable, Platform, Linking } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import { UniversalMap } from "../../../../components/map/UniversalMap";
 
 export interface ServiceLocationMapProps {
   latitude?: number | null;
@@ -18,9 +18,6 @@ export function ServiceLocationMap({
   distanceAwayText = "0.5 km away",
   serviceTitle,
 }: ServiceLocationMapProps) {
-  const mapRef = useRef<MapView>(null);
-  const animatedRef = useRef<boolean>(false);
-
   // Validate coordinates: must be finite, non-zero, within physical latitude/longitude ranges
   const hasCoordinates =
     typeof latitude === "number" &&
@@ -34,23 +31,6 @@ export function ServiceLocationMap({
 
   const validLat = hasCoordinates ? (latitude as number) : 17.385;
   const validLng = hasCoordinates ? (longitude as number) : 78.4867;
-
-  // Initial smooth camera focus without repeating on re-renders
-  useEffect(() => {
-    if (!animatedRef.current && hasCoordinates && mapRef.current) {
-      animatedRef.current = true;
-      const timer = setTimeout(() => {
-        mapRef.current?.animateCamera(
-          {
-            center: { latitude: validLat, longitude: validLng },
-            zoom: 16.5,
-          },
-          { duration: 800 }
-        );
-      }, 350);
-      return () => clearTimeout(timer);
-    }
-  }, [hasCoordinates, validLat, validLng]);
 
   const handleOpenDirections = () => {
     const label = encodeURIComponent(serviceTitle || areaName);
@@ -69,35 +49,14 @@ export function ServiceLocationMap({
       {hasCoordinates ? (
         <View style={styles.mapArea}>
           {Platform.OS !== "web" ? (
-            <MapView
-              ref={mapRef}
+            <UniversalMap
+              latitude={validLat}
+              longitude={validLng}
+              locality={areaName}
+              showMarker={true}
+              interactive={false}
               style={StyleSheet.absoluteFillObject}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={{
-                latitude: validLat,
-                longitude: validLng,
-                latitudeDelta: 0.0035,
-                longitudeDelta: 0.0035,
-              }}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              pitchEnabled={false}
-              rotateEnabled={false}
-              pointerEvents="none"
-            >
-              <Marker
-                coordinate={{ latitude: validLat, longitude: validLng }}
-                anchor={{ x: 0.5, y: 1.0 }}
-              >
-                <View style={styles.customMarkerContainer}>
-                  <View style={styles.markerCircle}>
-                    <Ionicons name="location" size={18} color="#047857" />
-                  </View>
-                  <View style={styles.markerTriangle} />
-                  <View style={styles.markerDotShadow} />
-                </View>
-              </Marker>
-            </MapView>
+            />
           ) : (
             <View style={styles.webFallbackBox}>
               <Ionicons name="map-outline" size={36} color="#047857" />
