@@ -60,12 +60,12 @@ describe("OTP coordination with storage and MSG91 mocked", () => {
     const c = coordinator(initial); expect((await c.request("resend")).status).toBe(200);
     expect(c.snapshot().challenge).toMatchObject({ expiresAt: at + 300, attempts: 3 }); expect(provider.resend).toHaveBeenCalledWith(phone);
   });
-  it("limits a phone to three sends in a rolling ten-minute window", async () => {
-    const c = coordinator(fixture({ sends: [at - 500, at - 300, at - 100] }));
+  it("limits a phone to five sends in a rolling ten-minute window", async () => {
+    const c = coordinator(fixture({ sends: [at - 500, at - 400, at - 300, at - 200, at - 100] }));
     expect((await c.request("send")).status).toBe(429); expect(provider.send).not.toHaveBeenCalled();
   });
   it("applies the independent daily phone ceiling", async () => {
-    const c = coordinator(fixture({ sends: Array.from({ length: 10 }, (_, i) => at - 10000 + i * 700) }));
+    const c = coordinator(fixture({ sends: Array.from({ length: 15 }, (_, i) => at - 15000 + i * 700) }));
     expect((await c.request("send")).status).toBe(429);
   });
   it.each([["limit-send", 10], ["limit-verify", 30]] as const)("limits IP %s before provider calls", async (action, max) => {

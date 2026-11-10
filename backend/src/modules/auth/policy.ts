@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const AUTH_POLICY = Object.freeze({
   otpDigits: 4, otpLifetime: 300, resendCooldown: 60,
-  phoneSends: 3, sendWindow: 600, phoneDailySends: 10, ipSends: 10,
+  phoneSends: 5, sendWindow: 600, phoneDailySends: 15, ipSends: 10,
   ipVerifications: 30, verificationAttempts: 5, verificationBlock: 600,
   providerTimeoutMs: 10000, operationLease: 30, sessionLifetime: 30 * 86400,
 });
