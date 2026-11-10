@@ -370,12 +370,54 @@ export const otpChallenges = sqliteTable(
   {
     id: text("id").primaryKey(),
     phone: text("phone").notNull(),
+    phoneHash: text("phone_hash"),
+    purpose: text("purpose").notNull().default("login"),
+    otpHmac: text("otp_hmac"),
+    otpEncrypted: text("otp_encrypted"),
+    status: text("status").notNull().default("PENDING"),
+    resendCount: integer("resend_count").notNull().default(0),
+    lastSentAt: integer("last_sent_at"),
+    cooldownUntil: integer("cooldown_until"),
+    idempotencyKey: text("idempotency_key"),
     expiresAt: integer("expires_at").notNull(),
     attempts: integer("attempts").notNull().default(0),
     used: integer("used").notNull().default(0),
-    provider: text("provider").notNull().default("development"),
+    provider: text("provider").notNull().default("msg91"),
+    createdAt: integer("created_at"),
+    consumedAt: integer("consumed_at"),
   },
-  (t) => [index("otp_expiry").on(t.expiresAt)],
+  (t) => [
+    index("otp_expiry").on(t.expiresAt),
+    index("otp_challenges_active_idx").on(t.phoneHash, t.purpose, t.status, t.expiresAt),
+    index("otp_challenges_idempotency_idx").on(t.phoneHash, t.purpose, t.idempotencyKey),
+  ],
+);
+export const otpDevices = sqliteTable("otp_devices", {
+  installationHash: text("installation_hash").primaryKey(),
+  lastUserId: text("last_user_id").references(() => users.id),
+  firstSeenAt: integer("first_seen_at").notNull(),
+  lastSeenAt: integer("last_seen_at").notNull(),
+  riskScore: integer("risk_score").notNull().default(0),
+});
+export const otpDeliveries = sqliteTable(
+  "otp_deliveries",
+  {
+    id: text("id").primaryKey(),
+    challengeId: text("challenge_id")
+      .notNull()
+      .references(() => otpChallenges.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerMessageId: text("provider_message_id"),
+    status: text("status").notNull(),
+    errorCode: text("error_code"),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("otp_deliveries_challenge_idx").on(t.challengeId),
+    index("otp_deliveries_provider_msg_idx").on(t.providerMessageId),
+  ],
 );
 export const rateLimits = sqliteTable(
   "rate_limits",
@@ -383,8 +425,9 @@ export const rateLimits = sqliteTable(
     key: text("key").notNull(),
     bucket: integer("bucket").notNull(),
     count: integer("count").notNull(),
+    expiresAt: integer("expires_at"),
   },
-  (t) => [primaryKey({ columns: [t.key, t.bucket] })],
+  (t) => [primaryKey({ columns: [t.key, t.bucket] }), index("rate_limits_expiry_idx").on(t.expiresAt)],
 );
 export const providerUsage = sqliteTable(
   "provider_usage",

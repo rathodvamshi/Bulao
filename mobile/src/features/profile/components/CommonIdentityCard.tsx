@@ -20,6 +20,9 @@ import { api } from "../../../api/client";
 import { colors } from "../../../components/ui";
 import { useLocation } from "../../../store/location";
 import { useAuth } from "../../../auth";
+import { sendPhoneChangeOtp, verifyPhoneChangeOtp } from "../../auth/otp";
+import { loginError, OTP_LENGTH } from "../../auth/loginTheme";
+import { newRequestIdempotencyKey } from "../../../utils/installationId";
 import type { CommonProfileData } from "../types";
 
 export function formatPhoneNumber(phone?: string) {
@@ -82,7 +85,16 @@ export function CommonIdentityCard({
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [otpError, setOtpError] = useState("");
   const [otpSuccess, setOtpSuccess] = useState("");
-  const [devOtp, setDevOtp] = useState<string | undefined>();
+  const [resendAt, setResendAt] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (otpStep !== "otp_sent") return;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [otpStep]);
+
+  const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
 
   const displayArea = location?.area || profile.area || "Indiranagar, Bangalore";
 
@@ -139,8 +151,9 @@ export function CommonIdentityCard({
     },
   });
 
-  // Send OTP for new mobile number
+  // Send or resend OTP for new mobile number via unified backend OtpService
   const handleSendOtp = async () => {
+    if (isSendingOtp) return;
     setOtpError("");
     setOtpSuccess("");
     const cleaned = newPhoneInput.replace(/\D/g, "");
@@ -151,19 +164,13 @@ export function CommonIdentityCard({
 
     try {
       setIsSendingOtp(true);
-      const res = await api<{
-        requestId: string;
-        newPhone: string;
-        message: string;
-        devOtp?: string;
-      }>("/users/phone/send-otp", { newPhone: cleaned }, "POST");
-
+      const res = await sendPhoneChangeOtp(cleaned, newRequestIdempotencyKey());
       setRequestId(res.requestId);
-      setDevOtp(res.devOtp);
+      setResendAt(Date.now() + (res.resendAfter || 30) * 1000);
       setOtpStep("otp_sent");
       setOtpSuccess(`OTP sent to +91 ${cleaned}`);
     } catch (err: any) {
-      setOtpError(err?.message || "Failed to send verification code. Please try again.");
+      setOtpError(loginError(err));
     } finally {
       setIsSendingOtp(false);
     }
@@ -171,32 +178,31 @@ export function CommonIdentityCard({
 
   // Verify OTP and update mobile number in database & local state
   const handleVerifyOtp = async () => {
+    if (isVerifyingOtp) return;
     setOtpError("");
     setOtpSuccess("");
-    if (otpCode.trim().length < 4) {
-      setOtpError("Please enter the 6-digit OTP received.");
+    const cleanedPhone = newPhoneInput.replace(/\D/g, "");
+    const cleanedOtp = otpCode.replace(/\D/g, "");
+    if (cleanedOtp.length !== OTP_LENGTH) {
+      setOtpError(`Please enter the ${OTP_LENGTH}-digit OTP received.`);
       return;
     }
 
     try {
       setIsVerifyingOtp(true);
-      const res = await api<{
-        success: boolean;
-        phone: string;
-        message: string;
-      }>("/users/phone/verify-otp", { requestId, otp: otpCode.trim() }, "POST");
-
-      const updatedPhone = res.phone || newPhoneInput.replace(/\D/g, "");
+      const res = await verifyPhoneChangeOtp(cleanedPhone, requestId, cleanedOtp);
+      const updatedPhone = res.phone || `+91${cleanedPhone}`;
       setCurrentPhone(updatedPhone);
+      auth.updateUser({ phone: updatedPhone });
       setIsChangingPhone(false);
       setNewPhoneInput("");
       setOtpStep("idle");
       setOtpCode("");
-      setDevOtp(undefined);
-      setOtpSuccess(`Mobile number updated to +91 ${updatedPhone} successfully!`);
+      setResendAt(0);
+      setOtpSuccess("Mobile number updated successfully!");
       void client.invalidateQueries({ queryKey: ["me"] });
     } catch (err: any) {
-      setOtpError(err?.message || "Invalid OTP code. Please check and re-enter.");
+      setOtpError(loginError(err));
     } finally {
       setIsVerifyingOtp(false);
     }
@@ -288,7 +294,6 @@ export function CommonIdentityCard({
             setOtpCode("");
             setOtpError("");
             setOtpSuccess("");
-            setDevOtp(undefined);
             setIsEditModalVisible(true);
           }}
           style={[styles.editCornerBtn, compact && { backgroundColor: "#034E3B" }]}
@@ -393,8 +398,7 @@ export function CommonIdentityCard({
                       setOtpCode("");
                       setOtpError("");
                       setOtpSuccess("");
-                      setDevOtp(undefined);
-                    }}
+                              }}
                     style={[
                       styles.changePhoneCornerBtn,
                       isChangingPhone && styles.changePhoneCornerBtnActive,
@@ -480,35 +484,38 @@ export function CommonIdentityCard({
                     {/* Step 2: OTP Entry & Verification */}
                     {otpStep === "otp_sent" && (
                       <View style={styles.otpVerifyContainer}>
-                        <Text style={styles.otpInstructions}>
-                          Enter 6-digit OTP sent to +91 {newPhoneInput}:
-                        </Text>
-                        {devOtp && (
-                          <View style={styles.devOtpBadge}>
-                            <Ionicons name="key" size={13} color="#034E3B" />
-                            <Text style={styles.devOtpHint}>
-                              Test OTP: <Text style={{ fontWeight: "900" }}>{devOtp}</Text>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Text style={styles.otpInstructions}>
+                            Enter {OTP_LENGTH}-digit OTP sent to +91 {newPhoneInput}:
+                          </Text>
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={isSendingOtp || resendSeconds > 0}
+                            onPress={handleSendOtp}
+                          >
+                            <Text style={{ fontSize: 12, fontWeight: "700", color: resendSeconds > 0 ? "#64748B" : "#034E3B" }}>
+                              {isSendingOtp ? "Sending…" : resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend OTP"}
                             </Text>
-                          </View>
-                        )}
+                          </Pressable>
+                        </View>
                         <TextInput
                           value={otpCode}
-                          onChangeText={setOtpCode}
+                          onChangeText={(val) => setOtpCode(val.replace(/\D/g, "").slice(0, OTP_LENGTH))}
                           style={styles.otpInput}
-                          placeholder="• • • • • •"
+                          placeholder="• • • •"
                           placeholderTextColor="#A0AEC0"
                           keyboardType="number-pad"
-                          maxLength={6}
+                          maxLength={OTP_LENGTH}
                           autoFocus
                         />
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel="Confirm OTP and Update Mobile Number"
                           onPress={handleVerifyOtp}
-                          disabled={isVerifyingOtp || otpCode.trim().length < 4}
+                          disabled={isVerifyingOtp || otpCode.trim().length < OTP_LENGTH}
                           style={[
                             styles.verifyOtpBtn,
-                            otpCode.trim().length < 4 && styles.sendOtpBtnDisabled,
+                            otpCode.trim().length < OTP_LENGTH && styles.sendOtpBtnDisabled,
                           ]}
                         >
                           {isVerifyingOtp ? (
@@ -941,17 +948,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.ink,
   },
-  devOtpBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#E9F8EF",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#D2E8DA",
-  },
   otpNoticeBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -1000,13 +996,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: colors.ink,
-  },
-  devOtpHint: {
-    fontSize: 11,
-    color: "#034E3B",
-    backgroundColor: "#E9F8EF",
-    padding: 6,
-    borderRadius: 6,
   },
   otpInput: {
     height: 48,

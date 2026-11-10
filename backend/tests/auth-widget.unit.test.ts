@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import { hash } from "../src/modules/auth/session";
 
-const repo = vi.hoisted(() => ({ createUserSession: vi.fn(), findActiveSession: vi.fn() }));
+const repo = vi.hoisted(() => ({
+  createUserSession: vi.fn(),
+  findActiveSession: vi.fn(),
+  consumeRollingRateLimits: vi.fn(),
+}));
 vi.mock("../src/modules/auth/repository", () => repo);
 const phone = "919999999991";
 const proof = "test-widget-verification-proof";
@@ -17,6 +21,7 @@ beforeEach(() => {
     AUTH_EVENTS: { send: async () => {} }, ALLOWED_ORIGIN: "https://example.test",
   };
   repo.createUserSession.mockResolvedValue({ id: "user-1", name: "User", area: "" });
+  repo.consumeRollingRateLimits.mockResolvedValue({ allowed: true });
   vi.mocked(fetch).mockResolvedValue(Response.json({ type: "success", message: phone }));
 });
 function request(path: string, body: unknown, token?: string) {

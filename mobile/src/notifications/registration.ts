@@ -1,12 +1,10 @@
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
-import * as SecureStore from "expo-secure-store";
 import { api } from "../api/client";
 import { apiBaseUrl } from "../api/config";
 import { fetchWithTimeout } from "../api/network";
-
-const INSTALLATION_KEY = "bulao.push.installation.v1";
+import { getExistingInstallationId, getInstallationId } from "../utils/installationId";
 
 export type PushEnableResult =
   | { status: "enabled" }
@@ -29,24 +27,12 @@ export function isExpoGo() {
   return Platform.OS === "android" && Constants.appOwnership === "expo";
 }
 
-function newInstallationId() {
-  const bytes = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
-  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
-  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 async function installationId() {
-  const saved = await SecureStore.getItemAsync(INSTALLATION_KEY);
-  if (saved && /^[0-9a-f-]{36}$/i.test(saved)) return saved;
-  const created = newInstallationId();
-  await SecureStore.setItemAsync(INSTALLATION_KEY, created);
-  return created;
+  return getInstallationId();
 }
 
 export async function registerCurrentAndroidInstallation(token: string) {
-  const id = await installationId();
+  const id = await getInstallationId();
   await api("/notifications/devices/register", {
     installationId: id,
     token,
@@ -138,7 +124,7 @@ export async function syncGrantedAndroidPush() {
 export async function unregisterAndroidPush(sessionToken: string | null) {
   if (!sessionToken) return;
   try {
-    const id = await SecureStore.getItemAsync(INSTALLATION_KEY);
+    const id = await getExistingInstallationId();
     if (id) {
       await fetchWithTimeout(`${apiBaseUrl()}/notifications/devices/unregister`, {
         method: "POST",

@@ -14,22 +14,18 @@ import { loginTheme, loginError, OTP_LENGTH } from "../src/features/auth/loginTh
 import { dismissLoginKeyboard, traceLogin } from "../src/features/auth/loginDiagnostics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { OTPWidget, widgetProof } from "../src/features/auth/widget";
-import { useAuth, completeLogin } from "../src/auth";
-import type { UserData, SessionData } from "../src/auth";
+import { useAuth } from "../src/auth";
+import type { SessionData } from "../src/auth";
 import { saveSession } from "../src/auth/authStorage";
 import { api } from "../src/api/client";
-
-// MSG91 Widget Configuration from environment
-const MSG91_WIDGET_ID = process.env.EXPO_PUBLIC_MSG91_WIDGET_ID || "3669686e4b46393237373639";
-const MSG91_TOKEN_AUTH = process.env.EXPO_PUBLIC_MSG91_TOKEN_AUTH || "568607TBQ8oKK8IF6aa02237P1";
+import { resendOtp, sendOtp, verifyLoginOtp } from "../src/features/auth/otp";
+import { newRequestIdempotencyKey } from "../src/utils/installationId";
 
 type OtpChallenge = {
   requestId: string;
   expiresIn: number;
   resendAfter: number;
   otpLength: number;
-  provider?: "widget" | "backend";
 };
 
 const COLORS = {
@@ -116,13 +112,6 @@ function AuthContent({ fontsReady }: { fontsReady: boolean }) {
     return () => sub.remove();
   }, [step]);
 
-  // Initialize MSG91 Widget on mount
-  useEffect(() => {
-    OTPWidget.initializeWidget(MSG91_WIDGET_ID, MSG91_TOKEN_AUTH)
-      .then(() => console.log("MSG91 Widget initialized"))
-      .catch((err) => console.error("Widget init error:", err));
-  }, []);
-
   const validate = (n: string) => /^[6-9]\d{9}$/.test(n);
 
   const transitionToOtp = () => {
@@ -138,27 +127,18 @@ function AuthContent({ fontsReady }: { fontsReady: boolean }) {
     setLoading(true);
 
     const fullPhone = "+91" + phone;
-    console.log("[Bulao Auth] Starting OTP dispatch for:", fullPhone);
+    const idempotencyKey = newRequestIdempotencyKey();
 
     try {
-      // Primary & direct route: Cloudflare Worker backend with MSG91 SMS dispatch
-      const res = await api<{
-        requestId: string;
-        expiresIn: number;
-        resendAfter: number;
-        otpLength: number;
-      }>("/auth/send-otp", { phone: fullPhone });
+      const res = await sendOtp(fullPhone, idempotencyKey);
 
       if (!mounted.current) return;
-      console.log("[Bulao Auth] Backend OTP sent successfully! Request ID:", res.requestId);
-      const backendChallenge: OtpChallenge = {
+      setChallenge({
         requestId: res.requestId,
         expiresIn: res.expiresIn || 300,
-        resendAfter: res.resendAfter || 60,
+        resendAfter: res.resendAfter || 30,
         otpLength: res.otpLength || OTP_LENGTH,
-        provider: "backend",
-      };
-      setChallenge(backendChallenge);
+      });
       transitionToOtp();
     } catch (failure) {
       if (!mounted.current) return;
@@ -296,90 +276,29 @@ function OtpStep({
 
   };
 
-  // Verify OTP using Backend or MSG91 Widget and create session
+  // Verify OTP through centralized backend OtpService and establish session
   const onVerify = async (manualCode?: string) => {
     if (busy.current) return;
     const otpCode = manualCode || otp.join("");
-    // A verified code's timer must not block retrying the session exchange.
-    if (!verifiedAccessToken.current && (otpCode.length < current.otpLength || Date.now() >= expiresAt)) return;
+    if (otpCode.length < current.otpLength || Date.now() >= expiresAt) return;
     busy.current = true;
     onBusyChange(true);
     setLoading("verify");
     setError("");
 
-    console.log("[Bulao Auth] Verifying OTP. Provider:", current.provider);
-
     try {
-      // In staging QA, support test code 1234
-      if ((otpCode === "0000" || otpCode === "1234") && (__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging"))) {
-        try {
-          const result = await api<{
-            token: string;
-            expiresAt: number;
-            user: UserData;
-            isNewUser: boolean;
-          }>("/auth/verify-otp", {
-            phone: "+91" + phone,
-            requestId: current.requestId,
-            otp: otpCode,
-          });
-          if (!mounted.current) return;
-          const session: SessionData = {
-            token: result.token,
-            expiresAt: result.expiresAt,
-            userId: result.user.id,
-          };
-          await saveSession(session);
-          auth.login({ ...result.user, phone: result.user.phone || ("+91" + phone) }, session);
-          setOtp(Array(current.otpLength).fill(""));
-          return;
-        } catch (testErr) {
-          console.warn("[Bulao Auth] Test code bypass did not match, continuing standard verification:", testErr);
-        }
-      }
+      const result = await verifyLoginOtp("+91" + phone, current.requestId, otpCode);
+      if (!mounted.current) return;
 
-      if (current.provider === "backend") {
-        // Backend verification route
-        const result = await api<{
-          token: string;
-          expiresAt: number;
-          user: UserData;
-          isNewUser: boolean;
-        }>("/auth/verify-otp", {
-          phone: "+91" + phone,
-          requestId: current.requestId,
-          otp: otpCode,
-        });
-
-        if (!mounted.current) return;
-        console.log("[Bulao Auth] Backend OTP verified successfully, user ID:", result.user.id);
-
-        const session: SessionData = {
-          token: result.token,
-          expiresAt: result.expiresAt,
-          userId: result.user.id,
-        };
-        await saveSession(session);
-        if (mounted.current) {
-          auth.login({ ...result.user, phone: result.user.phone || ("+91" + phone) }, session);
-          setOtp(Array(current.otpLength).fill(""));
-        }
-      } else {
-        // Retain proof in memory if the session exchange needs a network retry.
-        if (!verifiedAccessToken.current) {
-          verifiedAccessToken.current = widgetProof(await OTPWidget.verifyOTP({
-            reqId: current.requestId,
-            otp: otpCode,
-          }));
-        }
-        if (!mounted.current) return;
-        const { user, session } = await completeLogin("91" + phone, verifiedAccessToken.current);
-        if (mounted.current) {
-          auth.login({ ...user, phone: user.phone || ("91" + phone) }, session);
-          verifiedAccessToken.current = null;
-          setOtp(Array(current.otpLength).fill(""));
-          // AuthContent owns the name-step/route transition from auth state.
-        }
+      const session: SessionData = {
+        token: result.token,
+        expiresAt: result.expiresAt,
+        userId: result.user.id,
+      };
+      await saveSession(session);
+      if (mounted.current) {
+        auth.login({ ...result.user, phone: result.user.phone || ("+91" + phone) }, session);
+        setOtp(Array(current.otpLength).fill(""));
       }
     } catch (failure) {
       if (mounted.current) showFailure(failure);
@@ -390,7 +309,7 @@ function OtpStep({
     }
   };
 
-  // Resend OTP using Backend or MSG91 Widget
+  // Resend active OTP (or start fresh after expiry) via centralized backend OtpService
   const onResend = async () => {
     if (busy.current || Date.now() < resendAt) return;
     busy.current = true;
@@ -399,52 +318,20 @@ function OtpStep({
     setError("");
 
     try {
-      console.log("[Bulao Auth] Resending OTP via provider:", current.provider);
+      const res = await resendOtp("+91" + phone, current.requestId, newRequestIdempotencyKey());
+      if (!mounted.current) return;
 
-      if (current.provider === "backend") {
-        const res = await api<{
-          requestId: string;
-          expiresIn: number;
-          resendAfter: number;
-          otpLength: number;
-        }>("/auth/resend-otp", {
-          phone: "+91" + phone,
-          requestId: current.requestId,
-        });
-
-        if (!mounted.current) return;
-        console.log("[Bulao Auth] Backend OTP resent successfully:", res.requestId);
-        verifiedAccessToken.current = null;
-        setCurrent({
-          ...current,
-          requestId: res.requestId || current.requestId,
-          expiresIn: res.expiresIn || current.expiresIn,
-          resendAfter: res.resendAfter || current.resendAfter,
-        });
-        setOtp(Array(current.otpLength).fill(""));
-        setExpiresAt(Date.now() + (res.expiresIn || current.expiresIn) * 1000);
-        setResendAt(Date.now() + (res.resendAfter || current.resendAfter) * 1000);
-        focusAfterResend.current = true;
-      } else {
-        const retryResponse = await OTPWidget.retryOTP({
-          reqId: current.requestId,
-          retryChannel: 11, // SMS
-        });
-
-        if (retryResponse?.type !== "success") {
-          throw new Error(`MSG91: ${retryResponse?.message || "Could not resend OTP. Please try again."}`);
-        }
-        // Retry can keep the original reqId; its message may only be a status label.
-        const retryRequestId = retryResponse.reqId || retryResponse.requestId || current.requestId;
-        if (!mounted.current) return;
-        verifiedAccessToken.current = null;
-        setCurrent({ ...current, requestId: retryRequestId });
-        setOtp(Array(current.otpLength).fill(""));
-        setExpiresAt(Date.now() + current.expiresIn * 1000);
-        setResendAt(Date.now() + current.resendAfter * 1000);
-        // Focus after the loading state has made the native inputs editable.
-        focusAfterResend.current = true;
-      }
+      verifiedAccessToken.current = null;
+      setCurrent({
+        requestId: res.requestId || current.requestId,
+        expiresIn: res.expiresIn || current.expiresIn,
+        resendAfter: res.resendAfter || current.resendAfter,
+        otpLength: res.otpLength || current.otpLength,
+      });
+      setOtp(Array(res.otpLength || current.otpLength).fill(""));
+      setExpiresAt(Date.now() + (res.expiresIn || current.expiresIn) * 1000);
+      setResendAt(Date.now() + (res.resendAfter || current.resendAfter) * 1000);
+      focusAfterResend.current = true;
     } catch (failure) {
       if (mounted.current) showFailure(failure);
     } finally {
@@ -534,8 +421,6 @@ function OtpStep({
           <Text style={styles.changePhoneText}>Change number</Text>
         </TouchableOpacity>
       </View>
-      {
-        /* Test code hidden */ null}
       {expired && !hasProof && <Text style={styles.errorText}>Code expired. Request a new OTP.</Text>}
       {hasProof && <Text style={styles.compactSub}>Number verified. Retry to finish signing in.</Text>}
       {!!error && <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>}

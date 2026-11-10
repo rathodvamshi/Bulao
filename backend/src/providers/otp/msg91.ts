@@ -1,4 +1,4 @@
-import type { OtpProvider } from "./provider";
+import type { OtpProvider, SmsDeliveryResult } from "./provider";
 import { ApiError } from "../../middleware/errors";
 import { AUTH_POLICY } from "../../modules/auth/policy";
 type Transport = typeof fetch;
@@ -13,6 +13,33 @@ interface Msg91SendResponse {
 interface Msg91VerifyResponse {
   type: string;
   message?: string;
+}
+
+function classifyMsg91Failure(status: number | null, message: string): { code: string; retryable: boolean } {
+  const normalized = message.toLowerCase();
+  if (status === 401 || status === 403 || /auth|key|unauthoriz|access denied/.test(normalized)) {
+    return { code: "PROVIDER_AUTH_REJECTED", retryable: false };
+  }
+  if (/template|sender|dlt/.test(normalized)) {
+    return { code: "PROVIDER_TEMPLATE_ERROR", retryable: false };
+  }
+  if (/balance|credit/.test(normalized)) {
+    return { code: "PROVIDER_CREDITS_ERROR", retryable: false };
+  }
+  if (/invalid.*mobile|invalid.*number|recipient/.test(normalized)) {
+    return { code: "PROVIDER_INVALID_RECIPIENT", retryable: false };
+  }
+  if (status === 429 || (status !== null && status >= 500)) {
+    return { code: "PROVIDER_TRANSIENT_ERROR", retryable: true };
+  }
+  if (status !== null && status >= 400 && status < 500) {
+    return { code: "PROVIDER_REJECTED", retryable: false };
+  }
+  return { code: "PROVIDER_REJECTED", retryable: false };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class Msg91OtpProvider implements OtpProvider {
@@ -112,6 +139,145 @@ export class Msg91OtpProvider implements OtpProvider {
     }
   }
 
+  /**
+   * Sends a backend-generated OTP using MSG91's /api/v5/otp endpoint with custom `otp` parameter.
+   * Retries ONLY clearly transient errors (never timeouts, never permanent template/auth/recipient failures).
+   * Never logs OTP, phone number, or authkey.
+   */
+  async sendCustomOtp(phone: string, otp: string): Promise<SmsDeliveryResult> {
+    const mobile = phone.replace(/^\+/, "");
+    const url = new URL("https://control.msg91.com/api/v5/otp");
+    url.search = new URLSearchParams({
+      mobile,
+      template_id: this.templateId,
+      otp,
+      otp_length: String(AUTH_POLICY.otpDigits),
+      otp_expiry: String(Math.ceil(AUTH_POLICY.otpLifetime / 60)),
+    }).toString();
+
+    const maxAttempts = 1 + AUTH_POLICY.maxSmsRetries;
+    let lastResult: SmsDeliveryResult = {
+      status: "FAILED",
+      provider: "msg91",
+      errorCode: "PROVIDER_UNAVAILABLE",
+      retryable: false,
+      attempts: 0,
+    };
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let status: number | null = null;
+      try {
+        console.log(JSON.stringify({
+          event: "MSG91_CUSTOM_OTP_SEND",
+          requestId: this.requestId,
+          attempt,
+          mobileFormat: { startsWith91: mobile.startsWith("91"), length: mobile.length, isNumeric: /^\d+$/.test(mobile) },
+        }));
+
+        const transport = this.transport;
+        const response = await transport(url, {
+          method: "POST",
+          headers: { authkey: this.key, "Content-Type": "application/json" },
+          body: "{}",
+          signal: AbortSignal.timeout(AUTH_POLICY.providerTimeoutMs),
+          redirect: "manual",
+        });
+
+        status = response.status;
+        if (status >= 300 && status < 400) {
+          console.log(JSON.stringify({ event: "MSG91_DEBUG", requestId: this.requestId, operation: "send", status, code: "PROVIDER_REDIRECT_ERROR" }));
+          return { status: "FAILED", provider: "msg91", errorCode: "PROVIDER_REDIRECT_ERROR", retryable: false, attempts: attempt };
+        }
+
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload) && (payload as { type?: unknown }).type === "success") {
+          const rawReqId = (payload as { request_id?: unknown }).request_id;
+          const safeReqId = typeof rawReqId === "string" &&
+            /^[a-zA-Z0-9_-]{1,128}$/.test(rawReqId) &&
+            ![this.key, mobile, otp].some((secret) => secret && rawReqId.includes(secret))
+            ? rawReqId : undefined;
+
+          console.log(JSON.stringify({
+            event: "MSG91_DEBUG",
+            requestId: this.requestId,
+            operation: "send",
+            status,
+            code: "PROVIDER_SUCCESS",
+            hasProviderRequestId: Boolean(safeReqId),
+          }));
+
+          return {
+            status: "ACCEPTED",
+            provider: "msg91",
+            providerMessageId: safeReqId,
+            retryable: false,
+            attempts: attempt,
+          };
+        }
+
+        const errMessage = payload && typeof payload === "object" && "message" in payload && typeof (payload as { message?: unknown }).message === "string"
+          ? (payload as { message: string }).message
+          : "";
+        const classified = classifyMsg91Failure(status, errMessage);
+
+        console.log(JSON.stringify({
+          event: "MSG91_DEBUG",
+          requestId: this.requestId,
+          operation: "send",
+          status,
+          code: classified.code,
+        }));
+
+        lastResult = {
+          status: "FAILED",
+          provider: "msg91",
+          errorCode: classified.code,
+          retryable: classified.retryable,
+          attempts: attempt,
+        };
+
+        if (!classified.retryable || attempt === maxAttempts) {
+          return lastResult;
+        }
+        await sleep(AUTH_POLICY.smsRetryBackoffMs * attempt);
+      } catch (error) {
+        const isTimeout = error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
+        if (isTimeout) {
+          // Do NOT retry on timeout: MSG91 may have already accepted & queued the SMS.
+          console.log(JSON.stringify({ event: "MSG91_DEBUG", requestId: this.requestId, operation: "send", status: null, code: "PROVIDER_TIMEOUT" }));
+          return {
+            status: "UNKNOWN",
+            provider: "msg91",
+            errorCode: "PROVIDER_TIMEOUT",
+            retryable: false,
+            attempts: attempt,
+          };
+        }
+
+        console.log(JSON.stringify({ event: "MSG91_DEBUG", requestId: this.requestId, operation: "send", status, code: "PROVIDER_TRANSPORT_ERROR" }));
+        lastResult = {
+          status: "FAILED",
+          provider: "msg91",
+          errorCode: "PROVIDER_TRANSPORT_ERROR",
+          retryable: true,
+          attempts: attempt,
+        };
+        if (attempt === maxAttempts) {
+          return lastResult;
+        }
+        await sleep(AUTH_POLICY.smsRetryBackoffMs * attempt);
+      }
+    }
+
+    return lastResult;
+  }
+
   async send(phone: string): Promise<string> {
     if (this.widgetId && this.tokenAuth) {
       const url = new URL("https://control.msg91.com/api/v5/widget/sendOtpMobile");
@@ -166,12 +332,6 @@ export class Msg91OtpProvider implements OtpProvider {
   }
 
   async verify(phone: string, code: string, msg91RequestId?: string): Promise<boolean> {
-    // In staging, allow QA test code 1234 so testing isn't blocked by Indian carrier DLT delay
-    if (this.env?.APP_ENV === "staging" && (code === "0000" || code === "1234")) {
-      console.log(JSON.stringify({ event: "STAGING_TEST_OTP_ACCEPTED", phone, requestId: this.requestId }));
-      return true;
-    }
-
     if (this.widgetId && this.tokenAuth && msg91RequestId) {
       const url = new URL("https://control.msg91.com/api/v5/widget/verifyOtp");
       const transport = this.transport;

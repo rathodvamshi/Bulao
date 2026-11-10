@@ -18,11 +18,19 @@ export const loginTheme = {
 } as const;
 
 export function loginError(failure: unknown): string {
-  const item = failure as { message?: string; code?: string | number; status?: number } | null;
+  const item = failure as { message?: string; code?: string | number; status?: number; retryAfter?: number } | null;
   const message = typeof item?.message === "string" ? item.message : "";
   const detail = String(item?.code ?? "") + " " + message;
-  if (item?.status === 429 || /429|rate.?limit|too many|limit exceeded/i.test(detail))
+  if (item?.status === 429 || /429|rate.?limit|too many|limit exceeded/i.test(detail)) {
+    if (typeof item?.retryAfter === "number" && item.retryAfter > 0) {
+      if (item.retryAfter < 60) {
+        return `Too many attempts. Please wait ${item.retryAfter} seconds and try again.`;
+      }
+      const mins = Math.ceil(item.retryAfter / 60);
+      return `Too many attempts. Please wait ${mins} ${mins === 1 ? "minute" : "minutes"} and try again.`;
+    }
     return "Too many attempts. Please wait a few minutes and try again.";
+  }
   if (/network|offline|fetch|connect|timeout|timed out|abort/i.test(detail))
     return "Could not connect. Check your internet connection and try again.";
   if ((item?.status ?? 0) >= 500 || /server|unavailable|50[0234]/i.test(detail))

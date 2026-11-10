@@ -16,7 +16,7 @@ import {
   Linking,
   ScrollView,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   Easing,
   PanResponder,
 } from "react-native";
@@ -28,10 +28,10 @@ import { locationApi } from "../api/locationApi";
 import { useAuth } from "../auth";
 import { colors } from "./ui";
 
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-const SHEET_HEIGHT = SCREEN_HEIGHT * 0.68;
-
 export function LocationSheet() {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const sheetHeight = Math.min(windowHeight * 0.68, 620);
+  const sheetWidth = Math.min(windowWidth, 680);
   const {
     savedLocations,
     setSavedLocations,
@@ -47,14 +47,14 @@ export function LocationSheet() {
   const pathname = usePathname();
 
   // Animation values for smooth in-and-out flow
-  const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const translateY = useRef(new Animated.Value(sheetHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const isClosingRef = useRef(false);
 
   const animateIn = useCallback(() => {
     isClosingRef.current = false;
     setMounted(true);
-    translateY.setValue(SHEET_HEIGHT);
+    translateY.setValue(sheetHeight);
     backdropOpacity.setValue(0);
 
     Animated.parallel([
@@ -72,7 +72,7 @@ export function LocationSheet() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [translateY, backdropOpacity]);
+  }, [translateY, backdropOpacity, sheetHeight]);
 
   const animateOut = useCallback(
     (onComplete?: () => void) => {
@@ -81,7 +81,7 @@ export function LocationSheet() {
 
       Animated.parallel([
         Animated.timing(translateY, {
-          toValue: SHEET_HEIGHT,
+          toValue: sheetHeight,
           duration: 230,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
@@ -101,7 +101,7 @@ export function LocationSheet() {
         }
       });
     },
-    [translateY, backdropOpacity, setLocationSheetVisible]
+    [translateY, backdropOpacity, setLocationSheetVisible, sheetHeight]
   );
 
   // Animate open/close when visibility changes
@@ -257,7 +257,7 @@ export function LocationSheet() {
 
       {/* Sheet */}
       <Animated.View
-        style={[styles.sheet, { transform: [{ translateY }] }]}
+        style={[styles.sheet, { width: sheetWidth, left: (windowWidth - sheetWidth) / 2, height: sheetHeight, maxHeight: windowHeight, transform: [{ translateY }] }]}
       >
         {/* The required first-time location prompt cannot be dismissed accidentally. */}
         <View {...(!locationRequired ? panResponder.panHandlers : {})} style={styles.dragHandleArea}>
@@ -420,9 +420,6 @@ const styles = StyleSheet.create({
   sheet: {
     position: "absolute",
     bottom: 0,
-    left: 0,
-    right: 0,
-    height: SHEET_HEIGHT,
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

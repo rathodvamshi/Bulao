@@ -4,6 +4,7 @@ export interface Env {
   AUTH_EVENTS: Queue<import("../modules/auth/audit").AuthEvent>;
   PUSH_DELIVERIES: Queue<{ deliveryId: string }>;
   AUTH_HASH_KEY: string;
+  OTP_ENCRYPTION_KEY?: string;
   APP_ENV: "development" | "staging" | "production";
   OTP_PROVIDER: string;
   ALLOWED_ORIGIN: string;
@@ -12,6 +13,7 @@ export interface Env {
   MSG91_TEMPLATE_ID?: string;
   MSG91_WIDGET_ID?: string;
   MSG91_TOKEN_AUTH?: string;
+  MSG91_WEBHOOK_SECRET?: string;
   CLOUDINARY_CLOUD_NAME?: string;
   CLOUDINARY_API_KEY?: string;
   CLOUDINARY_API_SECRET?: string;

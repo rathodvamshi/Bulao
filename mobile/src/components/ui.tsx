@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { t } from "../i18n/en";
 import { AppImage } from './AppImage';
+import { LAYOUT_TOKENS, useResponsiveLayout } from "./responsive";
 
 export const colors = {
   marketplaceGreen: "#005C40",
@@ -50,10 +51,11 @@ export function Screen({
   back?: boolean;
   backgroundImage?: string;
 }) {
+  const { pageGutter } = useResponsiveLayout();
   const content = (
     <ScrollView
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={s.screen}
+      contentContainerStyle={[s.screen, { paddingHorizontal: pageGutter }]}
       showsVerticalScrollIndicator={false}
       refreshControl={refreshControl}
     >
@@ -329,11 +331,11 @@ export function Divider() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 export const s = StyleSheet.create({
   screen: {
-    padding: 20,
+    paddingVertical: 20,
     paddingBottom: 48,
     gap: 20,
     width: "100%",
-    maxWidth: 680,
+    maxWidth: LAYOUT_TOKENS.formMaxWidth,
     alignSelf: "center",
   },
   heading: {
@@ -355,7 +357,7 @@ export const s = StyleSheet.create({
     fontWeight: "600",
   },
   button: {
-    minHeight: 54,
+    minHeight: LAYOUT_TOKENS.buttonMinHeight,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 15,

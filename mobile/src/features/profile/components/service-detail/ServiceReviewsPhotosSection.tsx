@@ -5,14 +5,12 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  Dimensions,
   ActivityIndicator,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AppImage as Image } from "../../../../components/AppImage";
 import type { ServiceFeedbackReview, StarDistribution } from "../../types";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export type ServiceDetailTab = "rating" | "feedback" | "photos";
 
@@ -69,6 +67,7 @@ export function ServiceReviewsPhotosSection({
   onOpenRateModal,
   onOpenImageViewer,
 }: ServiceReviewsPhotosSectionProps) {
+  const { width: SCREEN_WIDTH } = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<ServiceDetailTab>("rating");
 
   // Collect customer work photos from reviews to supplement service photos

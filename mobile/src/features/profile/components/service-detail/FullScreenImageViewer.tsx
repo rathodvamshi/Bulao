@@ -6,13 +6,11 @@ import {
   Modal,
   Pressable,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AppImage as Image } from "../../../../components/AppImage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export interface FullScreenImageViewerProps {
   visible: boolean;
@@ -27,14 +25,24 @@ export function FullScreenImageViewer({
   initialIndex = 0,
   onClose,
 }: FullScreenImageViewerProps) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = React.useState(initialIndex);
+  const scrollRef = React.useRef<ScrollView>(null);
 
   React.useEffect(() => {
     if (visible) {
       setCurrentIndex(initialIndex);
     }
   }, [visible, initialIndex]);
+
+  React.useEffect(() => {
+    if (!visible) return;
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ x: currentIndex * screenWidth, y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [visible, currentIndex, screenWidth]);
 
   if (!images || images.length === 0) return null;
 
@@ -65,21 +73,21 @@ export function FullScreenImageViewer({
 
         {/* Swipeable Slides */}
         <ScrollView
+          ref={scrollRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          contentOffset={{ x: initialIndex * SCREEN_WIDTH, y: 0 }}
           onMomentumScrollEnd={(e) => {
             const offset = e.nativeEvent.contentOffset.x;
-            const idx = Math.round(offset / SCREEN_WIDTH);
+            const idx = Math.round(offset / screenWidth);
             setCurrentIndex(idx);
           }}
         >
           {images.map((uri, idx) => (
-            <View key={`${uri}-${idx}`} style={styles.slide}>
+            <View key={`${uri}-${idx}`} style={[styles.slide, { width: screenWidth, height: screenHeight - insets.top - insets.bottom - 60 }]}>
               <Image
                 source={{ uri }}
-                style={styles.fullImage}
+                style={[styles.fullImage, { width: screenWidth }]}
                 resizeMode="contain"
               />
             </View>
@@ -117,13 +125,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   slide: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT - 120,
     alignItems: "center",
     justifyContent: "center",
   },
   fullImage: {
-    width: SCREEN_WIDTH,
     height: "100%",
   },
 });

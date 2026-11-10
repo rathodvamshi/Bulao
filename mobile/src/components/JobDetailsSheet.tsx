@@ -7,15 +7,12 @@ import {
   Animated,
   Easing,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "./ui";
 import type { Job } from "../api/types";
-
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-const SHEET_HEIGHT = SCREEN_HEIGHT * 0.85; // Taller sheet for full details
 
 interface JobDetailsSheetProps {
   job: Job | null;
@@ -23,7 +20,10 @@ interface JobDetailsSheetProps {
 }
 
 export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
-  const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const sheetHeight = Math.min(windowHeight * 0.85, 760);
+  const sheetWidth = Math.min(windowWidth, 680);
+  const translateY = useRef(new Animated.Value(sheetHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(!!job);
   const [displayJob, setDisplayJob] = useState(job);
@@ -35,7 +35,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
     closing.current = true;
     Animated.parallel([
       Animated.timing(translateY, {
-        toValue: SHEET_HEIGHT,
+        toValue: sheetHeight,
         duration: 260,
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
@@ -54,7 +54,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
       closing.current = false;
       onComplete?.();
     });
-  }, [backdropOpacity, translateY]);
+  }, [backdropOpacity, translateY, sheetHeight]);
 
   useEffect(() => {
     if (job) {
@@ -62,7 +62,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
       mountedRef.current = true;
       setDisplayJob(job);
       setMounted(true);
-      translateY.setValue(SHEET_HEIGHT);
+      translateY.setValue(sheetHeight);
       backdropOpacity.setValue(0);
       Animated.timing(backdropOpacity, {
         toValue: 1,
@@ -80,7 +80,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
     } else if (mountedRef.current) {
       animateOut();
     }
-  }, [job, translateY, backdropOpacity, animateOut]);
+  }, [job, translateY, backdropOpacity, animateOut, sheetHeight]);
 
   const handleDismiss = () => {
     animateOut(onClose);
@@ -108,7 +108,7 @@ export function JobDetailsSheet({ job, onClose }: JobDetailsSheetProps) {
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
       </Animated.View>
-      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+      <Animated.View style={[styles.sheet, { width: sheetWidth, left: (windowWidth - sheetWidth) / 2, height: sheetHeight, maxHeight: windowHeight, transform: [{ translateY }] }]}>
         <View style={styles.handleContainer}>
           <View style={styles.handle} />
         </View>
@@ -187,9 +187,6 @@ const styles = StyleSheet.create({
   sheet: {
     position: "absolute",
     bottom: 0,
-    left: 0,
-    right: 0,
-    height: SHEET_HEIGHT,
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

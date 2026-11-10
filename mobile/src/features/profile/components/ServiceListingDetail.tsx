@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Pressable,
@@ -10,7 +10,7 @@ import {
   Linking,
   Alert,
   Modal,
-  Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -44,7 +44,6 @@ import {
   FullScreenImageViewer,
 } from "./service-detail";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IMAGE_HEIGHT = 240;
 
 function getInitials(name?: string): string {
@@ -116,6 +115,8 @@ export function ServiceListingDetail({
   onClose: () => void;
   isClientView?: boolean;
 }) {
+  const { width: SCREEN_WIDTH } = useWindowDimensions();
+  const photoScrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const { session, user } = useAuth();
   const client = useQueryClient();
@@ -124,6 +125,13 @@ export function ServiceListingDetail({
   // Gallery state
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      photoScrollRef.current?.scrollTo({ x: photoIndex * SCREEN_WIDTH, y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [photoIndex, SCREEN_WIDTH]);
 
   // Expandable description toggle
   const [descExpanded, setDescExpanded] = useState(false);
@@ -380,6 +388,7 @@ export function ServiceListingDetail({
           {photos.length > 0 ? (
             <View style={{ width: SCREEN_WIDTH, height: IMAGE_HEIGHT }}>
               <ScrollView
+                ref={photoScrollRef}
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}

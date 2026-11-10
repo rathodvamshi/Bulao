@@ -9,7 +9,10 @@ import type { AppEnv } from "./config/env";
 import { users, categories, roles } from "./db/schema";
 import { ApiError, ok } from "./middleware/errors";
 import { auth } from "./modules/auth/routes";
-import { requireAuth } from "./modules/auth/session";
+import { requireAuth, now as authNow } from "./modules/auth/session";
+import { handleDeliveryWebhook, requestOtp, verifyOtp } from "./modules/auth/otpService";
+import { installationIdSchema, otpSchema, phoneSchema } from "./modules/auth/policy";
+import { cleanupExpiredOtpRecords, updateUserPhone } from "./modules/auth/repository";
 import { jobRoutes } from "./modules/jobs/routes";
 import { savedPlacesRoutes } from "./modules/locations/saved-places";
 import { services, requests } from "./modules/services/routes";
@@ -160,20 +163,27 @@ app.notFound((c) =>
 );
 app.get("/api/v1/health", (c) => ok(c, { status: "ok" }));
 
-// MSG91 Webhook - receives delivery status events
+// MSG91 Webhook - authenticated delivery status callback
 app.post("/api/v1/webhooks/msg91", async (c) => {
+  const providedSecret = c.req.header("x-webhook-secret") || c.req.query("secret") || null;
+  let body: Record<string, unknown>;
   try {
-    const body = await c.req.json();
-    console.log(JSON.stringify({
-      event: "MSG91_WEBHOOK",
-      timestamp: new Date().toISOString(),
-      data: body
-    }));
-    return c.json({ received: true });
-  } catch (error) {
-    console.error(JSON.stringify({ event: "MSG91_WEBHOOK_ERROR", error: String(error) }));
+    const raw = await c.req.json();
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return c.json({ error: "Invalid payload" }, 400);
+    }
+    body = raw as Record<string, unknown>;
+  } catch {
     return c.json({ error: "Invalid payload" }, 400);
   }
+
+  const result = await handleDeliveryWebhook(c.env, body, providedSecret);
+  console.log(JSON.stringify({
+    event: "MSG91_WEBHOOK_PROCESSED",
+    requestId: c.get("requestId"),
+    updated: result.updated,
+  }));
+  return c.json({ received: true, updated: result.updated });
 });
 
 app.route("/api/v1/auth", auth);
@@ -763,107 +773,82 @@ app.patch("/api/v1/users/me", requireAuth, async (c) => {
   return ok(c, input);
 });
 
-// ── Secure Mobile Number Change (Send OTP) ──
+// ── Secure Mobile Number Change (Send OTP via unified OtpService) ──
 app.post("/api/v1/users/phone/send-otp", requireAuth, async (c) => {
   const userId = c.get("userId");
   const input = z.object({
-    newPhone: z.string().trim().min(10).max(15),
+    newPhone: phoneSchema,
+    installationId: installationIdSchema.optional(),
+    idempotencyKey: z.string().trim().min(8).max(128).optional(),
   }).parse(await c.req.json());
 
-  const digits = input.newPhone.replace(/\D/g, "");
-  if (digits.length < 10) {
-    throw new ApiError("INVALID_PHONE", 400, "Please enter a valid 10-digit mobile number.");
-  }
-  const cleanPhone = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+  const ip = c.req.header("CF-Connecting-IP");
+  if (!ip) throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
 
+  const digits = input.newPhone.replace(/^\+91/, "");
   const currentUser = await c.env.DB.prepare("SELECT phone FROM users WHERE id=?")
     .bind(userId)
     .first<{ phone: string }>();
-  if (currentUser?.phone === cleanPhone || currentUser?.phone === digits) {
+  if (currentUser?.phone === input.newPhone || currentUser?.phone === digits || currentUser?.phone === `91${digits}`) {
     throw new ApiError("SAME_PHONE", 400, "This is already your current mobile number.");
   }
 
-  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE (phone=? OR phone=?) AND id!=? AND suspended=0")
-    .bind(cleanPhone, digits, userId)
+  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE phone IN (?, ?, ?) AND id!=? AND suspended=0")
+    .bind(input.newPhone, digits, `91${digits}`, userId)
     .first();
   if (existing) {
     throw new ApiError("PHONE_IN_USE", 400, "This mobile number is already linked to another Bulao account.");
   }
 
-  await c.env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS phone_change_requests (
-      user_id TEXT PRIMARY KEY,
-      new_phone TEXT NOT NULL,
-      otp TEXT NOT NULL,
-      request_id TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0
-    )
-  `).run();
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const requestId = crypto.randomUUID();
-  const expiresAt = Math.floor(Date.now() / 1000) + 600;
-
-  await c.env.DB.prepare(`
-    INSERT OR REPLACE INTO phone_change_requests (user_id, new_phone, otp, request_id, expires_at, attempts)
-    VALUES (?, ?, ?, ?, ?, 0)
-  `).bind(userId, cleanPhone, otp, requestId, expiresAt).run();
-
-  console.log(`[Phone Change OTP] Generated for user ${userId} to ${cleanPhone}: ${otp}`);
+  const result = await requestOtp(c.env, {
+    phone: input.newPhone,
+    purpose: "phone_change",
+    ip,
+    installationId: input.installationId,
+    idempotencyKey: input.idempotencyKey,
+    userId,
+    traceId: c.get("requestId"),
+  });
 
   return ok(c, {
-    requestId,
-    newPhone: cleanPhone,
+    requestId: result.requestId,
+    newPhone: input.newPhone,
+    expiresIn: result.expiresIn,
+    resendAfter: result.resendAfter,
+    otpLength: result.otpLength,
     message: "OTP sent to your new mobile number.",
-    devOtp: c.env.APP_ENV !== "production" ? otp : undefined,
   });
 });
 
-// ── Secure Mobile Number Change (Verify OTP & Update) ──
+// ── Secure Mobile Number Change (Verify OTP & Update via unified OtpService) ──
 app.post("/api/v1/users/phone/verify-otp", requireAuth, async (c) => {
   const userId = c.get("userId");
   const input = z.object({
-    requestId: z.string(),
-    otp: z.string().trim().min(4).max(8),
+    newPhone: phoneSchema,
+    requestId: z.string().uuid(),
+    otp: otpSchema,
+    installationId: installationIdSchema.optional(),
   }).parse(await c.req.json());
 
-  const record = await c.env.DB.prepare("SELECT * FROM phone_change_requests WHERE user_id=?")
-    .bind(userId)
-    .first<{ user_id: string; new_phone: string; otp: string; request_id: string; expires_at: number; attempts: number }>();
+  const ip = c.req.header("CF-Connecting-IP");
+  if (!ip) throw new ApiError("PROVIDER_UNAVAILABLE", 503, "Phone verification is temporarily unavailable.");
 
-  if (!record || record.request_id !== input.requestId) {
-    throw new ApiError("INVALID_REQUEST", 400, "No pending verification found. Please request a new OTP.");
-  }
+  await verifyOtp(c.env, {
+    phone: input.newPhone,
+    requestId: input.requestId,
+    otp: input.otp,
+    purpose: "phone_change",
+    ip,
+    installationId: input.installationId,
+    userId,
+    traceId: c.get("requestId"),
+  });
 
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (nowSec > record.expires_at) {
-    throw new ApiError("OTP_EXPIRED", 400, "The OTP has expired. Please request a new code.");
-  }
-
-  if (record.attempts >= 5) {
-    throw new ApiError("TOO_MANY_ATTEMPTS", 429, "Too many failed attempts. Please request a new OTP.");
-  }
-
-  const isValidOtp = record.otp === input.otp || input.otp === "123456";
-  if (!isValidOtp) {
-    await c.env.DB.prepare("UPDATE phone_change_requests SET attempts = attempts + 1 WHERE user_id=?")
-      .bind(userId)
-      .run();
-    throw new ApiError("INVALID_OTP", 400, "Incorrect OTP. Please enter the valid code.");
-  }
-
-  // Update phone and phone_verified in users table
-  await c.env.DB.prepare("UPDATE users SET phone=?, phone_verified=1, updated_at=? WHERE id=?")
-    .bind(record.new_phone, nowSec, userId)
-    .run();
-
-  // Clean up
-  await c.env.DB.prepare("DELETE FROM phone_change_requests WHERE user_id=?").bind(userId).run();
+  await updateUserPhone(c.env.DB, userId, input.newPhone, authNow());
 
   return ok(c, {
     success: true,
-    phone: record.new_phone,
+    phone: input.newPhone,
     phoneVerified: 1,
     message: "Mobile number updated successfully.",
   });
@@ -999,6 +984,9 @@ export default {
   scheduled(_controller: ScheduledController, env: AppEnv["Bindings"], ctx: ExecutionContext) {
     ctx.waitUntil(runPushMaintenance(env).catch((error) => {
       console.error(JSON.stringify({ event: "PUSH_MAINTENANCE_FAILED", error: String(error) }));
+    }));
+    ctx.waitUntil(cleanupExpiredOtpRecords(env.DB, authNow()).catch((error) => {
+      console.error(JSON.stringify({ event: "OTP_CLEANUP_FAILED", error: String(error) }));
     }));
   },
 };

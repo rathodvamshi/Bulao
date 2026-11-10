@@ -2,10 +2,22 @@ import type { Env } from "../../config/env";
 import { ApiError } from "../../middleware/errors";
 import { Msg91OtpProvider } from "./msg91";
 
+export type SmsDeliveryStatus = "PENDING" | "ACCEPTED" | "SENT" | "DELIVERED" | "FAILED" | "UNKNOWN";
+
+export interface SmsDeliveryResult {
+  status: SmsDeliveryStatus;
+  provider: string;
+  providerMessageId?: string;
+  errorCode?: string;
+  retryable: boolean;
+  attempts: number;
+}
+
 export interface OtpProvider {
   send(phone: string): Promise<string>;
   verify(phone: string, code: string, msg91RequestId?: string): Promise<boolean>;
   resend(phone: string, msg91RequestId?: string): Promise<void>;
+  sendCustomOtp?(phone: string, otp: string): Promise<SmsDeliveryResult>;
 }
 
 export function otpProvider(env: Env, requestId?: string): OtpProvider {
