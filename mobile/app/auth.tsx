@@ -245,7 +245,9 @@ function OtpStep({
   useEffect(() => {
     mounted.current = true;
     const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => { mounted.current = false; clearInterval(timer); };
+    // Instant autofocus to first OTP box on screen entry
+    const focusTimer = setTimeout(() => { inputs.current[0]?.focus(); }, 60);
+    return () => { mounted.current = false; clearInterval(timer); clearTimeout(focusTimer); };
   }, []);
 
   useEffect(() => {
@@ -468,8 +470,7 @@ function OtpStep({
       return next;
     });
     if (filledCode) {
-      const fullCode = filledCode;
-      setTimeout(() => void onVerify(fullCode), 80);
+      void onVerify(filledCode);
     } else if (digits) {
       inputs.current[Math.min(current.otpLength - 1, start + digits.length)]?.focus();
     }

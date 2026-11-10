@@ -22,7 +22,8 @@ export function PhoneStep({ phone, setPhone, error, loading, isValid, onContinue
 
   useEffect(() => {
     traceLogin("phone:mount");
-    return () => traceLogin("phone:unmount");
+    const focusTimer = setTimeout(() => { inputRef.current?.focus(); }, 100);
+    return () => { traceLogin("phone:unmount"); clearTimeout(focusTimer); };
   }, []);
 
   useEffect(() => {

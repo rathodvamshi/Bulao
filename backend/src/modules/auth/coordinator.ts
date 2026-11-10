@@ -30,7 +30,7 @@ export class AuthCoordinator {
       const operation = crypto.randomUUID();
       const at = now();
       // Alarm is set before writes so abandoned state always has a cleanup task.
-      await this.state.storage.setAlarm(Date.now() + 86401 * 1000);
+      void this.state.storage.setAlarm(Date.now() + 86401 * 1000);
       const challenge = await this.state.storage.transaction(async (tx) => {
         const state = await tx.get<State>("phone") ?? { sends: [], blockedUntil: 0 };
         if (state.blockedUntil > at) throw blocked(state.blockedUntil - at);
@@ -129,7 +129,7 @@ export class AuthCoordinator {
 
   private async limit(action: string) {
     const at = now();
-    await this.state.storage.setAlarm(Date.now() + (P.sendWindow + 1) * 1000);
+    void this.state.storage.setAlarm(Date.now() + (P.sendWindow + 1) * 1000);
     await this.state.storage.transaction(async (tx) => {
       const attempts = recentAttempts(await tx.get<number[]>(action) ?? [], at, P.sendWindow);
       const max = action === "limit-send" ? P.ipSends : P.ipVerifications;
