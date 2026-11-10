@@ -167,7 +167,7 @@ export class Msg91OtpProvider implements OtpProvider {
 
   async verify(phone: string, code: string, msg91RequestId?: string): Promise<boolean> {
     // In staging, allow QA test code 1234 so testing isn't blocked by Indian carrier DLT delay
-    if (this.env?.APP_ENV === "staging" && code === "1234") {
+    if (this.env?.APP_ENV === "staging" && (code === "0000" || code === "1234")) {
       console.log(JSON.stringify({ event: "STAGING_TEST_OTP_ACCEPTED", phone, requestId: this.requestId }));
       return true;
     }

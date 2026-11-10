@@ -309,7 +309,7 @@ function OtpStep({
 
     try {
       // In staging QA, support test code 1234
-      if (otpCode === "1234" && (__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging"))) {
+      if ((otpCode === "0000" || otpCode === "1234") && (__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging"))) {
         try {
           const result = await api<{
             token: string;
@@ -319,7 +319,7 @@ function OtpStep({
           }>("/auth/verify-otp", {
             phone: "+91" + phone,
             requestId: current.requestId,
-            otp: "1234",
+            otp: otpCode,
           });
           if (!mounted.current) return;
           const session: SessionData = {
@@ -533,11 +533,8 @@ function OtpStep({
           <Text style={styles.changePhoneText}>Change number</Text>
         </TouchableOpacity>
       </View>
-      {(__DEV__ || process.env.EXPO_PUBLIC_API_BASE_URL?.includes("staging")) && (
-        <Text style={[styles.compactSub, { color: COLORS.green, fontSize: 12, fontWeight: "600", marginVertical: 2 }]}>
-          Test Code: 1234
-        </Text>
-      )}
+      {
+        /* Test code hidden */ null}
       {expired && !hasProof && <Text style={styles.errorText}>Code expired. Request a new OTP.</Text>}
       {hasProof && <Text style={styles.compactSub}>Number verified. Retry to finish signing in.</Text>}
       {!!error && <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>}
